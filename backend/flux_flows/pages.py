@@ -248,6 +248,49 @@ class DataSpec(_Strict):
         return self
 
 
+# Who a page is meant for (2026-10-30, ADR 0078). Empty = everyone. Otherwise a person
+# matches when one list names them (OR): by name, by project role, by department. The
+# others still see the page under "Other tools": a filter of the TOOL rail, not a lock.
+# Roles mirror features.roles.project_roles.ROLES (flux_flows imports no feature).
+ACCESS_ROLES = ("junior", "artist", "lead", "supervisor")
+_TOKEN_RE = re.compile(r"^[A-Z0-9_\-]{1,40}$")
+
+
+class Access(_Strict):
+    users: List[str] = []
+    roles: List[str] = []
+    departments: List[str] = []
+
+    @model_validator(mode="after")
+    def _check(self) -> "Access":
+        self.users = sorted({u.strip().upper() for u in self.users if u.strip()})
+        self.departments = sorted({d.strip().upper() for d in self.departments if d.strip()})
+        bad = [r for r in self.roles if r not in ACCESS_ROLES]
+        if bad:
+            raise ValueError(f"access.roles : '{bad[0]}' inconnu (attendu : {', '.join(ACCESS_ROLES)})")
+        self.roles = [r for r in ACCESS_ROLES if r in self.roles]
+        for token in self.users + self.departments:
+            if not _TOKEN_RE.match(token):
+                raise ValueError(f"access : '{token}' invalide (lettres, chiffres, _ et -)")
+        return self
+
+    def is_everyone(self) -> bool:
+        return not (self.users or self.roles or self.departments)
+
+
+def page_for(access: Optional[Access], user: Optional[str], role: Optional[str] = None,
+             departments: Optional[List[str]] = None) -> bool:
+    """True when the page is meant for this person (everyone when *access* is empty)."""
+    if access is None or access.is_everyone():
+        return True
+    user = (user or "").strip().upper()
+    if user and user in access.users:
+        return True
+    if role and role in access.roles:
+        return True
+    return bool(set(access.departments) & {d.upper() for d in departments or []})
+
+
 class Page(_Strict):
     page: int
     id: str
@@ -255,6 +298,7 @@ class Page(_Strict):
     icon: str = "wrench"
     scope: Optional[str] = None       # written by the store, ignored on read
     description: str = ""
+    access: Optional[Access] = None
     data: List[DataSpec] = []
     layout: List[LayoutItem] = []
 
@@ -420,6 +464,8 @@ def dump_page(page: Page, *, scope: Optional[str] = None) -> str:
         out.append(f"scope: {scope}")
     if page.description:
         out.append(f"description: {_scalar(page.description)}")
+    if page.access is not None and not page.access.is_everyone():
+        out.append(f"access: {_flow_style({k: v for k, v in _clean(page.access).items() if v})}")
     out.append("data:" + ("" if page.data else " []"))
     out += [f"  - {_flow_style(_data_doc(d))}" for d in page.data]
     out.append("layout:" + ("" if page.layout else " []"))

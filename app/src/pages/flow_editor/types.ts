@@ -426,12 +426,16 @@ export interface PageDataSpec {
   fields?: PageDataField[]
 }
 
+// Who a page is meant for (ADR 0078): empty = everyone; else a match on any list.
+export interface PageAccess { users?: string[]; roles?: string[]; departments?: string[] }
+
 export interface PageDoc {
   page:         1
   id:           string
   label?:       string
   icon?:        string
   description?: string
+  access?:      PageAccess
   data:         PageDataSpec[]
   layout:       PageLayoutItem[]
 }
@@ -450,6 +454,7 @@ export interface PageIssue {
 export interface PageListItem {
   id: string; scope: PageScope; rev: string; error: string | null
   label: string; icon: string; description: string; shadowed?: boolean
+  access?: PageAccess | null; for_me?: boolean   // for_me false: under "Other tools" (ADR 0078)
 }
 export interface PageList { pages: PageListItem[]; templates: PageListItem[]; can_edit: Record<'team' | 'project', boolean> }
 export interface PageRead { id: string; scope: PageScope; rev: string; page: PageDoc; issues: PageIssue[]; can_edit: boolean }

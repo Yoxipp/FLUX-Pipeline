@@ -25,6 +25,11 @@ class RoleChange(BaseModel):
     role: str
 
 
+class DepartmentsChange(BaseModel):
+    user: str
+    departments: list[str]
+
+
 @router.get("/{project}")
 async def get_roles(project: str) -> dict:
     _ensure_project(project)
@@ -38,6 +43,22 @@ async def put_role(project: str, body: RoleChange) -> dict:
     loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, lambda: project_roles.set_role(project, body.user, body.role))
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return await loop.run_in_executor(None, lambda: project_roles.summary(project, user_utils.list_users()))
+
+
+@router.put("/{project}/departments")
+async def put_departments(project: str, body: DepartmentsChange) -> dict:
+    """Departments of one artist (ADR 0078): their own, or anyone's for a lead."""
+    _ensure_project(project)
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: project_roles.set_departments(project, body.user, body.departments))
     except project_roles.RoleError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:

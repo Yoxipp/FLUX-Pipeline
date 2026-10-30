@@ -378,12 +378,33 @@ def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
     return [i.to_dict() for i in found]
 
 
+def _viewer(user: Optional[str], project: Optional[str]) -> tuple[Optional[str], list[str]]:
+    """Role and departments of *user* on *project* (None, [] without a project)."""
+    if not user or not project:
+        return None, []
+    from features.roles import project_roles
+    from utils import project_utils
+    if not project_utils.project_exists(project):
+        return None, []
+    roles = project_roles.read_roles(project)
+    return project_roles.role_of(project, user, roles), project_roles.departments_of(project, user, roles)
+
+
+def _mark_for_me(listed: list[dict[str, Any]], user: Optional[str], role: Optional[str], depts: list[str]) -> None:
+    # ADR 0078: "for_me" sorts the TOOL rail (Your tools / Other tools), it locks nothing.
+    for entry in listed:
+        access = entry.get("access")
+        entry["for_me"] = pages.page_for(pages.Access(**access) if access else None, user, role, depts)
+
+
 @router.get("/pages")
 async def list_pages(project: Optional[str] = None) -> dict[str, Any]:
     """Pages of team and project (TOOL), the shipped templates and whether the user may edit."""
     current = await asyncio.to_thread(rights.current_rights)
     roots = _page_roots(project)
     listed = await _call(page_store.list_pages, roots)
+    role, depts = await asyncio.to_thread(_viewer, current["user"], project)
+    _mark_for_me(listed, current["user"], role, depts)
     templates = await _call(page_store.list_templates, roots)
     return {"pages": listed, "templates": templates,
             "can_edit": {scope: rights.allowed(current, rights.ADMIN, scope) for scope in pages.SCOPES}}

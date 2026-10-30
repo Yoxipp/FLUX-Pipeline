@@ -129,7 +129,8 @@ def _entry(scope: str, path: Path) -> Dict[str, Any]:
     page = got["page"]
     return {"id": path.stem, "scope": scope, "rev": got["rev"], "error": got["error"],
             "label": page.label if page else path.stem, "icon": page.icon if page else "wrench",
-            "description": page.description if page else ""}
+            "description": page.description if page else "",
+            "access": page.access.model_dump() if page and page.access and not page.access.is_everyone() else None}
 
 
 def _files(root: Optional[Path]) -> List[Path]:

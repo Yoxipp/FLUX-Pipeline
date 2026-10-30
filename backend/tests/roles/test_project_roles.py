@@ -164,6 +164,39 @@ class ClaimTests(_Workspace):
         self.assertFalse(roles["legacy"])
 
 
+class DepartmentsTests(_Workspace):
+    # ADR 0078: departments target TOOL pages; own ones, or anyone's for a lead.
+    def setUp(self):
+        super().setUp()
+        pr.init_project_roles("PROJ", "ADAM")
+        pr.set_role("PROJ", "LEA", "lead", actor="ADAM")
+
+    def test_artist_sets_own_and_lead_sets_anyone(self):
+        pr.set_departments("PROJ", "EVA", ["anim", "RIG", "ANIM"], actor="EVA")
+        self.assertEqual(pr.departments_of("PROJ", "eva"), ["RIG", "ANIM"])
+        with self.assertRaises(pr.RoleError):
+            pr.set_departments("PROJ", "LEA", ["FX"], actor="EVA")
+        pr.set_departments("PROJ", "EVA", ["FX"], actor="LEA")
+        self.assertEqual(self.stored()["departments"], {"EVA": ["FX"]})
+        pr.set_departments("PROJ", "EVA", [], actor="LEA")
+        self.assertNotIn("EVA", self.stored()["departments"])
+
+    def test_unknown_department_and_roles_keep_departments(self):
+        with self.assertRaises(ValueError):
+            pr.set_departments("PROJ", "EVA", ["COOKING"], actor="ADAM")
+        pr.set_departments("PROJ", "EVA", ["MODELING"], actor="ADAM")
+        pr.set_role("PROJ", "EVA", "junior", actor="ADAM")
+        self.assertEqual(pr.departments_of("PROJ", "EVA"), ["MODELING"])
+        row = next(m for m in pr.summary("PROJ", ["EVA"])["members"] if m["name"] == "EVA")
+        self.assertEqual((row["departments"], row["can_set_departments"]), (["MODELING"], True))
+
+    def test_old_file_without_departments(self):
+        path = self.root / "DOSSIER_PROJETS" / "PROJ" / "_flux_setup" / "roles.json"
+        path.write_text('{"members": {"EVA": "lead"}, "departments": {"eva": ["ANIM", "X"], "BOB": "RIG"}}', encoding="utf-8")
+        self.assertEqual(pr.read_roles("PROJ")["departments"], {"EVA": ["ANIM"]})
+        self.assertEqual(pr.departments_of("PROJ", None), [])
+
+
 class StudioConfigTests(_Workspace):
     def test_defaults_are_empty(self):
         self.assertEqual(studio_config.read_studio(), studio_config.DEFAULTS)

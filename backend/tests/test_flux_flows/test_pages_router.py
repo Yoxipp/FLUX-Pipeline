@@ -90,6 +90,36 @@ class PagesRouter(unittest.TestCase):
         self.assertEqual(listed["pages"], [])
         self.assertIsInstance(listed["templates"], list)
 
+    def test_access_sorts_pages_for_me(self) -> None:
+        # ADR 0078: a page for others is still listed (Other tools), with for_me false.
+        self.boxes = {"flows_team_td": True}
+        mine = dict(_page(), access={"users": ["adam"]})
+        theirs = dict(_page("Anim"), id="anim_tools", access={"departments": ["ANIM"], "roles": ["lead"]})
+        self.assertEqual(self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": mine}).status_code, 200)
+        self.assertEqual(self.client.put("/flows/pages/anim_tools", json={"scope": "team", "page": theirs}).status_code, 200)
+        listed = {p["id"]: p for p in self.client.get("/flows/pages").json()["pages"]}
+        self.assertEqual((listed["daily_render"]["for_me"], listed["anim_tools"]["for_me"]), (True, False))
+        self.assertEqual(listed["anim_tools"]["access"], {"users": [], "roles": ["lead"], "departments": ["ANIM"]})
+        got = self.client.get("/flows/pages/daily_render").json()
+        self.assertEqual(got["page"]["access"], {"users": ["ADAM"]})
+        bad = dict(_page(), access={"roles": ["boss"]})
+        self.assertEqual(self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": bad}).status_code, 422)
+
+    def test_viewer_role_and_departments_match(self) -> None:
+        from flux_flows import pages
+        access = pages.Access(roles=["lead"], departments=["ANIM"])
+        self.assertTrue(pages.page_for(None, None))
+        self.assertTrue(pages.page_for(pages.Access(), "X"))
+        self.assertTrue(pages.page_for(access, "X", "lead", []))
+        self.assertTrue(pages.page_for(access, "X", "artist", ["anim"]))
+        self.assertFalse(pages.page_for(access, "X", "artist", ["RIG"]))
+        with mock.patch.object(flows_router, "_viewer", return_value=("artist", ["ANIM"])):
+            self.boxes = {"flows_team_td": True}
+            doc = dict(_page(), access={"departments": ["ANIM"]})
+            self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": doc})
+            listed = self.client.get("/flows/pages", params={"project": "P"}).json()["pages"]
+            self.assertTrue(listed[0]["for_me"])
+
     def test_missing_page_is_404(self) -> None:
         self.assertEqual(self.client.get("/flows/pages/nothing_here").status_code, 404)
 

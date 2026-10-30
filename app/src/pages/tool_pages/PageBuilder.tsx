@@ -13,7 +13,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns2, Database, FolderPl
 import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { useProject } from '../../ProjectContext'
-import type { FlowListItem, PageDoc, PageIssue, PageLayoutItem, PageListItem, PageScope, PageUse, PageWidget, PageWidgetKind } from '../flow_editor/types'
+import type { FlowListItem, PageAccess, PageDoc, PageIssue, PageLayoutItem, PageListItem, PageScope, PageUse, PageWidget, PageWidgetKind } from '../flow_editor/types'
 import { createDocStore, docOf, isDirty, useStore } from '../flow_editor/store'
 import { useTr } from '../flow_editor/useTr'
 import {
@@ -22,6 +22,7 @@ import {
 } from './builder'
 import { DataWidget } from './DataWidgets'
 import { pageIcon, PAGE_ICONS } from './icons'
+import { AccessPicker } from './PageAccess'
 import { PageRenderer } from './PageRenderer'
 import { DataProps, FolderProps, PropRow, WidgetProps, propInput } from './PageProps'
 
@@ -47,6 +48,7 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
   const [idEdited, setIdEdited] = useState(false)
   const [scope, setScope] = useState<PageScope>(canTeam ? 'team' : 'project')
   const [from, setFrom] = useState('')          // '' | tpl:<id> | copy:<scope>/<id>
+  const [access, setAccess] = useState<PageAccess | undefined>(undefined)   // ADR 0078, undefined = everyone
   const [busy, setBusy] = useState(false)
   const taken = useMemo(() => new Set(pages.map(p => p.id)), [pages])
   // From a template: its own id while free (the template flows find the page by it, e.g. page: team).
@@ -64,6 +66,7 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
         const src = await flowsApi.getPage(fid, { scope: fscope as PageScope, project })
         doc = { ...src.page, id: shownId, label: label || src.page.label }
       }
+      doc = { ...doc, access }
       await flowsApi.savePage(doc, scope, { project, base_rev: null })
       navigate(`/tool/${shownId}/edit?scope=${scope}`, { replace: true })
     } catch (err) {
@@ -89,6 +92,10 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
           {pages.filter(p => !p.error).map(p => <option key={`${p.scope}/${p.id}`} value={`copy:${p.scope}/${p.id}`}>{tr('Copie de ', 'Copy of ')}{p.label}</option>)}
         </select>
       </PropRow>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+        <span className="cap" style={{ width: 92, flexShrink: 0, paddingTop: 5 }}>{tr('Acces', 'Access')}</span>
+        <div style={{ flex: 1, minWidth: 0 }}><AccessPicker value={access} onChange={setAccess} project={project} /></div>
+      </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <button type="button" className="btn ghost" onClick={() => navigate('/tool')}>{tr('Annuler', 'Cancel')}</button>
         <button type="button" className="btn primary" disabled={busy} onClick={() => { void create() }}>{tr('Creer', 'Create')}</button>
@@ -339,6 +346,8 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
               </select>
             </PropRow>
             <PropRow label={tr('Description', 'Description')}><input value={doc.description ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, description: v || undefined }), 'page:desc') }} style={propInput} /></PropRow>
+            <div className="cap" style={{ margin: '10px 0 4px' }}>{tr('Acces', 'Access')}</div>
+            <AccessPicker value={doc.access} onChange={v => apply(d => ({ ...d, access: v }))} project={proj} />
           </>}
           {widget && <WidgetProps key={widget.id} doc={doc} w={widget} scope={scope} project={proj} flows={flows} uses={uses}
                                   onPatch={(p, key) => apply(d => updateWidget(d, widget.id, p), key)}

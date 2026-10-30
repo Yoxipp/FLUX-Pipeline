@@ -3,10 +3,12 @@
 // page), grouped by scope (team, project), search beyond 8 pages; the last page opened is
 // kept per artist (user data flux.tool.last). "Editer" (Team TD) opens /tool/:id/edit.
 // Everyone sees and uses the pages; the backend checks the rights again on every write.
+// ADR 0078: the pages meant for someone else (for_me false) sit under "Other tools", folded
+// by default (kept per artist, flux.tool.others_open): a filter of the rail, never a lock.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Pencil, Plus, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Pencil, Plus, Search } from 'lucide-react'
 import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
@@ -19,15 +21,38 @@ import { pageIcon } from './icons'
 import { PageRenderer } from './PageRenderer'
 
 const LAST_KEY = 'flux.tool.last'
+const OTHERS_KEY = 'flux.tool.others_open'
+const forMe = (p: PageListItem) => p.for_me !== false
 
 function Rail({ pages, current, onPick }: { pages: PageListItem[]; current: string | null; onPick: (p: PageListItem) => void }) {
   const { tr } = useTr()
   const [q, setQ] = useState('')
   const shown = pages.filter(p => !p.shadowed && (!q || `${p.label} ${p.id}`.toLowerCase().includes(q.toLowerCase())))
+  const mine = shown.filter(forMe)
+  const others = shown.filter(p => !forMe(p))
+  const [openOthers, setOpenOthers] = useState(false)
+  useEffect(() => {
+    api.getUserData().then(d => { if (d?.[OTHERS_KEY] === true) setOpenOthers(true) }).catch(() => { /* folded */ })
+  }, [])
+  // The current page or a search hit stays visible even when it is an other tool.
+  const othersOpen = openOthers || !!q || others.some(p => p.id === current)
+  const toggleOthers = () => {
+    const next = !openOthers
+    setOpenOthers(next)
+    api.setUserData({ [OTHERS_KEY]: next }).catch(() => { /* not kept */ })
+  }
   const groups: [string, PageListItem[]][] = [
-    [tr('Projet', 'Project'), shown.filter(p => p.scope === 'project')],
-    [tr('Equipe', 'Team'), shown.filter(p => p.scope === 'team')],
+    [tr('Projet', 'Project'), mine.filter(p => p.scope === 'project')],
+    [tr('Equipe', 'Team'), mine.filter(p => p.scope === 'team')],
   ]
+  const item = (p: PageListItem) => {
+    const Icon = pageIcon(p.icon)
+    return (
+      <div key={`${p.scope}/${p.id}`} className={`nav${current === p.id ? ' active' : ''}`} onClick={() => onPick(p)} title={p.error ?? p.description}>
+        <Icon size={14} strokeWidth={1.75} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+      </div>
+    )
+  }
   return (
     <aside style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--rule)', padding: '10px 8px', overflowY: 'auto' }}>
       {pages.length > 8 && (
@@ -37,19 +62,23 @@ function Rail({ pages, current, onPick }: { pages: PageListItem[]; current: stri
                  style={{ flex: 1, minWidth: 0, height: 24, padding: '0 6px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, fontSize: 12, color: 'var(--ink)' }} />
         </div>
       )}
+      {others.length > 0 && <div className="cap" style={{ padding: '0 6px 6px', color: 'var(--ink-2)' }}>{tr('Tes tools', 'Your tools')}</div>}
       {groups.filter(([, list]) => list.length).map(([title, list]) => (
         <div key={title} style={{ marginBottom: 10 }}>
           <div className="cap" style={{ padding: '0 6px 4px' }}>{title}</div>
-          {list.map(p => {
-            const Icon = pageIcon(p.icon)
-            return (
-              <div key={`${p.scope}/${p.id}`} className={`nav${current === p.id ? ' active' : ''}`} onClick={() => onPick(p)} title={p.error ?? p.description}>
-                <Icon size={14} strokeWidth={1.75} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
-              </div>
-            )
-          })}
+          {list.map(item)}
         </div>
       ))}
+      {others.length > 0 && (
+        <div style={{ marginTop: 6, borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+          <div className="nav" onClick={toggleOthers} title={tr('Pages faites pour les autres personnes, roles ou departements', 'Pages meant for other people, roles or departments')}>
+            {othersOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span className="cap" style={{ color: 'var(--ink-2)' }}>Other tools</span>
+            <span className="tp-note" style={{ marginLeft: 'auto' }}>{others.length}</span>
+          </div>
+          {othersOpen && others.map(item)}
+        </div>
+      )}
     </aside>
   )
 }
@@ -72,9 +101,9 @@ export function ToolPage() {
     let alive = true
     api.getUserData().then(d => {
       const last = typeof d?.[LAST_KEY] === 'string' ? d[LAST_KEY] as string : null
-      const pick = pages.find(p => p.id === last && !p.shadowed) ?? pages.find(p => !p.shadowed)
+      const pick = pages.find(p => p.id === last && !p.shadowed) ?? pages.find(p => !p.shadowed && forMe(p)) ?? pages.find(p => !p.shadowed)
       if (alive && pick) setParams({ page: pick.id }, { replace: true })
-    }).catch(() => { const first = pages.find(p => !p.shadowed); if (alive && first) setParams({ page: first.id }, { replace: true }) })
+    }).catch(() => { const first = pages.find(p => !p.shadowed && forMe(p)) ?? pages.find(p => !p.shadowed); if (alive && first) setParams({ page: first.id }, { replace: true }) })
     return () => { alive = false }
   }, [wanted, pages, setParams])
 
