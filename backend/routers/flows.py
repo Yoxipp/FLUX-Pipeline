@@ -429,6 +429,29 @@ async def validate_page(body: PageValidateBody) -> dict[str, Any]:
     return {"issues": issues}
 
 
+@router.get("/pages/trash")
+async def list_page_trash(project: Optional[str] = None) -> dict[str, Any]:
+    """Deleted pages per scope (team, and project when one is open): the restore list."""
+    roots = _page_roots(project)
+    return {scope: await _call(page_store.list_trash, roots, scope)
+            for scope in pages.SCOPES if roots.get(scope) is not None}
+
+
+class PageRestoreBody(BaseModel):
+    scope: str
+    project: Optional[str] = None
+
+
+@router.post("/pages/trash/{file}/restore")
+async def restore_page(file: str, body: PageRestoreBody) -> dict[str, Any]:
+    """The page and its data come back together; 409 if the id is taken again."""
+    current = await _require(rights.ADMIN, body.scope if body.scope in pages.SCOPES else "team")
+    done = await _call(page_store.restore_page, _page_roots(body.project), body.scope, file, user=current["user"] or "")
+    events.emit({"type": "page_changed", "page": done["id"], "scope": body.scope, "project": body.project,
+                 "rev": done["rev"], "by": current["user"]})
+    return done
+
+
 @router.get("/pages/links")
 async def get_page_links(project: Optional[str] = None) -> dict[str, Any]:
     """Reverse index {flow: [{page, scope, widget, kind, role, button_id | param | output}]} (04 §4)."""

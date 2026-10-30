@@ -250,7 +250,9 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   4 actions (un cran / tout devant / derriere, icone carre + 1 ou 2 fleches), points du fond masquables (par poste),
   double clic sur un objet = editer (un cadre : son nom), meme sous la capture du pointeur (`lastDown`).
   v5 (ADR 0083) : deux verrous (`model.ts` `moveLocked` / `textLocked` ; Ctrl+L deplacement, Ctrl+Maj+L texte ;
-  `mayChange` : geometrie -> deplacement, texte -> texte, style -> les deux) ; modeles inseres verrouilles en deplacement.
+  `mayChange` : geometrie -> deplacement, texte -> texte, style -> les deux) ; modeles sans verrou par defaut (le YAML
+  peut en poser). Minuteur : badge flottant 24 px en haut (aussi en presentation), a 0 toast bas droite + notification
+  native comme une mention @ (seulement si on l'a vu tourner).
   Shotboard (`board/Shotboard.tsx`) : objet `shotboard` dont la grille (ligne = sequence, colonne = shot) est lue dans
   Production (`useBoardProduction`, `useShotPreviews` -> `POST /production/<p>/shot-previews` toutes les 60 s, media
   choisi par `pickShotMedia` comme la Timeline) ; cases = enregistrements `shot` (`frame_at`, `frame_at2`, `text`) ;

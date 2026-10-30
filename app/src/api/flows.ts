@@ -21,6 +21,9 @@ export interface RunOpts {
 }
 
 // confirmed_destructive: ids of the `!` nodes validated with the slider (409 E_DESTRUCTIVE_UNCONFIRMED otherwise).
+// A deleted TOOL page in <scope>/_trash/ (data = its board / chat / tables were kept too).
+export interface PageTrashItem { file: string; id: string; label: string; at: string; data: boolean; exists: boolean }
+
 export interface SaveOpts { project?: string; base_revision?: number; force?: boolean; note?: string; confirmed_destructive?: string[] }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -105,6 +108,11 @@ export const flowsApi = {
     apiCall('PUT', `/flows/pages/${encodeURIComponent(page.id)}`, { page, scope, ...opts }),
   deletePage: (id: string, scope: PageScope, project?: string): Promise<{ trash: string }> =>
     apiCall('DELETE', `/flows/pages/${encodeURIComponent(id)}${qs({ scope, project })}`),
+  // Deleted pages and their data (board, chat, tables) come back together; 409 if the id is taken again.
+  pageTrash: (project?: string): Promise<Partial<Record<PageScope, PageTrashItem[]>>> =>
+    apiCall('GET', `/flows/pages/trash${qs({ project })}`),
+  restorePage: (file: string, scope: PageScope, project?: string): Promise<{ id: string; rev: string }> =>
+    apiCall('POST', `/flows/pages/trash/${encodeURIComponent(file)}/restore`, { scope, project }),
   validatePage: (page: PageDoc, scope: PageScope, project?: string): Promise<{ issues: PageIssue[] }> =>
     apiCall('POST', '/flows/pages/validate', { page, scope, project }),
   pageLinks: (project?: string): Promise<Record<string, PageLink[]>> =>

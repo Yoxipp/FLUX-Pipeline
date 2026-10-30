@@ -287,15 +287,16 @@ class BoardV5(unittest.TestCase):
             with self.assertRaises(FlowStoreError):
                 self._put({"type": "shot", "target": sb, "ref": "shot:SEQ010/SH020", **bad})
 
-    def test_templates_come_move_locked_text_free(self) -> None:
+    def test_templates_are_not_locked_by_default(self) -> None:
         from flux_flows import board_templates
 
         for tpl in board_templates.list_templates():
             for item in tpl["items"]:
-                if item.get("type") != "link":
-                    self.assertEqual((item["locked"], item["text_locked"]), (True, False), (tpl["id"], item["key"]))
-        tpl = board_templates.parse_template({"board": 1, "items": [{"key": "a", "type": "note", "locked": False}]})
-        self.assertFalse(tpl["items"][0]["locked"])
+                self.assertNotIn("locked", item, (tpl["id"], item["key"]))
+                self.assertNotIn("text_locked", item, (tpl["id"], item["key"]))
+        tpl = board_templates.parse_template({"board": 1, "items": [{"key": "a", "type": "note", "locked": True,
+                                                                      "text_locked": False}]})
+        self.assertEqual((tpl["items"][0]["locked"], tpl["items"][0]["text_locked"]), (True, False))
         shot = next(t for t in board_templates.list_templates() if t["id"] == "shotboard")
         self.assertEqual([i["type"] for i in shot["items"]], ["text", "shotboard"])
 

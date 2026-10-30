@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns2, Database, FolderPlus, Redo2, Save, Trash2, Undo2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { flowsApi } from '../../api/flows'
+import { flowsApi, type PageTrashItem } from '../../api/flows'
 import { useProject } from '../../ProjectContext'
 import type { FlowListItem, PageAccess, PageDoc, PageIssue, PageLayoutItem, PageListItem, PageScope, PageUse, PageWidget, PageWidgetKind } from '../flow_editor/types'
 import { createDocStore, docOf, isDirty, useStore } from '../flow_editor/store'
@@ -101,6 +101,45 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
         <button type="button" className="btn ghost" onClick={() => navigate('/tool')}>{tr('Annuler', 'Cancel')}</button>
         <button type="button" className="btn primary" disabled={busy} onClick={() => { void create() }}>{tr('Creer', 'Create')}</button>
       </div>
+      <PageTrash project={project} canTeam={canTeam} canProject={canProject} />
+    </div>
+  )
+}
+
+// Deleted pages: Restaurer puts the page and its data back; refused while the id is taken.
+function PageTrash({ project, canTeam, canProject }: { project?: string; canTeam: boolean; canProject: boolean }) {
+  const { tr } = useTr()
+  const navigate = useNavigate()
+  const [items, setItems] = useState<(PageTrashItem & { scope: PageScope })[]>([])
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    flowsApi.pageTrash(project)
+      .then(t => setItems((['project', 'team'] as PageScope[]).flatMap(s => (t[s] ?? []).map(e => ({ ...e, scope: s })))))
+      .catch(() => setItems([]))
+  }, [project])
+  const restore = async (e: PageTrashItem & { scope: PageScope }) => {
+    setBusy(true)
+    try {
+      await flowsApi.restorePage(e.file, e.scope, project)
+      navigate(`/tool/${e.id}`)
+    } catch (err) { toast.error((err as Error).message) } finally { setBusy(false) }
+  }
+  const shown = items.filter(e => e.scope === 'team' ? canTeam : canProject)
+  if (!shown.length) return null
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div className="cap" style={{ marginBottom: 6 }}>{tr('Corbeille', 'Trash')}</div>
+      {shown.map(e => (
+        <div key={`${e.scope}/${e.file}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, minHeight: 26 }}>
+          <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>{e.id}</span>
+          <span style={{ color: 'var(--ink-4)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {e.label} · {e.scope === 'team' ? tr('equipe', 'team') : tr('projet', 'project')} · {e.at.replace('T', ' ')}{e.data ? tr(' · avec donnees', ' · with data') : ''}
+          </span>
+          <button type="button" className="btn ghost sm" disabled={busy || e.exists}
+                  title={e.exists ? tr('Une page de meme id existe : supprime-la ou renomme-la d\'abord', 'A page with this id exists: delete or rename it first') : undefined}
+                  onClick={() => { void restore(e) }}>{tr('Restaurer', 'Restore')}</button>
+        </div>
+      ))}
     </div>
   )
 }
@@ -255,7 +294,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
   const move = (dir: -1 | 1, inRow = false) => { if (sel?.kind === 'widget' || sel?.kind === 'folder') { const id = sel.id; apply(d => moveItem(d, id, dir, inRow)) } }
 
   const deletePage = async () => {
-    if (!window.confirm(tr(`Supprimer la page ${pageId} ? (copie gardee dans _trash)`, `Delete the page ${pageId}? (copy kept in _trash)`))) return
+    if (!window.confirm(tr(`Supprimer la page ${pageId} ? Elle et ses donnees vont a la corbeille (Nouvelle page > Corbeille > Restaurer)`, `Delete the page ${pageId}? It goes to the trash with its data (New page > Trash > Restore)`))) return
     try { await flowsApi.deletePage(pageId, scope, proj); store.load(null); navigate('/tool') } catch (err) { toast.error((err as Error).message) }
   }
 

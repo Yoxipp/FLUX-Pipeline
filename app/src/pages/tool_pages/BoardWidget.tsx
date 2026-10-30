@@ -18,7 +18,7 @@
 // backend from a file path), FLUX cards (FluxCard.tsx) and shipped board templates.
 // v4 (ADR 0075): comments and reactions on an object (one record per author, badges under
 // the object, panel with who / when), a shared timer, PNG / PDF export (exportBoard.ts).
-// v5 (ADR 0083): move lock and text lock apart (model.ts), templates come move locked,
+// v5 (ADR 0083): move lock and text lock apart (model.ts), templates keep the locks their YAML sets (none by default),
 // shotboard (Shotboard.tsx: grid read live from Production, its cells are `shot` records).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent } from 'react'
@@ -394,7 +394,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     if (!templates) flowsApi.boardTemplates().then(r => setTemplates(r.templates)).catch(fail)
   }
   // A template goes in like a paste: new rids, links re-pointed from the keys, one undo;
-  // its locks are kept (move locked, text free by default, ADR 0083).
+  // the locks its YAML sets are kept (none by default, ADR 0083).
   const insertTemplate = (t: BoardTemplate) => {
     setShowTemplates(false)
     const list = t.items.map(({ key, text_en, ...f }) =>
@@ -509,13 +509,21 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     return () => clearInterval(t)
   }, [timer])
   const left = timer ? Math.max(0, Math.round((new Date(timer.ends_at!).getTime() - now) / 1000)) : 0
+  // At 0, the same alert as an @ mention (App.tsx MentionWatcher): a toast at the bottom
+  // right and the native notification. Only for a timer seen running here (a board opened
+  // on a finished timer stays quiet).
   const rang = useRef<string | null>(null)
+  const running = useRef<string | null>(null)
   useEffect(() => {
-    if (timer && left === 0 && rang.current !== timer.rid) {
-      rang.current = timer.rid
-      toast.info(tr('Minuteur termine.', 'Timer finished.'))
-    }
-  }, [timer, left, tr])
+    if (!timer) return
+    if (left > 0) { running.current = timer.rid; return }
+    if (rang.current === timer.rid || running.current !== timer.rid) return
+    rang.current = timer.rid
+    const title = tr('Minuteur termine', 'Timer finished')
+    const body = `${page.label || page.id}${w.label ? ` · ${w.label}` : ''}`
+    toast(title, { description: body, position: 'bottom-right', duration: 8000 })
+    void window.electronAPI?.showNotification?.(title, body)
+  }, [timer, left, tr, page.label, page.id, w.label])
   const startTimer = (minutes: number) => {
     setShowTimer(false)
     const ends = new Date(Date.now() + minutes * 60_000).toISOString().replace('Z', '+00:00')
@@ -950,15 +958,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         {btn(tr('Tout voir (Maj+1)', 'Fit (Shift+1)'), fit, <Maximize size={13} />)}
         {btn(tr('Presenter les cadres', 'Present the frames'), startPresent, <Play size={13} />, false, !frames.length)}
         {btn(tr('Exporter en PNG ou PDF', 'Export as PNG or PDF'), () => setShowExport(s => !s), <Download size={13} />, showExport, exporting || !cards.length)}
-        {timer
-          ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4, padding: '0 6px', height: 22, borderRadius: 5, fontSize: 12,
-                           fontVariantNumeric: 'tabular-nums', background: left === 0 ? 'oklch(88% 0.07 25)' : 'var(--paper-2)', color: left === 0 ? 'oklch(35% 0.1 25)' : 'var(--ink)' }}
-                  title={tr('Minuteur partage avec tout le board', 'Timer shared with the whole board')}>
-              <Timer size={12} />{left === 0 ? tr('Termine', 'Done') : clock(left)}
-              {canEdit && <button type="button" onClick={stopTimer} title={tr('Arreter le minuteur', 'Stop the timer')}
-                                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0, display: 'inline-flex' }}><X size={12} /></button>}
-            </span>
-          : canEdit && btn(tr('Minuteur partage', 'Shared timer'), () => setShowTimer(s => !s), <Timer size={13} />, showTimer)}
+        {!timer && canEdit && btn(tr('Minuteur partage', 'Shared timer'), () => setShowTimer(s => !s), <Timer size={13} />, showTimer)}
       </div>
 
 
@@ -994,12 +994,24 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
           {marquee && <div style={{ position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 4,
                                     border: `${1 / view.z}px solid var(--accent)`, background: 'oklch(60% 0.12 245 / 0.08)' }} />}
         </div>
-        {!presenting && (
+        {(!presenting || timer) && (
           // Over the board, not above it: selecting never pushes the board down.
           <div onPointerDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}
                style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 6, maxWidth: 'calc(100% - 20px)',
                         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}>
-            <div style={{ pointerEvents: 'auto', display: 'contents' }}>
+            {timer && (
+              // Shared timer, floating and big enough to read from across the room (2026-10-30).
+              <div title={tr('Minuteur partage avec tout le board', 'Timer shared with the whole board')}
+                   style={{ pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderRadius: 10,
+                            fontSize: 24, fontWeight: 650, fontVariantNumeric: 'tabular-nums', boxShadow: '0 2px 10px oklch(0% 0 0 / 0.22)',
+                            border: '1px solid var(--rule)', background: left === 0 ? 'oklch(88% 0.07 25)' : 'var(--paper)',
+                            color: left === 0 ? 'oklch(35% 0.1 25)' : 'var(--ink)' }}>
+                <Timer size={20} />{left === 0 ? tr('Termine', 'Done') : clock(left)}
+                {canEdit && <button type="button" onClick={stopTimer} title={tr('Arreter le minuteur', 'Stop the timer')}
+                                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0, display: 'inline-flex' }}><X size={16} /></button>}
+              </div>
+            )}
+            {!presenting && <div style={{ pointerEvents: 'auto', display: 'contents' }}>
       {canEdit && (tool === 'pen' || tool === 'highlighter') && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.18)' }}>
           <span className="cap" style={{ marginRight: 6 }}>{tool === 'pen' ? tr('Stylo', 'Pen') : tr('Surligneur', 'Highlighter')}</span>
@@ -1065,7 +1077,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
           {btn(tr('Supprimer (Suppr)', 'Delete (Del)'), () => remove(selection), <Trash2 size={13} />)}
         </div>
       )}
-            </div>
+            </div>}
           </div>
         )}
         {presenting && current && (

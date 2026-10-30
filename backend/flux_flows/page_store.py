@@ -4,7 +4,8 @@
 #   P/<id>.yml                       the page (one file, no numbered versions)
 #   P/_history/<id>_<stamp>.yml      the previous file, copied before each overwrite (last 20)
 #   P/_trash/<id>_<stamp>.yml        deleted pages
-#   P/_trash/<id>_<stamp>_data/      their shared data (pages_data/<id>/ of that base)
+#   P/_trash/<id>_<stamp>_data/      their shared data (pages_data/<id>/ of that base),
+#                                    put back together with the page by restore_page
 # shipped/pages/ holds the read-only templates (menu "Modele"), never listed in TOOL.
 #
 # rev = hash of the file text. A save sends the rev it loaded: another write since
@@ -299,6 +300,91 @@ def delete_page(roots: Mapping[str, Optional[Path]], scope: str, page_id: str, *
         path.replace(trash)
     _history(roots, scope, "page_delete", page_id, user)
     return {"trash": str(trash), "data_trash": [str(dest) for dest, _ in moved]}
+
+
+STAMP_LEN = len("_20261030_120000")
+
+
+def _trash_id(stem: str) -> Optional[str]:
+    """<id>_<YYYYmmdd>_<HHMMSS> -> id (None for anything else in _trash/)."""
+    stamp = stem[-STAMP_LEN:]
+    if len(stem) <= STAMP_LEN or not stamp[1:9].isdigit() or stamp[9] != "_" or not stamp[10:].isdigit():
+        return None
+    return stem[:-STAMP_LEN] if NAME_RE.match(stem[:-STAMP_LEN]) else None
+
+
+def _data_trashes(roots: Mapping[str, Optional[Path]], scope: str, stem: str) -> List[tuple]:
+    """(trash folder, target base) of the data moved with the page *stem*."""
+    targets = ["project"] if scope == "project" else ["team", "project"]
+    out = []
+    for target in targets:
+        root = roots.get(target)
+        folder = Path(root) / "_trash" / f"{stem}_data" if root is not None else None
+        if folder is not None and folder.is_dir():
+            out.append((folder, target))
+    return out
+
+
+def list_trash(roots: Mapping[str, Optional[Path]], scope: str) -> List[Dict[str, Any]]:
+    """Deleted pages of *scope*, recent first: {file, id, at, label, data, exists}."""
+    root = _root(roots, scope)
+    folder = root / "_trash"
+    if not folder.is_dir():
+        return []
+    out = []
+    for f in folder.iterdir():
+        page_id = _trash_id(f.stem) if f.is_file() and f.suffix == SUFFIX else None
+        if page_id is None:
+            continue
+        page = _read(f)["page"]
+        out.append({"file": f.name, "id": page_id, "label": page.label if page else page_id,
+                    "at": datetime.strptime(f.stem[-STAMP_LEN + 1:], "%Y%m%d_%H%M%S").isoformat(),
+                    "data": bool(_data_trashes(roots, scope, f.stem)),
+                    "exists": page_file(root, page_id).is_file()})
+    return sorted(out, key=lambda e: e["at"], reverse=True)
+
+
+def restore_page(roots: Mapping[str, Optional[Path]], scope: str, file: str, *, user: str) -> Dict[str, Any]:
+    """Put a deleted page back with its data. 409 when the id is taken again, or one of its
+    collections exists again: nothing is overwritten (delete or rename the new page first)."""
+    _require_writable(scope)
+    root = _root(roots, scope)
+    source = root / "_trash" / Path(file).name
+    page_id = _trash_id(source.stem) if source.suffix == SUFFIX else None
+    if page_id is None or not source.is_file():
+        raise FlowStoreError(f"{file} introuvable dans la corbeille ({scope})", 404)
+    with _lock(root, page_id):
+        path = page_file(root, page_id)
+        if path.is_file():
+            raise FlowStoreError(f"une page {page_id} existe deja ({scope}) : supprime-la ou renomme-la "
+                                 "avant de restaurer", 409, {"exists": True})
+        moves = []
+        for folder, target in _data_trashes(roots, scope, source.stem):
+            base = Path(roots[target]).parent / "pages_data" / page_id
+            for sub in sorted(p for p in folder.iterdir() if p.is_dir()):
+                if (base / sub.name).exists():
+                    raise FlowStoreError(f"la collection {sub.name} de {page_id} a deja des donnees : "
+                                         "rien n'est restaure", 409, {"collection": sub.name})
+                moves.append((sub, base / sub.name))
+        moved: List[tuple] = []
+        try:
+            for src, dest in moves:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest))
+                moved.append((src, dest))
+        except OSError as exc:
+            for src, dest in reversed(moved):
+                shutil.move(str(dest), str(src))
+            raise FlowStoreError(f"donnees de {page_id} occupees, reessaie ({exc})", 409) from exc
+        for folder, _ in _data_trashes(roots, scope, source.stem):
+            try:
+                folder.rmdir()                         # emptied above; never removes a non-empty folder
+            except OSError:
+                pass
+        source.replace(path)
+    _history(roots, scope, "page_restore", page_id, user, trash=source.name)
+    return {"id": page_id, "rev": rev_of(path.read_text(encoding="utf-8")),
+            "data": [str(dest) for _, dest in moved]}
 
 
 def list_history(roots: Mapping[str, Optional[Path]], scope: str, page_id: str) -> List[Dict[str, Any]]:

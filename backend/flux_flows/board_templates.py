@@ -2,8 +2,8 @@
 # storyboard, planning. A template is a list of board objects with local keys; inserting
 # it creates ordinary records in the viewer's own journal (the front re-points the links
 # from keys to the new rids, like a paste). Read only, inside the exe (shipped/boards/).
-# ADR 0083: every object of a template comes move locked and text free (`locked: true`,
-# `text_locked: false`) unless the YAML says otherwise; the shotboard template holds one
+# ADR 0083: a template may set `locked` / `text_locked` on an object; none does by default
+# (2026-10-30), insertion keeps what the YAML says. The shotboard template holds one
 # `shotboard` object, a grid read live from Production (sequence rows, shot columns).
 #
 #   board: 1
@@ -46,9 +46,6 @@ def parse_template(data: Any, name: str = "?") -> Dict[str, Any]:
         keys.add(raw["key"])
         fields = check_fields(_SPEC, {k: v for k, v in raw.items() if k not in _META})
         item = {"key": raw["key"], **fields}
-        if item.get("type") != "link":
-            item.setdefault("locked", True)
-            item.setdefault("text_locked", False)
         for k in ("text_en", "label_en"):
             if isinstance(raw.get(k), str):
                 item[k] = raw[k]
