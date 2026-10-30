@@ -37,9 +37,12 @@ export interface NotifyProjectSettings {
 export interface NotifyBot {
   configured: boolean
   name?: string
-  host?: string              // PC that holds the token (never the token itself)
-  hosted_here?: boolean
+  host?: string              // PC answering now, else the first that registered it (never the token itself)
+  hosted_here?: boolean      // the token is on this PC (host or ready to take over, ADR 0082)
   online?: boolean
+  is_host?: boolean          // this FLUX holds the project lock right now
+  this_pc?: string
+  candidates?: string[]      // other PCs ready to take over
   invite_url?: string
   background?: boolean       // this PC keeps its bots online when FLUX is closed (ADR 0076)
   runs_in?: '' | 'app' | 'headless'
@@ -68,7 +71,8 @@ export const notifyApi = {
     apiCall<{ prefs: NotifyPrefs; has_channel: boolean }>('POST', `/notify/me/discord_link${q(project)}`, { code }),
   setBot: (project: string, token: string) =>
     apiCall<{ bot: NotifyBot }>('PUT', `/notify/project/${enc(project)}/bot`, { token }),
-  removeBot: (project: string) => apiCall<{ bot: NotifyBot }>('DELETE', `/notify/project/${enc(project)}/bot`),
+  removeBot: (project: string, thisPcOnly = false) =>
+    apiCall<{ bot: NotifyBot }>('DELETE', `/notify/project/${enc(project)}/bot${thisPcOnly ? '?this_pc_only=true' : ''}`),
   setBotBackground: (project: string, enabled: boolean) =>
     apiCall<{ bot: NotifyBot }>('PUT', `/notify/project/${enc(project)}/bot/background`, { enabled }),
 }

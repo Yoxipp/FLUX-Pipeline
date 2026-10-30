@@ -1,7 +1,8 @@
 # discord_bot.py - the Discord bot of a project (ADR 0073, steps 1 and 2).
 #
-# Hosted by ONE PC: the one that holds the token (bot_secret, DPAPI). FLUX opens an
-# outgoing Gateway WebSocket to Discord, nothing listens on the network.
+# Hosted by ONE PC at a time among those that hold the token (bot_secret, DPAPI): they elect
+# the host through a lock on the share and another one takes over when it leaves (ADR 0082).
+# FLUX opens an outgoing Gateway WebSocket to Discord, nothing listens on the network.
 #   - slash commands /link, /mentions, /chat [n] and /calendar, answered ephemerally
 #     (only the caller sees); all but /link need an account linked by /link;
 #   - private messages (DM) for the phone notifications of linked accounts;
@@ -31,6 +32,8 @@ ENV = "FLUX_DISCORD_BOT"
 EPHEMERAL = 64
 PUMP_S = 5.0
 ALIVE_S = 30.0
+BEAT_S = 20.0               # core.host_lock beat of the project lock (ADR 0082)
+CANDIDATE_EVERY_S = 300.0   # a waiting PC says it is ready (store.CANDIDATE_S keeps it 10 min)
 MAX_CHARS = 2000
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O/1/I
 CHAT_DEFAULT = 10
@@ -286,8 +289,11 @@ def pump(project: str, token: str, sent: _Sent, now: float) -> int:
 class BotRunner:
     """One project's bot on this PC: a daemon thread with its own asyncio loop."""
 
-    def __init__(self, project: str, token: str):
+    beat_s = BEAT_S
+
+    def __init__(self, project: str, token: str, lock=None):
         self.project, self.token = project, token
+        self.lock = lock            # core.host_lock.HostLock of the project, made in _life (tests inject one)
         self.app_id = ""
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._main, name=f"flux-discord-bot-{project}", daemon=True)
@@ -311,23 +317,95 @@ class BotRunner:
                 pass
 
     def _main(self) -> None:
+        try:
+            asyncio.run(self._life())
+        except Exception as exc:  # noqa: BLE001 - a bot error never reaches FLUX
+            log.warning("discord bot %s: %s", self.project, type(exc).__name__)
+        finally:
+            self.online = False
+
+    # ADR 0082: every PC with the token runs this loop; only the holder of the project lock
+    # (core.host_lock on the share) opens the Gateway. The others wait, ready to take over;
+    # the one that took it keeps it (no way back to a preferred PC).
+    async def _life(self) -> None:
+        from core.host_lock import HostLock
+        self._loop = asyncio.get_running_loop()
+        if self.lock is None:
+            self.lock = HostLock(store.bot_host_lock_path(self.project), host=host_name())
+        gateway: asyncio.Task | None = None
+        last_seen = 0.0
+        try:
+            while not self._stop.is_set():
+                await self.lock.tick()
+                if self.lock.holder:
+                    if gateway is None or gateway.done():
+                        log.info("discord bot %s: this PC hosts it", self.project)
+                        gateway = asyncio.create_task(self._gateway())
+                else:
+                    if gateway is not None:
+                        log.info("discord bot %s: hosted elsewhere now, disconnecting", self.project)
+                        await self._drop(gateway)
+                        gateway = None
+                    now = time.time()
+                    if now - last_seen >= CANDIDATE_EVERY_S:
+                        if not await asyncio.to_thread(self._still_configured):
+                            log.info("discord bot %s removed from the project: stopping", self.project)
+                            self._stop.set()
+                            break
+                        await asyncio.to_thread(store.write_candidate, self.project, self.lock.host, now)
+                        last_seen = now
+                await self._wait(self.beat_s)
+        finally:
+            if gateway is not None:
+                await self._drop(gateway)
+            await asyncio.to_thread(self.lock.release)
+
+    def _still_configured(self) -> bool:
+        try:
+            return bool(store.read_project(self.project).get("discord_bot"))
+        except Exception:  # noqa: BLE001 - share unreachable: keep waiting
+            return True
+
+    async def _wait(self, seconds: float) -> None:
+        end = time.monotonic() + seconds
+        while not self._stop.is_set() and time.monotonic() < end:
+            await asyncio.sleep(min(0.5, max(0.0, end - time.monotonic())))
+
+    async def _drop(self, gateway: asyncio.Task) -> None:
+        """Close the Gateway at once: two connections on one token are never wanted."""
+        ws = self._ws
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+        gateway.cancel()
+        try:
+            await gateway
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        self.online, self._ws = False, None
+
+    async def _gateway(self) -> None:
         backoff = 5.0
         while not self._stop.is_set():
             started = time.time()
             try:
-                asyncio.run(self._session())
+                await self._session()
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001 - a bot error never reaches FLUX
                 log.warning("discord bot %s: %s", self.project, type(exc).__name__)
-            self.online = False
+            self.online, self._ws = False, None
             if self._stop.is_set():
                 return
             backoff = 5.0 if time.time() - started > 300 else min(backoff * 2, 300.0)
-            self._stop.wait(backoff)
+            await self._wait(backoff)
 
     async def _session(self) -> None:
         from websockets.asyncio.client import connect
         async with connect(GATEWAY, max_size=2 ** 22) as ws:
-            self._loop, self._ws = asyncio.get_running_loop(), ws
+            self._ws = ws
             hello = json.loads(await ws.recv())
             interval = float((hello.get("d") or {}).get("heartbeat_interval", 41250)) / 1000.0
             await ws.send(json.dumps({"op": 2, "d": {"token": self.token, "intents": 0,
@@ -456,8 +534,14 @@ def start_all() -> list[str]:
 
 
 def stop_all() -> None:
+    runners = list(_runners.values())
     for project in list(_runners):
         stop(project)
+    # Let each runner release its project lock (expires 0): another PC, or the headless
+    # process of this one, takes over at its next beat instead of after the TTL.
+    for runner in runners:
+        if runner._thread.is_alive() and runner._thread is not threading.current_thread():
+            runner._thread.join(timeout=2.0)
     from features.notify import bot_host
     bot_host.release()
 
@@ -474,9 +558,15 @@ def refresh() -> list[str]:
 
 
 def hosted_token(project: str) -> str:
-    """The token when THIS PC hosts the bot of *project* (to send DMs directly)."""
+    """The token when THIS PC hosts the bot of *project* right now (to send DMs directly).
+    A PC that only waits to take over (ADR 0082) leaves the DM in the shared queue."""
     runner = _runners.get(project)
-    return runner.token if runner else ""
+    return runner.token if runner and runner.online else ""
+
+
+def is_host(project: str) -> bool:
+    runner = _runners.get(project)
+    return bool(runner and runner.lock is not None and runner.lock.holder)
 
 
 def is_running(project: str) -> bool:

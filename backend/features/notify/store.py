@@ -31,6 +31,7 @@ PROJECT_DEFAULTS = {"discord_webhook": "", "ntfy_server": DEFAULT_SERVER, "diges
 USER_DEFAULTS = {"channel": "none", "discord_id": "", "ntfy_topic": "", "discord_linked_at": ""}
 
 BOT_ALIVE_S = 120.0         # the host rewrites its heartbeat every 30 s
+CANDIDATE_S = 600.0         # a waiting PC rewrites its line every 5 min (ADR 0082)
 LINK_TTL_S = 600.0
 BOT_QUEUE_TTL_S = 86400.0
 
@@ -187,11 +188,51 @@ def write_alive(project: str, host: str, now: float) -> bool:
 
 
 def bot_alive(project: str, now: float) -> bool:
+    return bool(bot_host_now(project, now))
+
+
+def bot_host_now(project: str, now: float) -> str:
+    """The PC whose bot answers right now (fresh heartbeat), "" when offline."""
     data = read_json(_setup_file(project, "discord_bot_alive.json")) or {}
     try:
-        return isinstance(data, dict) and now - float(data.get("at", 0)) < BOT_ALIVE_S
+        fresh = isinstance(data, dict) and now - float(data.get("at", 0)) < BOT_ALIVE_S
     except (TypeError, ValueError):
-        return False
+        return ""
+    return str(data.get("host") or "?") if fresh else ""
+
+
+# ADR 0082: several PCs may hold the token; one hosts, the others wait to take over.
+# _flux_setup/discord_bot_host.lock        core.host_lock record, the election
+# _flux_setup/discord_bot_candidates.json  {host: at}  each PC with the token, refreshed while it waits
+
+def bot_host_lock_path(project: str):
+    return _setup_file(project, "discord_bot_host.lock")
+
+
+def write_candidate(project: str, host: str, now: float) -> bool:
+    path = _setup_file(project, "discord_bot_candidates.json")
+    data = read_json(path) or {}
+    data = {h: at for h, at in data.items() if isinstance(at, (int, float)) and now - at < CANDIDATE_S} \
+        if isinstance(data, dict) else {}
+    data[host] = now
+    return write_json(path, data)
+
+
+def drop_candidate(project: str, host: str) -> bool:
+    path = _setup_file(project, "discord_bot_candidates.json")
+    data = read_json(path) or {}
+    if not isinstance(data, dict) or host not in data:
+        return True
+    data.pop(host)
+    return write_json(path, data)
+
+
+def bot_candidates(project: str, now: float) -> list[str]:
+    """PCs ready to host the bot (seen within CANDIDATE_S), sorted."""
+    data = read_json(_setup_file(project, "discord_bot_candidates.json")) or {}
+    if not isinstance(data, dict):
+        return []
+    return sorted(h for h, at in data.items() if isinstance(at, (int, float)) and now - at < CANDIDATE_S)
 
 
 def add_link_code(project: str, code: str, discord_id: str, now: float) -> bool:

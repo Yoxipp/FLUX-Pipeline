@@ -135,9 +135,16 @@ def _bot_status(project: str, cfg: dict) -> dict:
     if not info:
         return {"configured": False}
     # hosted_here = the token is on this PC (the bot may run in this FLUX or headless, ADR 0076).
-    return {"configured": True, "name": info.get("name", ""), "host": info.get("host", ""),
+    # ADR 0082: several PCs may hold the token; host = the one answering now (else the first
+    # that registered the bot), candidates = the others ready to take over.
+    now = time.time()
+    host_now = store.bot_host_now(project, now)
+    return {"configured": True, "name": info.get("name", ""), "host": host_now or info.get("host", ""),
             "hosted_here": project in bot_secret.hosted_projects(),
-            "online": store.bot_alive(project, time.time()),
+            "online": bool(host_now),
+            "is_host": discord_bot.is_host(project),
+            "this_pc": discord_bot.host_name(),
+            "candidates": [h for h in store.bot_candidates(project, now) if h != host_now],
             "invite_url": discord_bot.invite_url(info.get("app_id", "")),
             **bot_host.status()}
 
@@ -148,7 +155,8 @@ class BotRequest(BaseModel):
 
 @router.put("/project/{project}/bot")
 async def put_bot(project: str, req: BotRequest) -> dict:
-    """Host the project's bot on THIS PC: the token stays here, encrypted (ADR 0073)."""
+    """Host the project's bot on THIS PC: the token stays here, encrypted (ADR 0073). The bot
+    already registered: this PC becomes a candidate that takes over when the host leaves (0082)."""
     _ensure_project(project)
     _require_role(project)
     user = _user()
@@ -156,15 +164,22 @@ async def put_bot(project: str, req: BotRequest) -> dict:
     token = req.token.strip()
     try:
         info = await _io(lambda: discord_bot.check_token(token))
+        current = (await _io(lambda: store.read_project(project))).get("discord_bot") or {}
+        if current and current.get("app_id") and current.get("app_id") != info.get("app_id"):
+            raise HTTPException(status_code=409, detail=f"Ce jeton est celui d'un autre bot que {current.get('name') or 'celui du projet'} : "
+                                                        "colle le jeton du meme bot, ou retire d'abord le bot du projet")
         await _io(lambda: bot_secret.save_token(project, token))
     except (ValueError, bot_secret.SecretError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     discord_bot.stop(project)
-    cfg = await _io(lambda: store.set_bot(project, {**info, "host": discord_bot.host_name()}, user))
+    if current:
+        cfg = await _io(lambda: store.read_project(project))
+    else:
+        cfg = await _io(lambda: store.set_bot(project, {**info, "host": discord_bot.host_name()}, user))
     discord_bot.start(project)
-    log.info("discord bot of %s hosted here, set by %s", project, user)
+    log.info("discord bot of %s %s, set by %s", project, "candidate here" if current else "hosted here", user)
     return {"bot": await _io(lambda: _bot_status(project, cfg))}
 
 
@@ -198,13 +213,20 @@ async def put_bot_background(project: str, req: BackgroundRequest) -> dict:
 
 
 @router.delete("/project/{project}/bot")
-async def delete_bot(project: str) -> dict:
+async def delete_bot(project: str, this_pc_only: bool = False) -> dict:
+    """Remove the bot from the project (every PC stops), or with *this_pc_only* only take this
+    PC out of the hosts (its token is deleted, another PC keeps the bot, ADR 0082)."""
     _ensure_project(project)
     _require_role(project)
     user = _user()
     from features.notify import bot_secret, discord_bot
     discord_bot.stop(project)
     await _io(lambda: bot_secret.delete_token(project))
+    if this_pc_only:
+        await _io(lambda: store.drop_candidate(project, discord_bot.host_name()))
+        log.info("discord bot of %s: this PC is no longer a host (%s)", project, user)
+        cfg = await _io(lambda: store.read_project(project))
+        return {"bot": await _io(lambda: _bot_status(project, cfg))}
     cfg = await _io(lambda: store.set_bot(project, None, user))
     log.info("discord bot of %s removed by %s", project, user)
     return {"bot": _bot_status(project, cfg)}
