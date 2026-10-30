@@ -94,6 +94,9 @@ def _run_parent() -> int:
         # Pin stages alive for the run so a mid-run stage free can't abort a USD
         # worker thread before the verdict is written (see stage_factory).
         "USD_ASM_KEEPALIVE_STAGES": "1",
+        # Phone notify hooks off: no test may queue a push in the real %APPDATA%
+        # (tests/notify drives the module directly).
+        "FLUX_NOTIFY": "0",
     }
 
     try:

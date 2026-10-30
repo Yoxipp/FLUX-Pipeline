@@ -272,6 +272,7 @@ JSON_RENDER: str     = "render.json"        # setup dir - team render (Tractor) 
 JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
 JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
 JSON_ROLES: str      = "roles.json"         # setup dir - artists' roles on the project, ADR 0064
+JSON_COLLAB: str     = "collab.json"        # setup dir - phone notify relays (Discord webhook, ntfy), ADR 0062
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 JSON_STUDIO: str     = "studio.json"        # FLUX_ROOT/CONFIG - the studio's own settings, ADR 0063
 

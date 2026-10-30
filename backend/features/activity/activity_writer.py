@@ -102,6 +102,14 @@ def log_publish(user: str, filename: str, project: str, dest_folder: Path | str 
         publish_done(user, filename, project, dest_folder, soft=soft)
     except Exception as exc:  # noqa: BLE001 - a flow hook never fails a publish
         log.warning("Flows on_publish skipped: %s", exc)
+    # Phone notify (ADR 0062): followers / assignees of the entity, grouped. Returns at
+    # once (worker thread), cut by FLUX_NOTIFY=0.
+    try:
+        from features.notify import hooks as notify_hooks
+
+        notify_hooks.on_publish(user, filename, project)
+    except Exception as exc:  # noqa: BLE001 - a notification never fails a publish
+        log.warning("Notify on_publish skipped: %s", exc)
     return ok
 
 

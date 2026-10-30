@@ -312,6 +312,12 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
+    # Phone notify (ADR 0062): a new assignee or retake, seen as a diff of the saved doc.
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_production(project, previous, payload.production, config.get_current_user() or "")
+    except Exception as e:  # noqa: BLE001 — the save already succeeded
+        log.warning("Notify after Production save skipped for %r: %s", project, e)
 
     # A4 (ADR 0020): a casting or frame range edit regenerates that shot's stage.
     stages: list[str] = []

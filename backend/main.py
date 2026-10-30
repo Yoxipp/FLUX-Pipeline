@@ -28,7 +28,7 @@ from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
 from features.production import scan_cache as production_scan_cache
-from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, production, project, publish, render, review, roles, settings, shelf, system, team_calendar, usd_assembler
+from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, notify, production, project, publish, render, review, roles, settings, shelf, system, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -99,6 +99,14 @@ async def lifespan(app: FastAPI):
         flows_scheduler.start()
     except Exception as exc:  # never block startup on the Flows scheduler
         log.warning("[FLUX] Flows scheduler skipped: %s", exc)
+    # Phone notify (ADR 0062): resend what a previous run left in the local queue. The
+    # worker thread only lives while the queue has items. FLUX_NOTIFY=0 turns it off.
+    try:
+        from features.notify import dispatch as notify_dispatch, outbox as notify_outbox
+        if notify_outbox.load():
+            notify_dispatch.kick()
+    except Exception as exc:  # never block startup on notifications
+        log.warning("[FLUX] Notify queue skipped: %s", exc)
     yield
     try:
         from flux_flows import scheduler as flows_scheduler
@@ -201,6 +209,7 @@ app.include_router(logs.router,           prefix="/logs",           tags=["Logs"
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
 app.include_router(team_calendar.router,  prefix="/calendar",       tags=["Calendar"])
+app.include_router(notify.router,         prefix="/notify",         tags=["Notify"])
 app.include_router(render.router,         prefix="/render",         tags=["Render"])
 app.include_router(review.router,         prefix="/review",         tags=["Review"])
 app.include_router(roles.router,          prefix="/roles",          tags=["Roles"])

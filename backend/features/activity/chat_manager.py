@@ -120,11 +120,14 @@ def parse_pings(message: str) -> list[str]:
 
 def _record_mentions(
     from_user: str, msg_id: str, text: str, date: str, time: str, project: str | None = None,
+    *, notify_kind: str = "mention", notify_detail: str = "", notify_entity: str = "",
 ) -> None:
     """Persist an unread mention entry for each valid @name in *text*.
 
     Resolves each @name against the real user list (case-insensitive) so a typo
-    doesn't spam a phantom user, and skips self-mentions.
+    doesn't spam a phantom user, and skips self-mentions. The same targets get a
+    phone notification (features.notify, *notify_kind* "calendar" for calendar pings);
+    the text itself never leaves FLUX.
     """
     raw = parse_pings(text)
     if not raw:
@@ -161,6 +164,11 @@ def _record_mentions(
     # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
     if not append_events(mpath, new_entries, ARCHIVE_STEM_MENTIONS, _MENTIONS_COLLECTION):
         log.error("Failed to write chatMentions.json at %s", mpath)
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_mentions(from_user, targets, project, notify_kind, notify_detail, notify_entity)
+    except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
+        log.warning("Notify for mentions skipped: %s", exc)
 
 
 def _mentions_read_path(path: Path | None) -> Path:
