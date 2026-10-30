@@ -54,13 +54,19 @@ def resolve_chat_path(project: str | None) -> Path:
 
 
 def send_message(
-    user: str, message: str, project: str | None = None, path: Path | None = None,
+    user: str, message: str, project: str | None = None, path: Path | None = None, *,
+    channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
+    notify_all: bool = False,
 ) -> bool:
     """Append a chat message to the team chat of *project*. Returns True on success.
 
     *path* (tests) overrides the project's chat file. Any @name that matches a known
     user (case-insensitive, never the author) is recorded as an unread mention so
     that user gets a red notification, tagged with the project it was said in.
+    Team page (ADR 0077): *channel* (absent = general), *reply_to* (thread), *attachments*
+    (files copied by features.team.files) are stored only when given, so the home chat
+    reads the same file; *notify_all* (a call link posted with "Prevenir l'equipe")
+    sends a phone notification to every artist.
     """
     date, time = _now()
     msg_id = _make_id(user)
@@ -72,6 +78,12 @@ def send_message(
         "date":    date,
         "time":    time,
     }
+    if channel and channel != "general":
+        entry["channel"] = channel
+    if reply_to:
+        entry["reply_to"] = reply_to
+    if attachments:
+        entry["attachments"] = attachments
     chat_path = path or resolve_chat_path(project)
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
@@ -87,7 +99,21 @@ def send_message(
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to record chat mentions: %s", exc)
+    if notify_all:
+        try:
+            _notify_everyone(user, text, project)
+        except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
+            log.warning("Notify everyone skipped: %s", exc)
     return ok
+
+
+def _notify_everyone(user: str, text: str, project: str | None) -> None:
+    """Phone notification to every artist but the author (a call posted in the chat)."""
+    table = load_aliases()
+    targets = [u for u in get_user_list() if not same_user(u, user, table)]
+    if targets and project:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_mentions(user, targets, project, "mention", "appel", "chat", text)
 
 
 def get_messages(

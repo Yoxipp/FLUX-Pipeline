@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core import config
 from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
@@ -61,10 +61,22 @@ def _not_modified(request: Request, etag: str) -> bool:
     return any(_strip_weak(t) == target for t in inm.split(","))
 
 
+class ChatAttachment(BaseModel):
+    name: str = Field(max_length=200)
+    file: str = Field(pattern=r"^[0-9a-f]{20}\.[a-z0-9]{1,8}$")   # copied by POST /team/{project}/files
+    size: int = Field(ge=0)
+    image: bool = False
+
+
 class ChatMessage(BaseModel):
     user: str | None = None
     message: str
     project: str
+    # Team page (ADR 0077): all optional, the home chat sends none of them.
+    channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
+    reply_to: str | None = Field(default=None, max_length=80)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=10)
+    notify_all: bool = False
 
 
 class MarkReadRequest(BaseModel):
@@ -264,7 +276,8 @@ async def post_chat(req: ChatMessage) -> dict:
         raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
     loop = asyncio.get_running_loop()
     ok = await loop.run_in_executor(
-        None, lambda: send_message(user, req.message, project=req.project),
+        None, lambda: send_message(user, req.message, project=req.project, channel=req.channel, reply_to=req.reply_to,
+                                   attachments=[a.model_dump() for a in req.attachments], notify_all=req.notify_all),
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")

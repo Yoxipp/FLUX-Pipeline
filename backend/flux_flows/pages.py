@@ -36,7 +36,7 @@ PAGE_SCOPES = SCOPES + ("shipped",)
 # Kind -> its own props (04 §3, ADR 0066). Common props are in COMMON_PROPS.
 FORM_KINDS = ("button", "float", "int", "text", "path", "dir", "toggle", "select", "list")
 DECOR_KINDS = ("separator", "label")
-DATA_KINDS = ("feed", "table", "cards", "calendar", "members", "board")
+DATA_KINDS = ("feed", "table", "cards", "calendar", "members", "board", "chat")
 KINDS = FORM_KINDS + DECOR_KINDS + DATA_KINDS
 VALUE_KINDS = tuple(k for k in FORM_KINDS if k != "button")
 KIND_PROPS: Dict[str, Tuple[str, ...]] = {
@@ -57,6 +57,7 @@ KIND_PROPS: Dict[str, Tuple[str, ...]] = {
     "calendar": ("source", "date", "end", "title"),
     "members": ("source",),
     "board": ("source", "height"),
+    "chat": ("source", "height"),       # the project team chat, channels, calls (ADR 0077)
 }
 COMMON_PROPS = ("id", "kind", "label", "tooltip", "w")
 VALUE_PROPS = ("default", "remember")
@@ -87,7 +88,10 @@ BOARD_SCHEMA = 4
 BOARD_FIELDS = ("type", "x", "y", "w", "h", "z", "text", "color", "image", "from", "to",
                 "shape", "stroke", "font_size", "bold", "label", "dash", "arrow_start", "arrow_end", "group", "locked",
                 "points", "stroke_width", "highlight", "ref", "target", "emoji", "ends_at", "seconds")
-BUILTIN_SOURCES = ("users",)
+BUILTIN_SOURCES = ("users", "team_chat")
+# A builtin source goes with one widget kind.
+BUILTIN_KIND = {"users": "members", "team_chat": "chat"}
+BUILTIN_KIND_OF = {kind: src for src, kind in BUILTIN_KIND.items()}
 DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", "calendar": "records",
                      "board": "board"}
 
@@ -118,7 +122,7 @@ class Source(_Strict):
     data: Optional[str] = None                 # a collection of this page
     flow: Optional[str] = None                 # the last run of a flow ...
     output: Optional[str] = None               # ... and one of its interface outputs
-    builtin: Optional[Literal["users"]] = None
+    builtin: Optional[Literal["users", "team_chat"]] = None
 
     @model_validator(mode="after")
     def _one(self) -> "Source":
@@ -180,6 +184,8 @@ class Widget(_Strict):
             raise ValueError(f"{self.kind} '{self.id}' : propriete(s) {', '.join(sorted(extra))} non prise(s) en charge")
         if self.kind == "members" and self.source is None:
             self.source = Source(builtin="users")
+        if self.kind == "chat" and self.source is None:
+            self.source = Source(builtin="team_chat")
         if self.w is not None and not 0 < self.w <= 12:
             raise ValueError("w : poids entre 0 et 12")
         if self.height is not None and not 120 <= self.height <= 4000:
@@ -373,7 +379,7 @@ def widget_doc(widget: Widget) -> Dict[str, Any]:
         value = getattr(widget, key)
         if value is None or (key in ("label", "tooltip") and value == ""):
             continue
-        if key == "source" and widget.kind == "members" and value == Source(builtin="users"):
+        if key == "source" and widget.kind in ("members", "chat") and value == Source(builtin=BUILTIN_KIND_OF[widget.kind]):
             continue
         doc[key] = _clean(value)
     return doc
@@ -655,12 +661,13 @@ def _check_sources(page: Page, env: PageEnv, issues: List[PageIssue]) -> None:
                                  f"{w.kind} `{w.id}`: pick its data source.", {"kind": "pick_source", "args": {"widget": w.id}}))
             continue
         if src.builtin is not None:
-            if w.kind != "members":
-                issues.append(_issue("P_SOURCE_KIND", w.id, f"La source integree `{src.builtin}` va avec le widget members.",
-                                     f"The builtin source `{src.builtin}` goes with the members widget."))
+            want_kind = BUILTIN_KIND.get(src.builtin)
+            if w.kind != want_kind:
+                issues.append(_issue("P_SOURCE_KIND", w.id, f"La source integree `{src.builtin}` va avec le widget {want_kind}.",
+                                     f"The builtin source `{src.builtin}` goes with the {want_kind} widget."))
             continue
         if src.flow is not None:
-            if w.kind in ("board", "members"):
+            if w.kind in ("board", "members", "chat"):
                 issues.append(_issue("P_SOURCE_KIND", w.id, f"{w.kind} `{w.id}` lit une collection, pas la sortie d'un flow.",
                                      f"{w.kind} `{w.id}` reads a collection, not a flow output."))
                 continue
@@ -680,7 +687,7 @@ def _check_sources(page: Page, env: PageEnv, issues: List[PageIssue]) -> None:
             continue
         used.add(spec.id)
         want = DATA_SOURCE_KINDS.get(w.kind)
-        if w.kind == "members" or (want and spec.kind != want):
+        if w.kind in ("members", "chat") or (want and spec.kind != want):
             issues.append(_issue("P_SOURCE_KIND", w.id,
                                  f"{w.kind} `{w.id}` ne sait pas lire la collection {spec.kind} `{spec.id}`.",
                                  f"{w.kind} `{w.id}` cannot read the {spec.kind} collection `{spec.id}`."))

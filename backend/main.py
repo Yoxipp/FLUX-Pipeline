@@ -34,7 +34,7 @@ from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
 from features.production import scan_cache as production_scan_cache
-from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, notify, production, project, publish, render, review, roles, settings, shelf, system, team_calendar, usd_assembler
+from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, notify, production, project, publish, render, review, roles, settings, shelf, system, team, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -226,6 +226,7 @@ app.include_router(logs.router,           prefix="/logs",           tags=["Logs"
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
 app.include_router(team_calendar.router,  prefix="/calendar",       tags=["Calendar"])
+app.include_router(team.router,           prefix="/team",           tags=["Team"])
 app.include_router(notify.router,         prefix="/notify",         tags=["Notify"])
 app.include_router(render.router,         prefix="/render",         tags=["Render"])
 app.include_router(review.router,         prefix="/review",         tags=["Review"])

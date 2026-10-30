@@ -41,6 +41,7 @@ ACTIONS = {
     "farm_env": LEAD,            # locked farm environment screen (engine limits.config)
     "render_settings": LEAD,     # team render settings (render.json)
     "project_settings": LEAD,    # project.json, work profiles, studio environment
+    "team_channels": LEAD,       # Team page: create / archive channels, call links, pinned messages (ADR 0077)
     "reset_password": LEAD,      # remove another artist's password
     "manage_roles": LEAD,        # junior / artist / lead (supervisors: see can_set_role)
     "manage_accounts": SUPERVISOR,  # rename / delete another artist's account
