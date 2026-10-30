@@ -542,7 +542,8 @@ async def get_page_data(page_id: str, collection: str, project: Optional[str] = 
     """Records of a collection; with the etag the reader has: {unchanged: true} when nothing moved."""
     def work() -> dict[str, Any]:
         folder, spec = _page_and_spec(page_id, collection, project)
-        return {**page_data.read_records(folder, etag), "write": spec.write}
+        extra = {"schema": pages.BOARD_SCHEMA} if spec.kind == "board" else {}
+        return {**page_data.read_records(folder, etag), "write": spec.write, **extra}
 
     return await _call(work)
 

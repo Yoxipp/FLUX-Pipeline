@@ -80,7 +80,10 @@ KIND_FOR_TYPE = {"float": "float", "int": "int", "bool": "toggle", "str": "text"
 # Data collections (ADR 0066 n°3).
 FIELD_TYPES = ("str", "text", "int", "float", "bool", "date", "datetime", "user", "select", "image", "path")
 DATE_TYPES = ("date", "datetime")
-BOARD_FIELDS = ("type", "x", "y", "w", "h", "text", "color", "image", "from", "to")
+# Board schema v2 (ADR 0071): flat fields only, so the per field merge never loses a style change.
+BOARD_SCHEMA = 2
+BOARD_FIELDS = ("type", "x", "y", "w", "h", "z", "text", "color", "image", "from", "to",
+                "shape", "stroke", "font_size", "bold", "label", "dash", "arrow_start", "arrow_end", "group", "locked")
 BUILTIN_SOURCES = ("users",)
 DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", "calendar": "records",
                      "board": "board"}

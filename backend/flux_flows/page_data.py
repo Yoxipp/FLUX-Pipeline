@@ -14,6 +14,12 @@
 # team chat). etag = sizes + dates of the journals: a reader that has it gets
 # {unchanged: true} without parsing anything (cheap 5 s refresh, ADR 0066 n°4).
 #
+# put with restore: true brings back a deleted record under its rid (the board undo of a
+# delete, ADR 0071 n°4): the op carries every field. A plain put on a deleted rid stays a 404.
+# Compaction (ADR 0071 n°3): past COMPACT_BYTES, the author rewrites ITS OWN journal,
+# keeping only its operations that still decide something, with their original at / seq,
+# so the merge of every journal gives exactly the same records.
+#
 # Bytes never go through the API (ADR 0005): an image is COPIED from a local path the
 # user picked; the page shows it through a read route, like production/ref.
 
@@ -42,9 +48,14 @@ MAX_OPS = 200                       # per request
 MAX_RECORDS = 20_000
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 MAX_IMAGE = 20 * 1024 * 1024
-BOARD_TYPES = ("card", "note", "image", "link")
-BOARD_TYPED = {"x": "float", "y": "float", "w": "float", "h": "float", "text": "text", "color": "str",
-               "image": "image", "from": "str", "to": "str", "type": "str"}
+COMPACT_BYTES = 256 * 1024
+BOARD_TYPES = ("card", "note", "image", "link", "shape", "text")
+BOARD_TYPED = {"x": "float", "y": "float", "w": "float", "h": "float", "z": "float", "text": "text", "color": "str",
+               "image": "image", "from": "str", "to": "str", "type": "str", "shape": "str", "stroke": "str",
+               "font_size": "float", "bold": "bool", "label": "text", "dash": "str", "arrow_start": "bool",
+               "arrow_end": "bool", "group": "str", "locked": "bool"}
+BOARD_CHOICES = {"type": BOARD_TYPES, "shape": ("rect", "round", "ellipse", "diamond"),
+                 "dash": ("solid", "dashed", "dotted")}
 
 
 # -- where --------------------------------------------------------------------
@@ -143,8 +154,11 @@ def check_fields(spec: DataSpec, fields: Dict[str, Any]) -> Dict[str, Any]:
             if name not in BOARD_FIELDS:
                 raise FlowStoreError(f"un board n'a pas de champ `{name}` ({', '.join(BOARD_FIELDS)})", 422)
             out[name] = _check_value(name, BOARD_TYPED[name], value)
-        if out.get("type") is not None and out["type"] not in BOARD_TYPES:
-            raise FlowStoreError(f"type de carte `{out['type']}` inconnu ({', '.join(BOARD_TYPES)})", 422)
+            allowed = BOARD_CHOICES.get(name)
+            if allowed and out[name] is not None and out[name] not in allowed:
+                raise FlowStoreError(f"{name} `{out[name]}` inconnu ({', '.join(allowed)})", 422)
+            if name == "font_size" and out[name] is not None and not 6 <= out[name] <= 200:
+                raise FlowStoreError("font_size : entre 6 et 200", 422)
         return out
     known = {f.id: f for f in spec.fields}
     for name, value in fields.items():
@@ -157,23 +171,30 @@ def check_fields(spec: DataSpec, fields: Dict[str, Any]) -> Dict[str, Any]:
 
 # -- read ---------------------------------------------------------------------
 
-def _read_ops(folder: Path) -> List[Dict[str, Any]]:
-    ops: List[Dict[str, Any]] = []
-    for path in _journals(folder):
+def _op_key(op: Dict[str, Any]):
+    return (str(op.get("at", "")), op["user"], int(op.get("seq", 0) or 0))
+
+
+def _read_file(path: Path) -> List[Dict[str, Any]]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    ops = []
+    for line in text.splitlines():
         try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+            op = json.loads(line)
+        except ValueError:   # a line cut by a crash or a sync in progress: skipped
             continue
-        author = path.stem
-        for line in text.splitlines():
-            try:
-                op = json.loads(line)
-            except ValueError:   # a line cut by a crash or a sync in progress: skipped
-                continue
-            if isinstance(op, dict) and op.get("op") in ("put", "del") and RID_RE.match(str(op.get("rid", ""))):
-                op["user"] = author          # the file names the author, not the line
-                ops.append(op)
-    ops.sort(key=lambda o: (str(o.get("at", "")), o["user"], int(o.get("seq", 0) or 0)))
+        if isinstance(op, dict) and op.get("op") in ("put", "del") and RID_RE.match(str(op.get("rid", ""))):
+            op["user"] = path.stem           # the file names the author, not the line
+            ops.append(op)
+    return ops
+
+
+def _read_ops(folder: Path) -> List[Dict[str, Any]]:
+    ops = [op for path in _journals(folder) for op in _read_file(path)]
+    ops.sort(key=_op_key)
     return ops
 
 
@@ -221,6 +242,7 @@ def write_ops(folder: Path, spec: DataSpec, ops: List[Dict[str, Any]], *, user: 
         raise FlowStoreError(f"1 a {MAX_OPS} operations par envoi", 422)
     path = _author_file(folder, user)
     existing = None
+    known: Optional[set] = None
     lines, rids = [], []
     base_seq = time.time_ns()
     for k, op in enumerate(ops):
@@ -237,7 +259,14 @@ def write_ops(folder: Path, spec: DataSpec, ops: List[Dict[str, Any]], *, user: 
             rids.append(rid)
             continue
         fields = check_fields(spec, op.get("fields") or {})
-        if rid is None:
+        if op.get("restore"):
+            if rid is None:
+                raise FlowStoreError("restore sans rid", 422)
+            if known is None:
+                known = {o["rid"] for o in _read_ops(folder)}
+            if rid not in known:
+                raise FlowStoreError(f"enregistrement {rid} jamais vu : rien a restaurer", 404)
+        elif rid is None:
             rid = new_rid(user)
             missing = [f.id for f in spec.fields if f.required and fields.get(f.id) in (None, "")]
             if missing:
@@ -256,7 +285,58 @@ def write_ops(folder: Path, spec: DataSpec, ops: List[Dict[str, Any]], *, user: 
     with append_lock(path):   # only this user writes this file; the lock covers two requests of this machine
         with open(path, "a", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
+        try:
+            big = path.stat().st_size > COMPACT_BYTES
+        except OSError:
+            big = False
+        if big:
+            compact_journal(path)
     return {"rids": rids, "etag": etag(folder)}
+
+
+def compact_ops(ops: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The operations of ONE author that still decide something, unchanged (at, seq kept):
+    per record, its last del, the first put after it (creation stamp) and, per field, the
+    last put that sets it. Everything older than this author's last del is dead for anyone."""
+    ops = sorted(ops, key=_op_key)
+    by_rid: Dict[str, List[int]] = {}
+    for i, op in enumerate(ops):
+        by_rid.setdefault(op["rid"], []).append(i)
+    keep: Dict[int, Optional[Dict[str, Any]]] = {}   # index -> trimmed fields (None for a del)
+    for idx in by_rid.values():
+        last_del = max((i for i in idx if ops[i]["op"] == "del"), default=None)
+        live = [i for i in idx if last_del is None or i > last_del]
+        if last_del is not None:
+            keep[last_del] = None
+        winner: Dict[str, int] = {}
+        for i in live:
+            for key in (ops[i].get("fields") or {}):
+                winner[key] = i
+        if live:   # first put = creation stamp, last one = _by / _at
+            keep.setdefault(live[0], {})
+            keep.setdefault(live[-1], {})
+        for key, i in winner.items():
+            keep.setdefault(i, {})
+            keep[i][key] = ops[i]["fields"][key]
+    out = []
+    for i in sorted(keep):
+        op = {k: v for k, v in ops[i].items() if k not in ("user", "fields")}
+        if ops[i]["op"] == "put":
+            op["fields"] = keep[i]
+        out.append(op)
+    return out
+
+
+def compact_journal(path: Path) -> int:
+    """Rewrite the author's own journal with compact_ops (atomic replace): lines dropped.
+    Called with the append lock of *path* held."""
+    ops = _read_file(path)
+    kept = compact_ops(ops)
+    text = "".join(json.dumps(op, ensure_ascii=False) + "\n" for op in kept)
+    tmp = path.with_name(f".flux_tmp_{secrets.token_hex(4)}{SUFFIX}.part")
+    tmp.write_text(text, encoding="utf-8", newline="\n")
+    tmp.replace(path)
+    return len(ops) - len(kept)
 
 
 # -- media --------------------------------------------------------------------

@@ -125,6 +125,89 @@ class Journal(unittest.TestCase):
         self.assertEqual(no.exception.status, 409)
 
 
+class BoardV2(unittest.TestCase):
+    """P3 (2026-10-30): board schema v2, restore for undo, journal compaction (ADR 0071)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_board_v2_"))
+        self.folder = self.tmp / "wall"
+        self.board = _page().data[1]
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _put(self, fields, rid=None, user="ADAM", **extra):
+        op = {"op": "put", "fields": fields, **extra}
+        if rid:
+            op["rid"] = rid
+        return page_data.write_ops(self.folder, self.board, [op], user=user)["rids"][0]
+
+    def test_flat_style_fields(self) -> None:
+        rid = self._put({"type": "shape", "shape": "diamond", "x": 0, "y": 0, "z": 3, "stroke": "blue", "font_size": 18,
+                         "bold": True, "group": "g1", "locked": True})
+        link = self._put({"type": "link", "from": rid, "to": rid, "label": "next", "dash": "dashed", "arrow_end": True})
+        recs = {r["rid"]: r for r in page_data.read_records(self.folder)["records"]}
+        self.assertEqual((recs[rid]["shape"], recs[rid]["font_size"], recs[rid]["locked"]), ("diamond", 18.0, True))
+        self.assertEqual((recs[link]["dash"], recs[link]["arrow_end"]), ("dashed", True))
+        for bad in ({"shape": "star"}, {"dash": "wavy"}, {"font_size": 2}, {"locked": "yes"}, {"style": {}}):
+            with self.assertRaises(FlowStoreError):
+                self._put(bad, rid)
+
+    def test_two_authors_style_fields_both_kept(self) -> None:
+        rid = self._put({"type": "shape", "x": 0, "y": 0})
+        time.sleep(0.002)
+        self._put({"stroke": "blue"}, rid, user="BOB")
+        time.sleep(0.002)
+        self._put({"color": "pink"}, rid, user="ADAM")
+        rec = page_data.read_records(self.folder)["records"][0]
+        self.assertEqual((rec["stroke"], rec["color"]), ("blue", "pink"))
+
+    def test_restore_a_deleted_record(self) -> None:
+        rid = self._put({"type": "note", "x": 1, "y": 2, "text": "hi"})
+        page_data.write_ops(self.folder, self.board, [{"op": "del", "rid": rid}], user="BOB")
+        with self.assertRaises(FlowStoreError):
+            self._put({"text": "lost"}, rid)
+        self._put({"type": "note", "x": 1, "y": 2, "text": "hi"}, rid, restore=True)
+        rec = page_data.read_records(self.folder)["records"][0]
+        self.assertEqual((rec["rid"], rec["text"]), (rid, "hi"))
+        with self.assertRaises(FlowStoreError) as never:
+            self._put({"text": "x"}, "ADAM_never_seen", restore=True)
+        self.assertEqual(never.exception.status, 404)
+
+    def test_compaction_gives_the_same_records(self) -> None:
+        import random
+
+        rnd = random.Random(7)
+        rids = [self._put({"type": "note", "x": 0, "y": 0, "text": str(i)}) for i in range(6)]
+        for step in range(300):
+            user = rnd.choice(["ADAM", "BOB"])
+            rid = rnd.choice(rids)
+            live = {r["rid"] for r in page_data.read_records(self.folder)["records"]}
+            if rid not in live:
+                self._put({"type": "note", "x": step, "y": 0}, rid, user=user, restore=True)
+            elif rnd.random() < 0.08:
+                page_data.write_ops(self.folder, self.board, [{"op": "del", "rid": rid}], user=user)
+            else:
+                self._put(rnd.choice([{"x": step}, {"y": step}, {"text": f"t{step}"}, {"color": rnd.choice("ab")}]), rid, user=user)
+        before = page_data.read_records(self.folder)["records"]
+        path = self.folder / "ADAM.jsonl"
+        lines = len(path.read_text(encoding="utf-8").splitlines())
+        dropped = page_data.compact_journal(path)
+        self.assertGreater(dropped, 0)
+        self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), lines - dropped)
+        self.assertEqual(page_data.read_records(self.folder)["records"], before)
+
+    def test_compaction_runs_past_the_size(self) -> None:
+        rid = self._put({"type": "note", "x": 0, "y": 0})
+        with mock.patch.object(page_data, "COMPACT_BYTES", 2000):
+            for i in range(60):
+                self._put({"x": i}, rid)
+        size = (self.folder / "ADAM.jsonl").stat().st_size
+        self.assertLess(size, 2000)
+        self.assertEqual(page_data.read_records(self.folder)["records"][0]["x"], 59.0)
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir() if p.suffix == ".jsonl"), ["ADAM.jsonl"])
+
+
 class DataRouter(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="flux_page_data_router_"))
