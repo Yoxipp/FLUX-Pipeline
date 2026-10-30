@@ -261,9 +261,15 @@ export const api = {
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
-  // `project` is required to rename ANOTHER artist (supervisor) and to delete one.
+  // `project` is required to rename ANOTHER artist (lead) and to delete one (supervisor).
   renameUser: (old: string, next: string, project?: string) =>
     apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next, project }),
+
+  // Rename from first / last name (ADR 0079): identifier from the initials, empty last name = first name alone.
+  previewRename: (old: string, first_name: string, last_name: string) =>
+    apiCall<{ id: string }>('POST', '/settings/users/rename-preview', { old, first_name, last_name }),
+  renameUserByName: (old: string, first_name: string, last_name: string, project?: string) =>
+    apiCall<{ success: boolean; id: string; message: string }>('PUT', '/settings/users/rename-by-name', { old, first_name, last_name, project }),
 
   deleteUser: (name: string, project?: string) =>
     apiCall<{ success: boolean; message: string }>(

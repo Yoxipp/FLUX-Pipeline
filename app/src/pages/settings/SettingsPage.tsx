@@ -166,12 +166,48 @@ function NewArtist() {
   )
 }
 
+// First / last name of an artist being renamed, with the identifier it would get (server
+// side: initials of the last name, ADR 0079; no last name = the first name alone).
+function RenameFields({ user, first, last, onChange, onSubmit, onCancel }: {
+  user: string; first: string; last: string
+  onChange: (first: string, last: string) => void; onSubmit: () => void; onCancel: () => void
+}) {
+  const [preview, setPreview] = useState<string | null>(null)
+  useEffect(() => {
+    if (!first.trim()) { setPreview(null); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.previewRename(user, first.trim(), last.trim())
+        .then(r => { if (alive) setPreview(r.id) })
+        .catch(() => { if (alive) setPreview(null) })
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [user, first, last])
+  const input: React.CSSProperties = {
+    flex: 1, minWidth: 0, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)',
+    color: 'var(--ink)', border: '1px solid var(--rule-3)', borderRadius: 5,
+  }
+  const key = (e: React.KeyboardEvent) => { if (e.key === 'Enter') onSubmit(); if (e.key === 'Escape') onCancel() }
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input autoFocus value={first} placeholder="Prénom" onChange={e => onChange(e.target.value, last)} onKeyDown={key} style={input} />
+        <input value={last} placeholder="Nom (facultatif)" onChange={e => onChange(first, e.target.value)} onKeyDown={key} style={input} />
+      </div>
+      <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+        {preview ? `${user} → ${preview}${preview === user ? ' (identifiant inchangé)' : ''}` : 'Identifiant : (prénom requis)'}
+      </span>
+    </div>
+  )
+}
+
 // Rename / delete OTHER artists (old accounts). One's own user is in the User tab.
+// Rename = first / last name for a lead or supervisor; delete = supervisor.
 function OtherUsers({ currentUser }: { currentUser: string }) {
   const { project } = useProject()
   const [profiles, setProfiles] = useState<UserProfile[]>([])
   const [renaming, setRenaming] = useState<string | null>(null)
-  const [value, setValue] = useState('')
+  const [names, setNames] = useState({ first: '', last: '' })
   const [confirm, setConfirm] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState<string | null>(null)
   const refresh = () => api.listUserProfiles()
@@ -189,15 +225,16 @@ function OtherUsers({ currentUser }: { currentUser: string }) {
       {profiles.map(p => { const u = p.id; const full = `${p.first_name} ${p.last_name}`.trim(); return (
         <div key={u}style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderBottom: '1px solid var(--rule)' }}>
           {renaming === u
-            ? <input autoFocus value={value} onChange={e => setValue(e.target.value.toUpperCase())}
-                onKeyDown={e => { if (e.key === 'Enter') void run(() => api.renameUser(u, value.trim(), proj)); if (e.key === 'Escape') setRenaming(null) }}
-                style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule-3)', borderRadius: 5 }} />
+            ? <RenameFields user={u} first={names.first} last={names.last} onChange={(first, last) => setNames({ first, last })}
+                onSubmit={() => void run(() => api.renameUserByName(u, names.first.trim(), names.last.trim(), proj))}
+                onCancel={() => setRenaming(null)} />
             : <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {full ? `${full} (${u})` : u}
                 {p.has_password && <Lock size={10} strokeWidth={1.75} color="var(--ink-4)" />}
               </span>}
           {renaming === u ? <>
-            <Btn sm ghost title="Valider" onClick={() => void run(() => api.renameUser(u, value.trim(), proj))}><Check size={11} /></Btn>
+            <Btn sm ghost title="Valider" disabled={!names.first.trim()}
+              onClick={() => void run(() => api.renameUserByName(u, names.first.trim(), names.last.trim(), proj))}><Check size={11} /></Btn>
             <Btn sm ghost title="Annuler" onClick={() => setRenaming(null)}><X size={11} /></Btn>
           </> : confirm === u ? <>
             <span style={{ fontSize: 11, color: 'var(--err)' }}>Supprimer {u} et ses données ?</span>
@@ -211,7 +248,11 @@ function OtherUsers({ currentUser }: { currentUser: string }) {
             <Btn sm ghost title="Annuler" onClick={() => setConfirmReset(null)}><X size={11} /></Btn>
           </> : <>
             {p.has_password && <Btn sm ghost title="Réinitialiser le mot de passe" onClick={() => { setConfirmReset(u); setRenaming(null); setConfirm(null) }}><KeyRound size={11} /></Btn>}
-            <Btn sm ghost title="Renommer" onClick={() => { setRenaming(u); setValue(u); setConfirm(null); setConfirmReset(null) }}><Pencil size={11} /></Btn>
+            <Btn sm ghost title="Renommer (prénom et nom)" onClick={() => {
+              setRenaming(u); setConfirm(null); setConfirmReset(null)
+              // Artists without a profile: their identifier is their first name.
+              setNames({ first: p.first_name || u.charAt(0) + u.slice(1).toLowerCase(), last: p.last_name })
+            }}><Pencil size={11} /></Btn>
             <Btn sm ghost title="Supprimer" onClick={() => { setConfirm(u); setRenaming(null); setConfirmReset(null) }}><Trash2 size={11} /></Btn>
           </>}
         </div>

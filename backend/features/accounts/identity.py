@@ -58,6 +58,32 @@ def make_user_id(first_name: str, last_name: str, taken: set[str] | list[str]) -
     return f"{base}_{index}"
 
 
+def id_for_rename(first_name: str, last_name: str, current: str, taken: set[str] | list[str]) -> str:
+    """Identifier artist *current* gets when renamed to *first_name* *last_name*.
+
+    *current* and the old names that point to it do not block (the same person keeps
+    ADAM_FR, or takes an old name of their own back). No last name = the first name
+    alone (artists who never gave one, 2026-10-30), _1, _2... when taken.
+    """
+    from features.accounts import aliases
+
+    cur = str(current or "").strip().upper()
+    table = aliases.load_aliases()
+    used = {str(t).strip().upper() for t in taken}
+    used -= {cur} | {old for old, new in table.items() if new == cur}
+    if (last_name or "").strip():
+        return make_user_id(first_name, last_name, used)
+    first = ascii_upper(first_name)
+    if not first:
+        raise ValueError("Prénom requis (lettres ou chiffres).")
+    if first not in used:
+        return first
+    index = 1
+    while f"{first}_{index}" in used:
+        index += 1
+    return f"{first}_{index}"
+
+
 def clean_display_name(text: object) -> str:
     """Trimmed display name (accents kept), bounded length."""
     return " ".join(str(text or "").split())[:MAX_NAME_LENGTH]

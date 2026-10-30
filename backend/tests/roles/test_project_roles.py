@@ -72,9 +72,10 @@ class MatrixTests(_Workspace):
     def test_matrix(self):
         expect = {
             "JUN": {"edit_entity": False, "hard_delete": False, "farm_env": False},
-            "EVA": {"edit_entity": True, "hard_delete": False, "farm_env": False, "render_settings": False},
+            "EVA": {"edit_entity": True, "hard_delete": False, "farm_env": False, "render_settings": False,
+                    "rename_accounts": False},
             "LEA": {"edit_entity": True, "hard_delete": True, "farm_env": True, "render_settings": True,
-                    "project_settings": True, "reset_password": True, "manage_accounts": False,
+                    "project_settings": True, "reset_password": True, "rename_accounts": True, "manage_accounts": False,
                     "delete_project": False},
             "ADAM": {"manage_accounts": True, "delete_project": True},
         }

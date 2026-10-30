@@ -215,6 +215,41 @@ class AccountRouteTests(_TempWorkspace):
             self.assertEqual(res.status_code, 200, res.text)
         self.assertFalse(passwords.has_password("BOB"))
 
+    def test_rename_by_first_and_last_name(self):
+        # ADR 0079: a lead renames from first / last name, the id comes from the initials.
+        allow = mock.patch("features.roles.project_roles.require", return_value=None)
+        with allow:
+            res = self.client.post("/settings/users/rename-preview",
+                                   json={"old": "BOB", "first_name": "Bob", "last_name": "Le Gall"})
+            self.assertEqual(res.json()["id"], "BOB_LG")
+            res = self.client.put("/settings/users/rename-by-name",
+                                  json={"old": "BOB", "first_name": "Bob", "last_name": "Le Gall", "project": "P"})
+            self.assertEqual(res.status_code, 200, res.text)
+            self.assertEqual(res.json()["id"], "BOB_LG")
+            self.assertTrue(uu.user_exists("BOB_LG"))
+            self.assertFalse(uu.user_exists("BOB"))
+            self.assertEqual(aliases.resolve_user("BOB"), "BOB_LG")
+            profile = identity.read_profile("BOB_LG")
+            self.assertEqual((profile["first_name"], profile["last_name"]), ("Bob", "Le Gall"))
+            # Same person, same name: keeps the id (not BOB_L because BOB_LG is "taken").
+            res = self.client.put("/settings/users/rename-by-name",
+                                  json={"old": "BOB_LG", "first_name": "Bob", "last_name": "le gall", "project": "P"})
+            self.assertEqual(res.json()["id"], "BOB_LG")
+            self.assertEqual(identity.read_profile("BOB_LG")["last_name"], "le gall")
+            # No last name = the first name alone (his own old name BOB is his to take back).
+            res = self.client.put("/settings/users/rename-by-name",
+                                  json={"old": "BOB_LG", "first_name": "Bob", "last_name": "", "project": "P"})
+            self.assertEqual(res.json()["id"], "BOB")
+            # Someone else's name is never reused.
+            res = self.client.post("/settings/users/rename-preview",
+                                   json={"old": "BOB", "first_name": "Alice", "last_name": ""})
+            self.assertEqual(res.json()["id"], "ALICE_1")
+        refuse = mock.patch("features.roles.project_roles.require", side_effect=PermissionError("Réservé aux leads."))
+        with refuse:
+            res = self.client.put("/settings/users/rename-by-name",
+                                  json={"old": "BOB", "first_name": "Robert", "last_name": "X", "project": "P"})
+            self.assertEqual(res.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

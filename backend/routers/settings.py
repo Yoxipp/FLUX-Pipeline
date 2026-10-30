@@ -437,15 +437,68 @@ class UserRenameRequest(BaseModel):
 async def rename_user_endpoint(req: UserRenameRequest) -> dict:
     """Rename an artist (folder + alias so the history follows; active user follows).
 
-    Your own account is always yours; another artist's needs a supervisor of the project.
+    Your own account is always yours; another artist's needs a lead of the project.
     """
     loop = asyncio.get_running_loop()
     if req.old.strip().upper() != (config.get_current_user() or ""):
-        await loop.run_in_executor(None, lambda: _require_role(req.project, "manage_accounts"))
+        await loop.run_in_executor(None, lambda: _require_role(req.project, "rename_accounts"))
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.rename_user(req.old, req.new))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     return {"success": True, "message": msg}
+
+
+class UserRenameByNameRequest(BaseModel):
+    old: str
+    first_name: str
+    last_name: str = ""          # empty = the first name alone
+    project: str | None = None   # needed to rename ANOTHER artist (lead or supervisor)
+
+
+@router.post("/users/rename-preview")
+async def preview_rename(req: UserRenameByNameRequest) -> dict:
+    """Identifier artist *old* would get with this first / last name (ADR 0079)."""
+    from features.accounts import identity
+    loop = asyncio.get_running_loop()
+    try:
+        user_id = await loop.run_in_executor(
+            None, lambda: identity.id_for_rename(req.first_name, req.last_name, req.old, _taken_names()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"id": user_id}
+
+
+@router.put("/users/rename-by-name")
+async def rename_user_by_name(req: UserRenameByNameRequest) -> dict:
+    """Rename an artist from first + last name: identifier from the initials (ADR 0079),
+    folder + alias as /users/rename, display name stored. Same identifier = only the
+    display name changes. Another artist's account needs a lead of the project."""
+    from features.accounts import identity
+    loop = asyncio.get_running_loop()
+    old = req.old.strip().upper()
+    if old != (config.get_current_user() or ""):
+        await loop.run_in_executor(None, lambda: _require_role(req.project, "rename_accounts"))
+
+    def _rename() -> tuple[str, str]:
+        if not user_utils.user_exists(old):
+            raise ValueError(f"Artiste introuvable : {old}")
+        new_id = identity.id_for_rename(req.first_name, req.last_name, old, _taken_names())
+        if new_id != old:
+            ok, msg = user_utils.rename_user(old, new_id)
+            if not ok:
+                raise ValueError(msg)
+        else:
+            msg = f"Nom de {old} mis à jour"
+        identity.write_profile(new_id, req.first_name, req.last_name)
+        return new_id, msg
+
+    try:
+        new_id, msg = await loop.run_in_executor(None, _rename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"success": True, "id": new_id, "message": msg}
 
 
 @router.delete("/users/{name}")

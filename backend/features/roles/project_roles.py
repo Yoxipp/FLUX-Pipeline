@@ -48,7 +48,8 @@ ACTIONS = {
     "team_channels": LEAD,       # Team page: create / archive channels, call links, pinned messages (ADR 0077)
     "reset_password": LEAD,      # remove another artist's password
     "manage_roles": LEAD,        # junior / artist / lead (supervisors: see can_set_role)
-    "manage_accounts": SUPERVISOR,  # rename / delete another artist's account
+    "rename_accounts": LEAD,     # rename another artist from first / last name (2026-10-30, ADR 0079)
+    "manage_accounts": SUPERVISOR,  # delete another artist's account
     "delete_project": SUPERVISOR,
 }
 _LEAD_ASSIGNABLE = (JUNIOR, ARTIST, LEAD)
