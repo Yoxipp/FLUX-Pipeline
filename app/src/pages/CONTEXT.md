@@ -249,6 +249,14 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   raccourcis ecoutes sur tout le widget (Suppr marche apres un clic sur une couleur, sauf dans un champ texte), ordre en
   4 actions (un cran / tout devant / derriere, icone carre + 1 ou 2 fleches), points du fond masquables (par poste),
   double clic sur un objet = editer (un cadre : son nom), meme sous la capture du pointeur (`lastDown`).
+  v5 (ADR 0083) : deux verrous (`model.ts` `moveLocked` / `textLocked` ; Ctrl+L deplacement, Ctrl+Maj+L texte ;
+  `mayChange` : geometrie -> deplacement, texte -> texte, style -> les deux) ; modeles inseres verrouilles en deplacement.
+  Shotboard (`board/Shotboard.tsx`) : objet `shotboard` dont la grille (ligne = sequence, colonne = shot) est lue dans
+  Production (`useBoardProduction`, `useShotPreviews` -> `POST /production/<p>/shot-previews` toutes les 60 s, media
+  choisi par `pickShotMedia` comme la Timeline) ; cases = enregistrements `shot` (`frame_at`, `frame_at2`, `text`) ;
+  image extraite par `board/frameGrab.ts` (video hors ecran, `ImageBitmap` 480 px, LRU 150, 2 a la fois) ; slider en
+  direct, ecrit au lacher ; bouton Retake -> `api.addShotRetake` (`POST /production/<p>/retake`) ; retakes de Production
+  listees ; taille de l'objet recalee sur la grille ; export (`drawShotboard`).
 * `ChatWidget.tsx` (ADR 0077) : widget officiel `chat` de la page Team = le chat d'equipe du projet (le meme que l'accueil,
   `api/team.ts`) par canaux (general + canaux d'un lead, archives), fils, reactions (une par auteur), messages epingles
   (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus par
