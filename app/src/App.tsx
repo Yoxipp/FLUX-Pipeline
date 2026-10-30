@@ -16,6 +16,7 @@ import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
 import { usePresenceHeartbeat } from './hooks/usePresenceHeartbeat'
+import { PresenceProvider } from './hooks/usePresence'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
@@ -291,7 +292,9 @@ export function App() {
 
   return (
     <FeedsProvider>
-      <AppShell settings={settings} />
+      <PresenceProvider>
+        <AppShell settings={settings} />
+      </PresenceProvider>
     </FeedsProvider>
   )
 }

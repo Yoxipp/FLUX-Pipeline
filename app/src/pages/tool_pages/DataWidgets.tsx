@@ -17,7 +17,8 @@ import { useTr } from '../flow_editor/useTr'
 import { ago } from './links'
 import { BoardWidget } from './BoardWidget'
 import { ChatWidget } from './ChatWidget'
-import { setMyPresence, teamApi, type Presence, type PresenceStatus } from '../../api/team'
+import { setMyPresence, type PresenceStatus } from '../../api/team'
+import { PresenceDot, usePresence, usePresenceLabels } from '../../hooks/usePresence'
 import './tool_pages.css'
 
 export interface DataWidgetProps { page: PageDoc; widget: PageWidget; project?: string; preview?: boolean }
@@ -134,7 +135,10 @@ function Feed({ page, widget: w, project, preview }: DataWidgetProps) {
         <State data={data} preview={preview} empty={tr('Aucun message pour le moment.', 'No message yet.')} />
         {shown.map(r => (
           <div key={r.rid} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <Avatar ch={(r._created_by || '?').slice(0, 1)} size={22} />
+            <span style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+              <Avatar ch={(r._created_by || '?').slice(0, 1)} size={22} />
+              {r._created_by && <PresenceDot user={r._created_by} overlay />}
+            </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{r._created_by}</span>
@@ -369,31 +373,18 @@ function Calendar({ page, widget: w, project, preview }: DataWidgetProps) {
 
 // -- members ------------------------------------------------------------------------------------------
 
-// Presence (ADR 0077): each FLUX rewrites its own file every minute; flat status dots, no glow.
-const PRESENCE_TONE: Record<string, string> = {
-  available: 'oklch(65% 0.14 150)', away: 'oklch(75% 0.13 75)', meeting: 'oklch(60% 0.13 290)',
-  dnd: 'oklch(60% 0.17 25)', offline: 'oklch(70% 0.01 250)',
-}
-const PRESENCE_REFRESH_MS = 30_000
+// Presence (ADR 0077): each FLUX rewrites its own file every minute, read once for the app
+// (PresenceProvider). Green = online, grey = offline, the chosen status is the tooltip.
 
 function Members({ widget: w }: DataWidgetProps) {
   const { tr } = useTr()
   const [users, setUsers] = useState<string[] | null>(null)
   const [me, setMe] = useState<string | null>(null)
-  const [people, setPeople] = useState<Record<string, Presence>>({})
-  const labels: Record<string, string> = {
-    available: tr('Disponible', 'Available'), away: tr('Absent', 'Away'), meeting: tr('En reunion', 'In a meeting'),
-    dnd: tr('Ne pas deranger', 'Do not disturb'), offline: tr('Hors ligne', 'Offline'),
-  }
+  const { byUser: people } = usePresence()
+  const labels = usePresenceLabels()
   useEffect(() => {
     api.listUsers().then(r => setUsers(r.users)).catch(() => setUsers([]))
     flowsApi.getRights().then(r => setMe(r.user)).catch(() => setMe(null))
-    const load = () => teamApi.presence().then(r => setPeople(Object.fromEntries(r.people.map(p => [p.user.toUpperCase(), p])))).catch(() => undefined)
-    load()
-    const t = setInterval(load, PRESENCE_REFRESH_MS)
-    const again = () => { setTimeout(load, 300) }
-    window.addEventListener('flux:presence', again)
-    return () => { clearInterval(t); window.removeEventListener('flux:presence', again) }
   }, [])
   const online = users?.filter(u => people[u.toUpperCase()]?.online).length ?? 0
   const sorted = users ? [...users].sort((a, b) => Number(!!people[b.toUpperCase()]?.online) - Number(!!people[a.toUpperCase()]?.online)) : null
@@ -409,8 +400,7 @@ function Members({ widget: w }: DataWidgetProps) {
             <div key={u} style={{ display: 'flex', alignItems: 'center', gap: 8 }} title={`${labels[status]}${p?.text ? ` : ${p.text}` : ''}`}>
               <span style={{ position: 'relative', display: 'inline-flex' }}>
                 <Avatar ch={u.slice(0, 1)} size={20} />
-                <span style={{ position: 'absolute', right: -2, bottom: -2, width: 8, height: 8, borderRadius: 4, background: PRESENCE_TONE[status],
-                               border: '1.5px solid var(--paper)' }} />
+                <PresenceDot user={u} overlay />
               </span>
               <span style={{ fontSize: 12, color: status === 'offline' ? 'var(--ink-4)' : 'var(--ink-2)' }}>{u}</span>
               {u === me

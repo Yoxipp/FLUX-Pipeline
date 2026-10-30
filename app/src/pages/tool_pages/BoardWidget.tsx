@@ -29,6 +29,7 @@ import {
 import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { usePageData } from '../../hooks/usePages'
+import { PresenceDot } from '../../hooks/usePresence'
 import { useSettings } from '../../hooks/useSettings'
 import type { BoardTemplate, PageDataOp } from '../flow_editor/types'
 import { expandFluxPath } from '../Production/util'
@@ -1064,7 +1065,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
                 {e?.c.map(c => (
                   <div key={c.rid} style={{ padding: '6px 0', borderBottom: '1px solid var(--rule)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
-                      <b>{c._created_by}</b><span style={{ color: 'var(--ink-4)' }}>{when(c._created_at)}</span>
+                      <PresenceDot user={c._created_by} /><b>{c._created_by}</b><span style={{ color: 'var(--ink-4)' }}>{when(c._created_at)}</span>
                       <span style={{ flex: 1 }} />
                       {canEdit && c._created_by === data.me && <button type="button" title={tr('Supprimer mon commentaire', 'Delete my comment')} onClick={() => delRecords([c])}
                                   style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--ink-4)', padding: 0 }}><X size={11} /></button>}

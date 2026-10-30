@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { Archive, Hash, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { setMyPresence, teamApi, type TeamAttachment, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
+import { PresenceDot } from '../../hooks/usePresence'
+import { PeoplePanel } from '../../components/shared/PeoplePanel'
 import type { PageDataOp } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 import type { DataWidgetProps } from './DataWidgets'
@@ -284,6 +286,9 @@ export function ChatWidget({ widget: w, project, preview }: DataWidgetProps) {
                     onSend={(message, attachments) => send({ message, attachments, reply_to: root.id })} />
         </div>
       )}
+
+      {/* everyone of the pipeline, online or not (collapsible) */}
+      <PeoplePanel storageKey="flux.people.team" />
     </div>
   )
 }
@@ -300,7 +305,7 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
          style={{ position: 'relative', padding: '5px 8px', borderRadius: 6, background: hover ? 'var(--paper-2)' : undefined }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 12 }}>
-        <b>{m.user}</b><span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
+        <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b><span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
         {pinned && <Pin size={10} style={{ color: 'var(--accent)' }} />}
       </div>
       <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><Text text={m.message} users={users} /></div>
@@ -382,7 +387,8 @@ function Composer({ users, project, placeholder, onSend }: {
       {suggest.length > 0 && (
         <div style={{ position: 'absolute', bottom: '100%', left: 8, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.15)', zIndex: 3 }}>
           {suggest.map(u => <div key={u} onMouseDown={e => { e.preventDefault(); setText(text.slice(0, at!.index) + `@${u} `) }}
-                                 style={{ padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>@{u}</div>)}
+                                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
+                                 <PresenceDot user={u} />@{u}</div>)}
         </div>
       )}
       {files.length > 0 && (
