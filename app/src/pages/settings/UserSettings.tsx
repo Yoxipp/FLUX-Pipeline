@@ -17,6 +17,7 @@ import { useWorkProfile } from '../../WorkProfileContext'
 import { useProject } from '../../ProjectContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
 import { BridgesInstall } from './BridgesInstall'
+import { NotifyUser } from './NotifySettings'
 import { FLOW_RIGHTS_EVENT } from '../../api/flows'
 
 // Console log levels the user can recolor + a theme-neutral swatch default shown
@@ -39,6 +40,7 @@ const inputStyle = {
 
 export function UserSettings({ username }: { username: string }) {
   const { t, lang, setLang } = useI18n()
+  const { project } = useProject()
   const [version, setVersion] = useState('')
   const [accentKey, setAccentKey] = useState('orange')
   const [logColors, setLogColors] = useState<Record<string, string>>({})
@@ -98,6 +100,8 @@ export function UserSettings({ username }: { username: string }) {
         {workProfile.modified.length > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--warn)' }}>modifié</span>}
         <ChevronRight size={12} strokeWidth={1.75} color="var(--ink-4)" />
       </div>
+
+      <NotifyUser project={project} />
 
       <SecTitle>Flows</SecTitle>
       <FlowBoxes />
