@@ -5,6 +5,7 @@
 import type { PageDataOp, PageRecord } from '../../flow_editor/types'
 
 export type ItemType = 'note' | 'card' | 'image' | 'link' | 'shape' | 'text' | 'frame' | 'ink' | 'flux'
+  | 'comment' | 'reaction' | 'timer'
 export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond'
 
 export type Item = PageRecord & {
@@ -14,6 +15,7 @@ export type Item = PageRecord & {
   label?: string; dash?: 'solid' | 'dashed' | 'dotted'; arrow_start?: boolean; arrow_end?: boolean
   group?: string; locked?: boolean
   points?: string; stroke_width?: number; highlight?: boolean; ref?: string
+  target?: string; emoji?: Emoji; ends_at?: string; seconds?: number
 }
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -31,10 +33,14 @@ export const STROKES: Record<string, string> = {
 export const FONT_SIZES = [10, 12, 13, 14, 16, 18, 24, 32, 48, 64]
 export const SIZE: Record<ItemType, [number, number]> = {
   note: [180, 120], card: [220, 90], image: [240, 180], shape: [160, 100], text: [200, 40], link: [0, 0],
-  frame: [480, 360], ink: [1, 1], flux: [240, 104],
+  frame: [480, 360], ink: [1, 1], flux: [240, 104], comment: [0, 0], reaction: [0, 0], timer: [0, 0],
 }
-export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12, frame: 13, ink: 13, flux: 12 }
+export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12, frame: 13, ink: 13, flux: 12, comment: 12, reaction: 12, timer: 12 }
 export const GRID = 8
+// Records that are not drawn on the board: links (drawn between objects), comments, reactions, the timer (ADR 0075).
+export const META_TYPES = new Set(['link', 'comment', 'reaction', 'timer'])
+export type Emoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
+export const EMOJI: Record<Emoji, string> = { like: '\u{1F44D}', love: '\u2764\uFE0F', laugh: '\u{1F602}', question: '\u2753', check: '\u2705' }
 export const CLIP_TAG = 'flux_board'
 
 const num = (v: unknown, d: number) => typeof v === 'number' && Number.isFinite(v) ? v : d

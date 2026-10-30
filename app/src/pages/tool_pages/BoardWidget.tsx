@@ -16,11 +16,13 @@
 // removes whole strokes), frames (moving one moves what is inside, presentation in reading
 // order), images pasted (Ctrl+V of a screenshot) or dropped from the explorer (copied by the
 // backend from a file path), FLUX cards (FluxCard.tsx) and shipped board templates.
+// v4 (ADR 0075): comments and reactions on an object (one record per author, badges under
+// the object, panel with who / when), a shared timer, PNG / PDF export (exportBoard.ts).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bold, BringToFront, ChevronLeft, ChevronRight, Circle, Clapperboard, Copy, Diamond, Eraser, Frame, Group, Hand, Highlighter, ImagePlus,
+  Bold, BringToFront, ChevronLeft, Download, MessageSquare, Timer, ChevronRight, Circle, Clapperboard, Copy, Diamond, Eraser, Frame, Group, Hand, Highlighter, ImagePlus,
   LayoutTemplate, Link2, Lock, LockOpen, Magnet, Map as MapIcon, Maximize, Minus, MousePointer2, MoveLeft, MoveRight, PenLine, Play, Plus,
   Redo2, Search, SendToBack, Square, Squircle, StickyNote, Trash2, Type, Undo2, Ungroup, RectangleHorizontal, X,
 } from 'lucide-react'
@@ -36,9 +38,10 @@ import { BoardItem, BoardLink, type Corner, type ItemHandlers } from './board/Bo
 import { BoardMinimap } from './board/BoardMinimap'
 import { FluxBoardContext, FluxPicker, resolveRef, useBoardProduction, type FluxBoardData } from './board/FluxCard'
 import {
-  CLIP_TAG, FILLS, FONT_SIZES, GRID, SIZE, STROKES, bounds, dims, fieldsOf, fontOf, inkFields, inkHit, inside, intersects, inversePut,
-  newGroupId, parseClip, readingOrder, restoreOp, type Box, type ClipData, type Item, type Pt, type Shape,
+  CLIP_TAG, EMOJI, FILLS, FONT_SIZES, GRID, META_TYPES, SIZE, STROKES, bounds, dims, fieldsOf, fontOf, inkFields, inkHit, inside,
+  intersects, inversePut, newGroupId, parseClip, readingOrder, restoreOp, type Box, type ClipData, type Emoji, type Item, type Pt, type Shape,
 } from './board/model'
+import { pdfBytes, pngBytes, regionOf, renderBoard, saveFile } from './board/exportBoard'
 import { useBoardHistory } from './board/useBoardHistory'
 
 const ZOOM_MIN = 0.1
@@ -66,6 +69,7 @@ interface LayerProps {
   visible: Item[]; links: Item[]; byId: Map<string, Item>; boxOf: (it: Item) => Box
   selSet: Set<string>; matchSet: Set<string>; singleCard: string | null; editing: string | null
   linkFrom: string | null | 'armed'; canEdit: boolean; media: (it: Item) => string | undefined; faded: Set<string>
+  badgeOf: (rid: string) => string | undefined
   placeholder: string; handlers: ItemHandlers; onLinkDown: (e: RPointerEvent, rid: string) => void
 }
 const BoardLayer = memo(function BoardLayer(p: LayerProps) {
@@ -82,7 +86,7 @@ const BoardLayer = memo(function BoardLayer(p: LayerProps) {
       return <BoardItem key={it.rid} it={it} x={b.x} y={b.y} w={b.w} h={b.h} selected={p.selSet.has(it.rid)}
                         handles={p.singleCard === it.rid} editing={p.editing === it.rid} linkSource={p.linkFrom === it.rid}
                         match={p.matchSet.has(it.rid)} canEdit={p.canEdit} mediaUrl={it.type === 'image' ? p.media(it) : undefined}
-                        placeholder={p.placeholder} on={p.handlers} faded={p.faded.has(it.rid)} />
+                        placeholder={p.placeholder} on={p.handlers} faded={p.faded.has(it.rid)} badges={p.badgeOf(it.rid)} />
     })}
   </>
 })
@@ -133,7 +137,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const byId = useMemo(() => new Map(items.map(it => [it.rid, it])), [items])
   // Back to front: z, then creation order (a stable sort keeps the journal order).
   // Frames always behind the rest.
-  const cards = useMemo(() => items.filter(it => it.type !== 'link')
+  const cards = useMemo(() => items.filter(it => !META_TYPES.has(it.type ?? ''))
     .sort((a, b) => (a.type === 'frame' ? 0 : 1) - (b.type === 'frame' ? 0 : 1) || (a.z ?? 0) - (b.z ?? 0)), [items])
   const frames = useMemo(() => readingOrder(cards.filter(c => c.type === 'frame')), [cards])
   const links = useMemo(() => items.filter(it => it.type === 'link'), [items])
@@ -158,7 +162,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const selLinks = selection.map(r => byId.get(r)).filter((i): i is Item => !!i && i.type === 'link')
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return q ? items.filter(it => (it.text ?? it.label ?? '').toLowerCase().includes(q)) : []
+    return q ? items.filter(it => (it.type === 'link' || !META_TYPES.has(it.type ?? '')) && (it.text ?? it.label ?? '').toLowerCase().includes(q)) : []
   }, [items, query])
   const matchSet = useMemo(() => new Set(matches.map(m => m.rid)), [matches])
 
@@ -282,12 +286,14 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     const gone = new Set(rids.filter(r => byId.has(r) && !byId.get(r)!.locked))
     // An object takes its links with it.
     for (const l of links) if ((l.from && gone.has(l.from)) || (l.to && gone.has(l.to))) gone.add(l.rid)
+    // ... and its comments and reactions (all authors: the object is gone).
+    for (const it of items) if ((it.type === 'comment' || it.type === 'reaction') && it.target && gone.has(it.target)) gone.add(it.rid)
     if (!gone.size) return
     const recs = [...gone].map(r => byId.get(r)!)
     const redo: PageDataOp[] = recs.map(r => ({ op: 'del', rid: r.rid }))
     data.write(redo).then(() => history.push({ redo, undo: recs.map(restoreOp) })).catch(fail)
     setSelection([])
-  }, [byId, links, data, history])
+  }, [byId, links, items, data, history])
 
   // -- clipboard -------------------------------------------------------------
   const clipOf = (rids: string[]): ClipData => {
@@ -369,6 +375,109 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     reveal: t => { if (t.publish?.dest_folder) navigate('/projects', { state: { openPath: expandFluxPath(t.publish.dest_folder, workspace) } }) },
   }), [project, production, navigate, workspace])
   const addFlux = (ref: string) => { setFluxPicker(false); addAtMiddle('flux', { ref, text: null }) }
+
+  // -- comments, reactions (one record per author, ADR 0075 n°2) -------------
+  const notes = useMemo(() => {
+    const m = new Map<string, { r: Map<Emoji, { n: number; mine?: Item }>; c: Item[] }>()
+    for (const it of items) {
+      if ((it.type !== 'reaction' && it.type !== 'comment') || !it.target) continue
+      let e = m.get(it.target)
+      if (!e) { e = { r: new Map(), c: [] }; m.set(it.target, e) }
+      if (it.type === 'comment') e.c.push(it)
+      else if (it.emoji && it.emoji in EMOJI) {
+        const x = e.r.get(it.emoji) ?? { n: 0 }
+        x.n++
+        if (it._created_by === data.me) x.mine = it
+        e.r.set(it.emoji, x)
+      }
+    }
+    return m
+  }, [items, data.me])
+  const badgeOf = useCallback((rid: string) => {
+    const e = notes.get(rid)
+    if (!e) return undefined
+    const parts = [...e.r].map(([k, v]) => `${k}:${v.n}:${v.mine ? 1 : 0}`)
+    if (e.c.length) parts.push(`c:${e.c.length}:0`)
+    return parts.join(' ') || undefined
+  }, [notes])
+  const [notesFor, setNotesFor] = useState<string | null>(null)
+  const [draftComment, setDraftComment] = useState('')
+  const delRecords = (recs: Item[]) => {
+    const redo: PageDataOp[] = recs.map(r => ({ op: 'del', rid: r.rid }))
+    data.write(redo).then(() => history.push({ redo, undo: recs.map(restoreOp) })).catch(fail)
+  }
+  const react = (rid: string, emoji: Emoji) => {
+    if (!canEdit) return
+    const mine = notes.get(rid)?.r.get(emoji)?.mine
+    if (mine) { delRecords([mine]); return }
+    const f = { type: 'reaction', target: rid, emoji }
+    createRaw([f]).then(rids => pushCreated(rids, [f])).catch(fail)
+  }
+  const sendComment = (rid: string) => {
+    const text = draftComment.trim()
+    if (!text || !canEdit) return
+    const f = { type: 'comment', target: rid, text: text.slice(0, 10_000) }
+    setDraftComment('')
+    createRaw([f]).then(rids => pushCreated(rids, [f])).catch(fail)
+  }
+  const when = (iso: string | null | undefined) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(lang === 'en' ? 'en-GB' : 'fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  // -- shared timer (ADR 0075 n°4) -------------------------------------------
+  const timers = useMemo(() => items.filter(it => it.type === 'timer' && it.ends_at), [items])
+  const timer = useMemo(() => [...timers].sort((a, b) => String(b._created_at ?? '').localeCompare(String(a._created_at ?? '')))[0], [timers])
+  const [now, setNow] = useState(() => Date.now())
+  const [showTimer, setShowTimer] = useState(false)
+  useEffect(() => {
+    if (!timer) return
+    const t = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(t)
+  }, [timer])
+  const left = timer ? Math.max(0, Math.round((new Date(timer.ends_at!).getTime() - now) / 1000)) : 0
+  const rang = useRef<string | null>(null)
+  useEffect(() => {
+    if (timer && left === 0 && rang.current !== timer.rid) {
+      rang.current = timer.rid
+      toast.info(tr('Minuteur termine.', 'Timer finished.'))
+    }
+  }, [timer, left, tr])
+  const startTimer = (minutes: number) => {
+    setShowTimer(false)
+    const ends = new Date(Date.now() + minutes * 60_000).toISOString().replace('Z', '+00:00')
+    data.write([...timers.map(t => ({ op: 'del' as const, rid: t.rid })),
+                { op: 'put', fields: { type: 'timer', ends_at: ends, seconds: minutes * 60 } }]).catch(fail)
+  }
+  const stopTimer = () => { if (timers.length) data.write(timers.map(t => ({ op: 'del' as const, rid: t.rid }))).catch(fail) }
+  const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+
+  // -- export PNG / PDF (redrawn from the records, ADR 0075 n°5) ---------------
+  const [showExport, setShowExport] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const runExport = async (kind: 'png' | 'pdf', scope: 'board' | 'frame' | 'frames') => {
+    setShowExport(false)
+    const fluxText = (it: Item) => {
+      const t = fluxCtx.resolve(it.ref ?? '')
+      return t ? `${t.kind} ${t.group} / ${t.name}${t.task ? ` ${t.task}` : ''}${t.publish ? `\n${t.publish.file}` : ''}` : (it.ref ?? '')
+    }
+    const src = { cards, links, byId, media, fluxText }
+    const picked = scope === 'board' ? [regionOf(cards.map(dims))]
+      : scope === 'frame' ? selCards.filter(c => c.type === 'frame').slice(0, kind === 'png' ? 1 : undefined).map(f => regionOf([dims(f)]))
+      : frames.map(f => regionOf([dims(f)]))
+    const regions = picked.filter((r): r is Box => !!r)
+    if (!regions.length) { toast.info(tr('Rien a exporter.', 'Nothing to export.')); return }
+    setExporting(true)
+    try {
+      const canvases = await Promise.all(regions.map(r => renderBoard(src, r, 2)))
+      const bytes = kind === 'png' ? await pngBytes(canvases[0]) : await pdfBytes(canvases)
+      const name = `${page.id}_${scope === 'board' ? 'board' : scope === 'frame' ? (selCards.find(c => c.type === 'frame')?.text || 'cadre') : 'cadres'}.${kind}`
+        .replace(/[\\/:*?"<>|]+/g, '_')
+      const saved = await saveFile(name, bytes, kind)
+      if (saved) toast.success(tr(`Exporte : ${saved}`, `Exported: ${saved}`))
+    } catch (err) { fail(err) } finally { setExporting(false) }
+  }
 
   // -- presentation (frames in reading order, nothing written) ----------------
   const startPresent = () => {
@@ -646,8 +755,8 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }
 
   // Stable handlers for the memoised items: they call the latest closures.
-  const latest = useRef({ onItemDown, onResizeDown, update, canEdit, byId })
-  latest.current = { onItemDown, onResizeDown, update, canEdit, byId }
+  const latest = useRef({ onItemDown, onResizeDown, update, canEdit, byId, react })
+  latest.current = { onItemDown, onResizeDown, update, canEdit, byId, react }
   const handlers = useMemo<ItemHandlers>(() => ({
     down: (e, rid) => latest.current.onItemDown(e, rid),
     double: rid => {
@@ -657,6 +766,8 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     commitText: (rid, text) => latest.current.update([{ rid, fields: { text } }]),
     stopEdit: () => setEditing(null),
     resize: (e, rid, corner) => latest.current.onResizeDown(e, rid, corner),
+    react: (rid, emoji) => latest.current.react(rid, emoji),
+    openNotes: rid => { setSelection([rid]); setNotesFor(rid) },
   }), [])
   const onLinkDown = useCallback((e: RPointerEvent, rid: string) => latest.current.onItemDown(e, rid), [])
 
@@ -732,6 +843,16 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         {btn(tr('Zoom avant', 'Zoom in'), () => setView(v => ({ ...v, z: Math.min(ZOOM_MAX, v.z * 1.2) })), <Plus size={13} />)}
         {btn(tr('Tout voir (Maj+1)', 'Fit (Shift+1)'), fit, <Maximize size={13} />)}
         {btn(tr('Presenter les cadres', 'Present the frames'), startPresent, <Play size={13} />, false, !frames.length)}
+        {btn(tr('Exporter en PNG ou PDF', 'Export as PNG or PDF'), () => setShowExport(s => !s), <Download size={13} />, showExport, exporting || !cards.length)}
+        {timer
+          ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4, padding: '0 6px', height: 22, borderRadius: 5, fontSize: 12,
+                           fontVariantNumeric: 'tabular-nums', background: left === 0 ? 'oklch(88% 0.07 25)' : 'var(--paper-2)', color: left === 0 ? 'oklch(35% 0.1 25)' : 'var(--ink)' }}
+                  title={tr('Minuteur partage avec tout le board', 'Timer shared with the whole board')}>
+              <Timer size={12} />{left === 0 ? tr('Termine', 'Done') : clock(left)}
+              {canEdit && <button type="button" onClick={stopTimer} title={tr('Arreter le minuteur', 'Stop the timer')}
+                                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0, display: 'inline-flex' }}><X size={12} /></button>}
+            </span>
+          : canEdit && btn(tr('Minuteur partage', 'Shared timer'), () => setShowTimer(s => !s), <Timer size={13} />, showTimer)}
       </div>
 
       {canEdit && (tool === 'pen' || tool === 'highlighter') && (
@@ -790,6 +911,8 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
                   selCards.every(c => c.locked) ? <LockOpen size={13} /> : <Lock size={13} />, selCards.every(c => c.locked))}
             {btn(tr('Dupliquer (Ctrl+D)', 'Duplicate (Ctrl+D)'), duplicate, <Copy size={13} />)}
           </>}
+          {selection.length === 1 && byId.get(selection[0]) && btn(tr('Commentaires, reactions, auteur', 'Comments, reactions, author'),
+                () => setNotesFor(f => f === selection[0] ? null : selection[0]), <MessageSquare size={13} />, notesFor === selection[0])}
           {btn(tr('Supprimer (Suppr)', 'Delete (Del)'), () => remove(selection), <Trash2 size={13} />)}
         </div>
       )}
@@ -810,7 +933,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         <div style={{ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: 'none' }}>
           <BoardLayer visible={visible} links={visibleLinks} byId={byId} boxOf={boxOf} selSet={selSet} matchSet={matchSet}
                       singleCard={singleCard} editing={editing} linkFrom={linkFrom} canEdit={canEdit} media={media}
-                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} faded={erasing} />
+                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} faded={erasing} badgeOf={badgeOf} />
           {draft && draft.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
             <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')} fill="none" stroke={STROKES[penColor] ?? STROKES.ink}
                       strokeWidth={tool === 'highlighter' ? 16 : 3} strokeLinecap="round" strokeLinejoin="round" opacity={tool === 'highlighter' ? 0.4 : 1} />
@@ -848,6 +971,82 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
                   <div style={{ fontSize: 12.5, fontWeight: 600 }}>{lang === 'en' ? t.label_en : t.label}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{lang === 'en' ? t.description_en : t.description}</div>
                 </div>
+              ))}
+          </div>
+        )}
+        {notesFor && byId.get(notesFor) && selection.includes(notesFor) && (() => {
+          const it = byId.get(notesFor)!, e = notes.get(notesFor)
+          return (
+            <div onPointerDown={ev => ev.stopPropagation()} onWheel={ev => ev.stopPropagation()} onKeyDown={ev => ev.stopPropagation()}
+                 style={{ position: 'absolute', right: 10, top: 10, bottom: 10, width: 290, zIndex: 7, display: 'flex', flexDirection: 'column',
+                          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 4px 14px oklch(0% 0 0 / 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid var(--rule)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {(it.text || it.label || it.type || '').slice(0, 40)}</span>
+                <span style={{ flex: 1 }} />
+                {btn(tr('Fermer', 'Close'), () => setNotesFor(null), <X size={13} />)}
+              </div>
+              <div className="tp-note" style={{ padding: '6px 10px', fontSize: 11.5, color: 'var(--ink-3)', borderBottom: '1px solid var(--rule)' }}>
+                {tr('Cree par', 'Created by')} <b>{it._created_by || '?'}</b> {when(it._created_at)}<br />
+                {tr('Modifie par', 'Changed by')} <b>{it._by || '?'}</b> {when(it._at)}
+              </div>
+              <div style={{ display: 'flex', gap: 4, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
+                {(Object.keys(EMOJI) as Emoji[]).map(k => {
+                  const r = e?.r.get(k)
+                  return <button key={k} type="button" disabled={!canEdit} onClick={() => react(notesFor, k)}
+                                 style={{ fontSize: 13, padding: '1px 6px', borderRadius: 10, cursor: canEdit ? 'pointer' : 'default', color: 'var(--ink)',
+                                          background: r?.mine ? 'var(--paper-2)' : 'transparent', border: r?.mine ? '1.5px solid var(--accent)' : '1px solid var(--rule-2)' }}>
+                    {EMOJI[k]}{r ? ` ${r.n}` : ''}</button>
+                })}
+              </div>
+              <div style={{ flex: 1, overflow: 'auto', padding: '4px 10px' }}>
+                {!(e?.c.length) && <div className="tp-note" style={{ color: 'var(--ink-4)', padding: '6px 0' }}>{tr('Aucun commentaire.', 'No comment.')}</div>}
+                {e?.c.map(c => (
+                  <div key={c.rid} style={{ padding: '6px 0', borderBottom: '1px solid var(--rule)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+                      <b>{c._created_by}</b><span style={{ color: 'var(--ink-4)' }}>{when(c._created_at)}</span>
+                      <span style={{ flex: 1 }} />
+                      {canEdit && c._created_by === data.me && <button type="button" title={tr('Supprimer mon commentaire', 'Delete my comment')} onClick={() => delRecords([c])}
+                                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--ink-4)', padding: 0 }}><X size={11} /></button>}
+                    </div>
+                    <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{c.text}</div>
+                  </div>
+                ))}
+              </div>
+              {canEdit && <div style={{ padding: 8, borderTop: '1px solid var(--rule)' }}>
+                <textarea value={draftComment} onChange={ev => setDraftComment(ev.target.value)} rows={2}
+                          placeholder={tr('Commenter (@nom previent l\u2019artiste, Ctrl+Entree pour envoyer)', 'Comment (@name notifies the artist, Ctrl+Enter to send)')}
+                          onKeyDown={ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); sendComment(notesFor) } }}
+                          style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: 6, border: '1px solid var(--rule-2)', borderRadius: 5,
+                                   background: 'var(--bg-deep)', color: 'var(--ink)', font: 'inherit', fontSize: 12.5 }} />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <button type="button" className="btn sm" disabled={!draftComment.trim()} onClick={() => sendComment(notesFor)}>{tr('Envoyer', 'Send')}</button>
+                </div>
+              </div>}
+            </div>
+          )
+        })()}
+        {showTimer && (
+          <div onPointerDown={ev => ev.stopPropagation()}
+               style={{ position: 'absolute', right: 10, top: 10, zIndex: 8, display: 'flex', gap: 4, padding: 8, alignItems: 'center',
+                        background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 4px 14px oklch(0% 0 0 / 0.2)' }}>
+            <span className="cap" style={{ marginRight: 4 }}>{tr('Minuteur pour tous', 'Timer for everyone')}</span>
+            {[1, 3, 5, 10, 15].map(m => <button key={m} type="button" className="btn ghost sm" onClick={() => startTimer(m)}>{m} min</button>)}
+          </div>
+        )}
+        {showExport && (
+          <div onPointerDown={ev => ev.stopPropagation()}
+               style={{ position: 'absolute', right: 10, top: 10, zIndex: 8, width: 240, background: 'var(--paper)', border: '1px solid var(--rule)',
+                        borderRadius: 8, boxShadow: '0 4px 14px oklch(0% 0 0 / 0.2)', padding: 4 }}>
+            {([['png', 'board', tr('PNG du board entier', 'PNG of the whole board'), true],
+               ['png', 'frame', tr('PNG du cadre selectionne', 'PNG of the selected frame'), selCards.some(c => c.type === 'frame')],
+               ['pdf', 'board', tr('PDF du board entier', 'PDF of the whole board'), true],
+               ['pdf', 'frame', tr('PDF des cadres selectionnes', 'PDF of the selected frames'), selCards.some(c => c.type === 'frame')],
+               ['pdf', 'frames', tr('PDF de tous les cadres (ordre de lecture)', 'PDF of every frame (reading order)'), frames.length > 0]] as const)
+              .map(([kind, scope, label, ok]) => (
+                <button key={`${kind}${scope}`} type="button" disabled={!ok} onClick={() => { void runExport(kind, scope) }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', border: 'none', borderRadius: 5, fontSize: 12.5,
+                                 background: 'transparent', color: ok ? 'var(--ink)' : 'var(--ink-4)', cursor: ok ? 'pointer' : 'default' }}>{label}</button>
               ))}
           </div>
         )}

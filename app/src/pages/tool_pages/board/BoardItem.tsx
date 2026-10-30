@@ -6,7 +6,7 @@
 import { memo, type PointerEvent as RPointerEvent } from 'react'
 import { Lock } from 'lucide-react'
 import { FluxCardBody } from './FluxCard'
-import { edgePoint, fillOf, fontOf, strokeOf, type Box, type Item } from './model'
+import { EMOJI, edgePoint, fillOf, fontOf, strokeOf, type Box, type Emoji, type Item } from './model'
 
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'
 export interface ItemHandlers {
@@ -15,12 +15,15 @@ export interface ItemHandlers {
   commitText: (rid: string, text: string) => void
   stopEdit: () => void
   resize: (e: RPointerEvent, rid: string, corner: Corner) => void
+  react: (rid: string, emoji: Emoji) => void
+  openNotes: (rid: string) => void
 }
 
 interface ItemProps {
   it: Item; x: number; y: number; w: number; h: number
   selected: boolean; handles: boolean; editing: boolean; linkSource: boolean; match: boolean
   canEdit: boolean; mediaUrl?: string; placeholder: string; on: ItemHandlers; faded?: boolean
+  badges?: string      // reactions and comments under the object: 'like:3:1 love:1:0 c:2' (count, mine)
 }
 
 const INK = 'oklch(25% 0.02 250)'
@@ -75,6 +78,7 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
         </div>
         {it.locked && p.selected && <Lock size={12} style={{ position: 'absolute', right: 4, top: 4, color: 'var(--ink-3)' }} />}
         {p.handles && handles(it, on)}
+        {p.badges && badgeRow(it.rid, p.badges, on)}
       </div>
     )
   }
@@ -116,9 +120,30 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
         : <div style={{ position: 'relative', width: '100%' }}>{text}</div>}
       {it.locked && p.selected && <Lock size={12} style={{ position: 'absolute', right: -16, top: -2, color: 'var(--ink-3)' }} />}
       {p.handles && handles(it, on)}
+      {p.badges && badgeRow(it.rid, p.badges, on)}
     </div>
   )
 })
+
+// Reaction counts (yours outlined, a click toggles yours) and the comment count (opens the panel).
+function badgeRow(rid: string, badges: string, on: ItemHandlers) {
+  return (
+    <div onPointerDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
+         style={{ position: 'absolute', left: 0, top: '100%', marginTop: 4, display: 'flex', gap: 3, whiteSpace: 'nowrap' }}>
+      {badges.split(' ').map(b => {
+        const [key, n, mine] = b.split(':')
+        const comment = key === 'c'
+        return (
+          <button key={key} type="button" onClick={() => comment ? on.openNotes(rid) : on.react(rid, key as Emoji)}
+                  style={{ fontSize: 11, lineHeight: '16px', padding: '0 5px', borderRadius: 8, cursor: 'pointer', color: 'var(--ink)',
+                           background: 'var(--paper)', border: mine === '1' ? '1.5px solid var(--accent)' : '1px solid var(--rule-2)' }}>
+            {comment ? '\u{1F4AC}' : EMOJI[key as Emoji]} {n}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 function handles(it: Item, on: ItemHandlers) {
   return CORNERS.map(c => (
