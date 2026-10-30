@@ -255,6 +255,50 @@ class BoardV3(unittest.TestCase):
                 board_templates.parse_template(data)
 
 
+class BoardV4(unittest.TestCase):
+    """P3 lot C (2026-10-30): comments, reactions, shared timer, comment mentions (ADR 0075)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_board_v4_"))
+        self.folder = self.tmp / "wall"
+        self.board = _page().data[1]
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _put(self, fields, user="ADAM"):
+        return page_data.write_ops(self.folder, self.board, [{"op": "put", "fields": fields}], user=user)["rids"][0]
+
+    def test_comment_reaction_timer(self) -> None:
+        note = self._put({"type": "note", "x": 0, "y": 0, "text": "idee"})
+        self._put({"type": "comment", "target": note, "text": "@BOB tu en penses quoi ?"})
+        self._put({"type": "reaction", "target": note, "emoji": "like"}, user="BOB")
+        self._put({"type": "reaction", "target": note, "emoji": "like"}, user="ADAM")
+        self._put({"type": "timer", "ends_at": "2026-10-30T10:05:00+00:00", "seconds": 300})
+        recs = page_data.read_records(self.folder)["records"]
+        likes = [r for r in recs if r.get("type") == "reaction"]
+        self.assertEqual(sorted(r["_created_by"] for r in likes), ["ADAM", "BOB"])
+        for bad in ({"type": "reaction", "target": note, "emoji": "fire"}, {"type": "timer", "seconds": 0},
+                    {"type": "timer", "ends_at": "bientot"}, {"type": "comment", "target": "../x"}):
+            with self.assertRaises(FlowStoreError):
+                self._put(bad)
+
+    def test_comment_mentions_notify(self) -> None:
+        from flux_flows import board_mentions
+
+        calls = []
+        with mock.patch("features.activity.chat_manager.get_user_list", return_value=["ADAM", "BOB", "CLEO"]), \
+             mock.patch("features.accounts.aliases.load_aliases", return_value={}), \
+             mock.patch("features.notify.hooks.on_mentions", side_effect=lambda *a: calls.append(a)):
+            ops = [{"op": "put", "fields": {"type": "comment", "target": "r1", "text": "@bob @ADAM @nobody voir"}},
+                   {"op": "put", "fields": {"type": "note", "text": "@BOB"}},
+                   {"op": "put", "rid": "c1", "fields": {"type": "comment", "text": "@CLEO edit"}}]
+            self.assertEqual(board_mentions.notify_comments(ops, "ADAM", "demo", "board"), 1)
+            self.assertEqual(board_mentions.notify_comments(ops, "ADAM", None, "board"), 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:3], ("ADAM", ["BOB"], "demo"))
+
+
 class DataRouter(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="flux_page_data_router_"))

@@ -82,10 +82,11 @@ FIELD_TYPES = ("str", "text", "int", "float", "bool", "date", "datetime", "user"
 DATE_TYPES = ("date", "datetime")
 # Board schema (ADR 0071, 0074): flat fields only, so the per field merge never loses a style change.
 # v3 adds frames, free drawing (points relative to x / y) and FLUX cards (ref only, read live).
-BOARD_SCHEMA = 3
+# v4 (ADR 0075) adds comments and reactions on an object (`target`, one record per author) and a shared timer.
+BOARD_SCHEMA = 4
 BOARD_FIELDS = ("type", "x", "y", "w", "h", "z", "text", "color", "image", "from", "to",
                 "shape", "stroke", "font_size", "bold", "label", "dash", "arrow_start", "arrow_end", "group", "locked",
-                "points", "stroke_width", "highlight", "ref")
+                "points", "stroke_width", "highlight", "ref", "target", "emoji", "ends_at", "seconds")
 BUILTIN_SOURCES = ("users",)
 DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", "calendar": "records",
                      "board": "board"}

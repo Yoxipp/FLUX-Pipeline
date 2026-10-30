@@ -571,7 +571,12 @@ async def post_page_data(page_id: str, collection: str, body: PageDataBody) -> d
         folder, spec = _page_and_spec(page_id, collection, body.project)
         if not page_data.can_write(spec, current):
             raise rights.FlowRightsError("team_td")
-        return page_data.write_ops(folder, spec, body.ops, user=current["user"] or "")
+        result = page_data.write_ops(folder, spec, body.ops, user=current["user"] or "")
+        if spec.kind == "board":   # @name in a new comment -> phone notification (ADR 0075 n°3)
+            from flux_flows import board_mentions
+
+            board_mentions.notify_comments(body.ops, current["user"] or "", body.project, page_id)
+        return result
 
     done = await _call(work)
     events.emit({"type": "page_data", "page": page_id, "collection": collection, "project": body.project,
