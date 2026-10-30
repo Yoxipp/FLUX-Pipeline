@@ -257,10 +257,11 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". `hooks/usePresenceHeartbeat.ts`
   (monte dans `App.tsx`) reecrit le fichier de presence de l'artiste toutes les 60 s. Presence visible (P2b) : une seule
   lecture `GET /team/presence` toutes les 30 s pour toute l'app (`hooks/usePresence.tsx`, `PresenceProvider` dans `App.tsx`,
-  relue apres `flux:presence`), `PresenceDot` = rond vert (connecte, fichier de moins de 150 s) / gris (hors ligne), statut
-  choisi et texte en info-bulle. Ronds : auteurs du chat Team et de l'accueil (`home/TeamChat.tsx`), autocompletion @nom
+  relue apres `flux:presence`), `PresenceDot` = couleur du statut quand connecte (fichier de moins de 150 s) : vert disponible,
+  jaune en reunion, orange ne pas deranger, gris plein absent ; anneau gris vide = hors ligne ; texte en info-bulle. Ronds : auteurs du chat Team et de l'accueil (`home/TeamChat.tsx`), autocompletion @nom
   (les deux), `Members` (selecteur de son statut), auteurs du fil `feed`, commentaires du board, avatar de la barre du haut.
-  `components/shared/PresenceIndicator.tsx` dans `TitleBar` : "N en ligne", au clic la liste (rond, nom, statut, texte) et
+  `components/shared/PresenceIndicator.tsx` dans `TitleBar` : "N en ligne", au clic tous les artistes (`everyone` du
+  provider : dossiers `USER/` + fichiers de presence ; connectes d'abord) avec rond, nom, statut, texte, et
   son propre statut + message. `components/shared/PeoplePanel.tsx` : colonne repliable a droite du chat de l'accueil et du
   widget `chat` (tous les artistes de `USER/`, ordre alphabetique, rond vert / gris, ouvert / ferme memorise par chat).
   Pas encore : assignee Production, calendrier (filtre par personne), Login.
