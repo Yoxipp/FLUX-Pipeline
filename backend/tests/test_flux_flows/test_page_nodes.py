@@ -112,36 +112,12 @@ class PageNodes(unittest.TestCase):
         self.assertEqual(len(self._tick(sched, w)), 1)
         self.assertEqual([v for _, v in h.CALLS], ["ZOE"])
 
-    def test_shipped_team_flows_run(self) -> None:
-        # The Team template flows: today's event gives a reminder, a message gives a line (dry run: nothing posted).
-        from datetime import datetime
-
-        from flux_flows import locations as loc
-        from flux_flows.model import load_flow_text
-
-        today = datetime.now().strftime("%Y-%m-%dT09:30")
-        page_store.save_page(self.roots, "team", pages.parse_page({
-            **pages.to_document(_page()), "data": [{"id": "messages", "fields": [{"id": "text", "type": "text"}, {"id": "channel", "type": "str"}]},
-                                                     {"id": "events", "fields": [{"id": "title", "type": "str"}, {"id": "when", "type": "datetime"}]}]}),
-            user="ADAM", base_rev=page_store.read_page(self.roots, "team", "team")["rev"])
-        events_dir, events_spec, _ = page_data.locate("team", "events", "demo")
-        page_data.write_ops(events_dir, events_spec, [{"op": "put", "fields": {"title": "Review lighting", "when": today}},
-                                                      {"op": "put", "fields": {"title": "Plus tard", "when": "2099-01-01T10:00"}}], user="ADAM")
-        text = (loc.shipped_dir() / "team_reminders.flow.yml").read_text(encoding="utf-8")
-        flow = load_flow_text(text)
-        flow.nodes["read"].params["project"] = "demo"
-        rec = h.run_flow(flow, mode="dry")
-        self.assertEqual(rec["status"], "ok", rec.get("error"))
-        lines = " ".join(str(r.get("text_fr")) for r in rec["report"])
-        self.assertIn("Rappel : Review lighting", lines)
-        self.assertNotIn("Plus tard", lines)
-
     def test_shipped_templates_load(self) -> None:
         from flux_flows import locations as loc
 
         roots = {"shipped": loc.shipped_dir() / "pages", "team": None, "project": None}
         ids = sorted(t["id"] for t in page_store.list_templates(roots))
-        self.assertEqual(ids, ["annonces", "board", "controle_usd", "daily_render", "livraison_plan", "team"])   # + T1 examples (ADR 0069)
+        self.assertEqual(ids, ["annonces", "board", "controle_usd", "daily_render", "livraison_plan"])   # + T1 examples (ADR 0069); team: built-in page (ADR 0080)
         for tid in ids:
             got = page_store.read_page(roots, "shipped", tid)
             self.assertEqual([i.code for i in pages.validate_page(got["page"]) if i.level == "error"], [], tid)

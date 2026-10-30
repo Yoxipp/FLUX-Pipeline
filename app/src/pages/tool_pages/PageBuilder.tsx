@@ -31,7 +31,8 @@ type HttpError = Error & { status?: number; detail?: { by?: string; rev?: string
 const PALETTE: PageWidgetKind[][] = [
   ['button', 'text', 'int', 'float', 'toggle', 'select', 'list', 'path', 'dir'],
   ['separator', 'label'],
-  ['feed', 'table', 'cards', 'calendar', 'members', 'board', 'chat'],
+  // No 'chat': the team chat is the built-in Team page (ADR 0080); an existing chat widget still renders.
+  ['feed', 'table', 'cards', 'calendar', 'members', 'board'],
 ]
 
 type Sel = { kind: 'widget'; id: string } | { kind: 'folder'; id: string } | { kind: 'data'; id: string } | { kind: 'page' } | null
