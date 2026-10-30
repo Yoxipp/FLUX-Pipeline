@@ -49,13 +49,14 @@ MAX_RECORDS = 20_000
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 MAX_IMAGE = 20 * 1024 * 1024
 COMPACT_BYTES = 256 * 1024
-BOARD_TYPES = ("card", "note", "image", "link", "shape", "text", "frame", "ink", "flux", "comment", "reaction", "timer")
+BOARD_TYPES = ("card", "note", "image", "link", "shape", "text", "frame", "ink", "flux", "comment", "reaction", "timer",
+               "shotboard", "shot")
 BOARD_TYPED = {"x": "float", "y": "float", "w": "float", "h": "float", "z": "float", "text": "text", "color": "str",
                "image": "image", "from": "str", "to": "str", "type": "str", "shape": "str", "stroke": "str",
                "font_size": "float", "bold": "bool", "label": "text", "dash": "str", "arrow_start": "bool",
                "arrow_end": "bool", "group": "str", "locked": "bool", "points": "str", "stroke_width": "float",
                "highlight": "bool", "ref": "str", "target": "str", "emoji": "str", "ends_at": "datetime",
-               "seconds": "float"}
+               "seconds": "float", "text_locked": "bool", "frame_at": "float", "frame_at2": "float"}
 POINTS_RE = re.compile(r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?( -?\d+(\.\d+)?,-?\d+(\.\d+)?)*$")
 # A FLUX card names an entity, never copies it: asset:<class>/<name>, shot:<seq>/<shot>,
 # publish:asset:<class>/<name>/<task> or publish:shot:<seq>/<shot>/<task>.
@@ -169,6 +170,8 @@ def check_fields(spec: DataSpec, fields: Dict[str, Any]) -> Dict[str, Any]:
                 raise FlowStoreError("seconds : entre 1 s et 6 h", 422)
             if name == "target" and out[name] and not RID_RE.match(out[name]):
                 raise FlowStoreError("target : rid d'un objet du board", 422)
+            if name in ("frame_at", "frame_at2") and out[name] is not None and not 0 <= out[name] <= 1:
+                raise FlowStoreError(f"{name} : position dans le media, entre 0 et 1", 422)
             if name == "stroke_width" and out[name] is not None and not 0.5 <= out[name] <= 80:
                 raise FlowStoreError("stroke_width : entre 0.5 et 80", 422)
             if name == "points" and out[name] and not POINTS_RE.match(out[name]):

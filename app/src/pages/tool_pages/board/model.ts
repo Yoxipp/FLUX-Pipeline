@@ -1,11 +1,11 @@
 // model.ts — board data helpers (ADR 0071, v3 ADR 0074): item type, palette, geometry, ops for
 // the undo stack and the clipboard, free drawing points, frame reading order. Flat fields only
-// (one field = one value, per field merge).
+// (one field = one value, per field merge). v5 (ADR 0083): move lock and text lock apart, shotboard.
 
 import type { PageDataOp, PageRecord } from '../../flow_editor/types'
 
 export type ItemType = 'note' | 'card' | 'image' | 'link' | 'shape' | 'text' | 'frame' | 'ink' | 'flux'
-  | 'comment' | 'reaction' | 'timer'
+  | 'comment' | 'reaction' | 'timer' | 'shotboard' | 'shot'
 export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond'
 
 export type Item = PageRecord & {
@@ -16,6 +16,7 @@ export type Item = PageRecord & {
   group?: string; locked?: boolean
   points?: string; stroke_width?: number; highlight?: boolean; ref?: string
   target?: string; emoji?: Emoji; ends_at?: string; seconds?: number
+  text_locked?: boolean | null; frame_at?: number | null; frame_at2?: number | null
 }
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -34,11 +35,20 @@ export const FONT_SIZES = [10, 12, 13, 14, 16, 18, 24, 32, 48, 64]
 export const SIZE: Record<ItemType, [number, number]> = {
   note: [180, 120], card: [220, 90], image: [240, 180], shape: [160, 100], text: [200, 40], link: [0, 0],
   frame: [480, 360], ink: [1, 1], flux: [240, 104], comment: [0, 0], reaction: [0, 0], timer: [0, 0],
+  shotboard: [1200, 400], shot: [0, 0],
 }
-export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12, frame: 13, ink: 13, flux: 12, comment: 12, reaction: 12, timer: 12 }
+export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12, frame: 13, ink: 13, flux: 12, comment: 12, reaction: 12, timer: 12, shotboard: 12, shot: 12 }
 export const GRID = 8
-// Records that are not drawn on the board: links (drawn between objects), comments, reactions, the timer (ADR 0075).
-export const META_TYPES = new Set(['link', 'comment', 'reaction', 'timer'])
+// Records that are not drawn on the board: links (drawn between objects), comments, reactions, the timer (ADR 0075),
+// the cells of a shotboard (drawn by it, ADR 0083).
+export const META_TYPES = new Set(['link', 'comment', 'reaction', 'timer', 'shot'])
+// Records that live on another object (`target`) and go with it.
+export const ATTACHED_TYPES = new Set(['comment', 'reaction', 'shot'])
+
+// Two locks (ADR 0083): `locked` stops moving, resizing and deleting; `text_locked` stops
+// editing the text. An old board has only `locked` (it meant both): absent `text_locked` follows it.
+export const moveLocked = (it: Item) => !!it.locked
+export const textLocked = (it: Item) => typeof it.text_locked === 'boolean' ? it.text_locked : !!it.locked
 export type Emoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export const EMOJI: Record<Emoji, string> = { like: '\u{1F44D}', love: '\u2764\uFE0F', laugh: '\u{1F602}', question: '\u2753', check: '\u2705' }
 export const CLIP_TAG = 'flux_board'

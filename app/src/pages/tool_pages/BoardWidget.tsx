@@ -11,13 +11,15 @@
 // selection, corner handles = resize (Shift or an image keeps the ratio), double click the
 // background = new note, double click an object = edit its text.
 // Keys: Ctrl+Z / Ctrl+Y undo / redo (own ops only), Ctrl+C / X / V / D, Ctrl+A, Suppr,
-// Ctrl+G / Ctrl+Shift+G group, Ctrl+L lock, Ctrl+] / Ctrl+[ order, Ctrl+F search, Shift+1 fit.
+// Ctrl+G / Ctrl+Shift+G group, Ctrl+L move lock, Ctrl+Shift+L text lock, Ctrl+] / Ctrl+[ order, Ctrl+F search, Shift+1 fit.
 // v3 (ADR 0074): pen / highlighter / eraser tools (a stroke is written on release, the eraser
 // removes whole strokes), frames (moving one moves what is inside, presentation in reading
 // order), images pasted (Ctrl+V of a screenshot) or dropped from the explorer (copied by the
 // backend from a file path), FLUX cards (FluxCard.tsx) and shipped board templates.
 // v4 (ADR 0075): comments and reactions on an object (one record per author, badges under
 // the object, panel with who / when), a shared timer, PNG / PDF export (exportBoard.ts).
+// v5 (ADR 0083): move lock and text lock apart (model.ts), templates come move locked,
+// shotboard (Shotboard.tsx: grid read live from Production, its cells are `shot` records).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -38,8 +40,10 @@ import type { DataWidgetProps } from './DataWidgets'
 import { BoardItem, BoardLink, type Corner, type ItemHandlers } from './board/BoardItem'
 import { BoardMinimap } from './board/BoardMinimap'
 import { FluxBoardContext, FluxPicker, resolveRef, useBoardProduction, type FluxBoardData } from './board/FluxCard'
+import { ShotboardContext, drawShotboard, shotCells, shotRows, shotboardSize, useShotPreviews, type ShotboardData } from './board/Shotboard'
+import { api } from '../../api/client'
 import {
-  CLIP_TAG, EMOJI, FILLS, FONT_SIZES, GRID, META_TYPES, SIZE, STROKES, bounds, dims, fieldsOf, fontOf, inkFields, inkHit, inside,
+  ATTACHED_TYPES, CLIP_TAG, EMOJI, FILLS, FONT_SIZES, GRID, META_TYPES, SIZE, moveLocked, textLocked, STROKES, bounds, dims, fieldsOf, fontOf, inkFields, inkHit, inside,
   intersects, inversePut, newGroupId, parseClip, readingOrder, restoreOp, type Box, type ClipData, type Emoji, type Item, type Pt, type Shape,
 } from './board/model'
 import { pdfBytes, pngBytes, regionOf, renderBoard, saveFile } from './board/exportBoard'
@@ -104,6 +108,18 @@ const BoardLayer = memo(function BoardLayer(p: LayerProps) {
     })}
   </>
 })
+
+// Which lock a change meets (ADR 0083): geometry -> move lock, text -> text lock, the rest
+// (colour, order, group...) only when both are on, like the old single lock.
+const GEOMETRY = new Set(['x', 'y', 'w', 'h'])
+const TEXTUAL = new Set(['text', 'label'])
+function mayChange(it: Item, fields: Record<string, unknown>) {
+  const keys = Object.keys(fields)
+  if (keys.some(k => GEOMETRY.has(k)) && moveLocked(it)) return false
+  if (keys.some(k => TEXTUAL.has(k)) && textLocked(it)) return false
+  return keys.every(k => GEOMETRY.has(k) || TEXTUAL.has(k)) || !(moveLocked(it) && textLocked(it))
+}
+const editable = (it: Item) => !textLocked(it) && !['image', 'ink', 'flux', 'shotboard'].includes(it.type ?? '')
 
 export function BoardWidget({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr } = useTr()
@@ -235,7 +251,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }, [byId, cards])
 
   const update = useCallback((changes: { rid: string; fields: Record<string, unknown> }[], evenLocked = false) => {
-    const ok = changes.filter(c => byId.has(c.rid) && (evenLocked || !byId.get(c.rid)!.locked))
+    const ok = changes.filter(c => byId.has(c.rid) && (evenLocked || mayChange(byId.get(c.rid)!, c.fields)))
     if (!ok.length) return
     const redo: PageDataOp[] = ok.map(c => ({ op: 'put', rid: c.rid, fields: c.fields }))
     const undo = ok.map(c => inversePut(byId.get(c.rid)!, c.fields))
@@ -306,8 +322,8 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     const gone = new Set(rids.filter(r => byId.has(r) && !byId.get(r)!.locked))
     // An object takes its links with it.
     for (const l of links) if ((l.from && gone.has(l.from)) || (l.to && gone.has(l.to))) gone.add(l.rid)
-    // ... and its comments and reactions (all authors: the object is gone).
-    for (const it of items) if ((it.type === 'comment' || it.type === 'reaction') && it.target && gone.has(it.target)) gone.add(it.rid)
+    // ... and its comments, reactions and shotboard cells (all authors: the object is gone).
+    for (const it of items) if (ATTACHED_TYPES.has(it.type ?? '') && it.target && gone.has(it.target)) gone.add(it.rid)
     if (!gone.size) return
     const recs = [...gone].map(r => byId.get(r)!)
     const redo: PageDataOp[] = recs.map(r => ({ op: 'del', rid: r.rid }))
@@ -330,7 +346,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }
 
   // New rids, new groups, links re-pointed, on top of everything; *at* = where the block goes.
-  const pasteItems = async (c: ClipData, at: 'middle' | { dx: number; dy: number }) => {
+  const pasteItems = async (c: ClipData, at: 'middle' | { dx: number; dy: number }, keepLocks = false) => {
     const same = c.page === page.id && c.collection === collection
     const objs = c.items.filter(i => i.type !== 'link' && (same || i.type !== 'image'))
     if (objs.length < c.items.filter(i => i.type !== 'link').length)
@@ -344,7 +360,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       const f = fieldsOf(o)
       const g = o.group ? (groups.get(o.group) ?? groups.set(o.group, newGroupId()).get(o.group)) : undefined
       return { ...f, x: Math.round(dims(o).x + shift.dx), y: Math.round(dims(o).y + shift.dy), z: top + (o.z ?? 0) - z0,
-               group: g ?? null, locked: null }
+               group: g ?? null, locked: keepLocks ? o.locked ?? null : null, text_locked: keepLocks ? o.text_locked ?? null : null }
     })
     try {
       const rids = await createRaw(list)
@@ -377,16 +393,52 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     setShowTemplates(s => !s)
     if (!templates) flowsApi.boardTemplates().then(r => setTemplates(r.templates)).catch(fail)
   }
-  // A template goes in like a paste: new rids, links re-pointed from the keys, one undo.
+  // A template goes in like a paste: new rids, links re-pointed from the keys, one undo;
+  // its locks are kept (move locked, text free by default, ADR 0083).
   const insertTemplate = (t: BoardTemplate) => {
     setShowTemplates(false)
     const list = t.items.map(({ key, text_en, ...f }) =>
       ({ ...f, rid: key, ...(lang === 'en' && typeof text_en === 'string' ? { text: text_en } : {}) })) as unknown as Item[]
-    void pasteItems({ [CLIP_TAG]: 2, page: page.id, collection, items: list }, 'middle')
+    void pasteItems({ [CLIP_TAG]: 2, page: page.id, collection, items: list }, 'middle', true)
   }
 
   const hasFlux = useMemo(() => cards.some(c => c.type === 'flux'), [cards])
-  const production = useBoardProduction(project, hasFlux || fluxPicker)
+  const hasShotboard = useMemo(() => cards.some(c => c.type === 'shotboard'), [cards])
+  const production = useBoardProduction(project, hasFlux || fluxPicker || hasShotboard)
+
+  // -- shotboard (ADR 0083): grid read from Production, cells written in the board ---------
+  const prodState = production?.production ?? null
+  const shotPreviews = useShotPreviews(project, prodState, hasShotboard)
+  const rows = useMemo(() => shotRows(prodState), [prodState])
+  const cellMap = useMemo(() => shotCells(items), [items])
+  const setCell = useCallback((board: Item, ref: string, fields: Record<string, unknown>) => {
+    const cur = cellMap.get(`${board.rid}|${ref.toUpperCase()}`)
+    if (cur) { update([{ rid: cur.rid, fields }]); return }
+    const f = { type: 'shot', target: board.rid, ref, ...fields }
+    createRaw([f]).then(rids => pushCreated(rids, [f])).catch(fail)
+  }, [cellMap, update, createRaw, pushCreated])
+  const sendRetake = useCallback(async (seq: string, shot: string, task: string, text: string) => {
+    if (!project) return false
+    try {
+      await api.addShotRetake(project, { seq, shot, task, text })
+      toast.success(tr(`Retake ajoutee a ${seq} ${shot} (${task}) dans Production.`, `Retake added to ${seq} ${shot} (${task}) in Production.`))
+      return true
+    } catch (err) { fail(err); return false }
+  }, [project, tr])
+  const sbCtx = useMemo<ShotboardData>(() => ({ project, state: prodState, rows, previews: shotPreviews, cells: cellMap, canEdit, setCell, sendRetake }),
+                                        [project, prodState, rows, shotPreviews, cellMap, canEdit, setCell, sendRetake])
+  // The object takes the size of its grid when Production changes. Every editor on the board
+  // writes the same values (harmless with the per field merge); once per size.
+  const sized = useRef(new Map<string, string>())
+  useEffect(() => {
+    if (!canEdit || !prodState) return
+    const { w: gw, h: gh } = shotboardSize(rows)
+    const fix = cards.filter(c => c.type === 'shotboard' && (Math.abs((c.w ?? 0) - gw) > 1 || Math.abs((c.h ?? 0) - gh) > 1)
+                               && sized.current.get(c.rid) !== `${gw}x${gh}`)
+    if (!fix.length) return
+    for (const c of fix) sized.current.set(c.rid, `${gw}x${gh}`)
+    data.write(fix.map(c => ({ op: 'put' as const, rid: c.rid, fields: { w: gw, h: gh } }))).catch(fail)
+  }, [canEdit, prodState, rows, cards, data])
   const workspace = settings?.workspace
   const fluxCtx = useMemo<FluxBoardData>(() => ({
     project, payload: production,
@@ -482,7 +534,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       const t = fluxCtx.resolve(it.ref ?? '')
       return t ? `${t.kind} ${t.group} / ${t.name}${t.task ? ` ${t.task}` : ''}${t.publish ? `\n${t.publish.file}` : ''}` : (it.ref ?? '')
     }
-    const src = { cards, links, byId, media, fluxText }
+    const src = { cards, links, byId, media, fluxText, drawShotboard: (c: CanvasRenderingContext2D, it: Item, b: Box) => drawShotboard(sbCtx, c, it, b) }
     const picked = scope === 'board' ? [regionOf(cards.map(dims))]
       : scope === 'frame' ? selCards.filter(c => c.type === 'frame').slice(0, kind === 'png' ? 1 : undefined).map(f => regionOf([dims(f)]))
       : frames.map(f => regionOf([dims(f)]))
@@ -553,9 +605,15 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     const g = on ? newGroupId() : null
     update(selCards.map(c => ({ rid: c.rid, fields: { group: g } })))
   }
+  // Move lock; locking writes the text lock explicitly, else an absent one would follow it (old boards).
   const lock = () => {
-    const all = selCards.every(c => c.locked)
-    update(selCards.map(c => ({ rid: c.rid, fields: { locked: all ? null : true } })), true)
+    const all = selCards.every(moveLocked)
+    update(selCards.map(c => ({ rid: c.rid, fields: all ? { locked: null }
+      : { locked: true, ...(typeof c.text_locked === 'boolean' ? {} : { text_locked: false }) } })), true)
+  }
+  const lockText = () => {
+    const all = selCards.every(textLocked)
+    update(selCards.map(c => ({ rid: c.rid, fields: { text_locked: !all } })), true)
   }
   const style = (fields: Record<string, unknown>, which: 'cards' | 'links' = 'cards') =>
     update((which === 'cards' ? selCards : selLinks).map(c => ({ rid: c.rid, fields })))
@@ -789,7 +847,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     if (ctrl && k === 'x') { e.preventDefault(); copy(); remove(selection); return }
     if (ctrl && k === 'd') { e.preventDefault(); duplicate(); return }
     if (ctrl && k === 'g') { e.preventDefault(); group(!e.shiftKey); return }
-    if (ctrl && k === 'l') { e.preventDefault(); lock(); return }
+    if (ctrl && k === 'l') { e.preventDefault(); if (e.shiftKey) lockText(); else lock(); return }
     if (ctrl && (e.key === ']' || e.key === '[' || e.code === 'BracketRight' || e.code === 'BracketLeft')) {
       e.preventDefault()
       const up = e.key === ']' || e.code === 'BracketRight'
@@ -797,7 +855,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       return
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selection.length) { e.preventDefault(); remove(selection); return }
-    if (e.key === 'Enter' && selCards.length === 1 && selCards[0].type !== 'image') { e.preventDefault(); setEditing(selCards[0].rid) }
+    if (e.key === 'Enter' && selCards.length === 1 && editable(selCards[0])) { e.preventDefault(); setEditing(selCards[0].rid) }
   }
 
   // Stable handlers for the memoised items: they call the latest closures.
@@ -807,7 +865,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     down: (e, rid) => latest.current.onItemDown(e, rid),
     double: rid => {
       const it = latest.current.byId.get(rid)
-      if (latest.current.canEdit && it && !it.locked && it.type !== 'image') setEditing(rid)
+      if (latest.current.canEdit && it && editable(it)) setEditing(rid)
     },
     commitText: (rid, text) => latest.current.update([{ rid, fields: { text } }]),
     stopEdit: () => setEditing(null),
@@ -832,7 +890,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const sep = <span style={{ width: 1, height: 16, background: 'var(--rule)', margin: '0 4px' }} />
   const one = <T,>(list: Item[], pick: (i: Item) => T) => list.length && list.every(i => pick(i) === pick(list[0])) ? pick(list[0]) : undefined
   const singleLink = selLinks.length === 1 ? selLinks[0] : undefined
-  const singleCard = selCards.length === 1 && selection.length === 1 && !selCards[0].locked && selCards[0].type !== 'ink' && canEdit
+  const singleCard = selCards.length === 1 && selection.length === 1 && !selCards[0].locked && selCards[0].type !== 'ink' && selCards[0].type !== 'shotboard' && canEdit
     ? selCards[0].rid : null
   const placeholder = tr('Double clic pour ecrire', 'Double click to write')
   const media = useCallback((it: Item) => it.image ? flowsApi.pageImageUrl(page.id, collection, it.image, project) : undefined,
@@ -842,6 +900,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const current = presenting ? frames[Math.min(present, frames.length - 1)] : undefined
   return (
     <FluxBoardContext.Provider value={fluxCtx}>
+    <ShotboardContext.Provider value={sbCtx}>
     <div ref={root} onKeyDown={onKey} onKeyUp={e => { if (e.key === ' ') setSpace(false) }} style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', overflow: 'hidden',
                              ...(presenting ? { display: 'flex', flexDirection: 'column', height: '100%' } : {}) }}>
       {!presenting && <>
@@ -995,8 +1054,10 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             {selCards.some(c => c.group)
               ? btn(tr('Degrouper (Ctrl+Maj+G)', 'Ungroup (Ctrl+Shift+G)'), () => group(false), <Ungroup size={13} />)
               : btn(tr('Grouper (Ctrl+G)', 'Group (Ctrl+G)'), () => group(true), <Group size={13} />, false, selCards.length < 2)}
-            {btn(selCards.every(c => c.locked) ? tr('Deverrouiller (Ctrl+L)', 'Unlock (Ctrl+L)') : tr('Verrouiller (Ctrl+L)', 'Lock (Ctrl+L)'), lock,
-                  selCards.every(c => c.locked) ? <LockOpen size={13} /> : <Lock size={13} />, selCards.every(c => c.locked))}
+            {btn(selCards.every(moveLocked) ? tr('Deverrouiller le deplacement (Ctrl+L)', 'Unlock moving (Ctrl+L)') : tr('Verrouiller le deplacement (Ctrl+L)', 'Lock moving (Ctrl+L)'), lock,
+                  selCards.every(moveLocked) ? <Lock size={13} /> : <LockOpen size={13} />, selCards.every(moveLocked))}
+            {btn(selCards.every(textLocked) ? tr('Deverrouiller le texte (Ctrl+Maj+L)', 'Unlock the text (Ctrl+Shift+L)') : tr('Verrouiller le texte (Ctrl+Maj+L)', 'Lock the text (Ctrl+Shift+L)'), lockText,
+                  <Type size={13} />, selCards.every(textLocked))}
             {btn(tr('Dupliquer (Ctrl+D)', 'Duplicate (Ctrl+D)'), duplicate, <Copy size={13} />)}
           </>}
           {selection.length === 1 && byId.get(selection[0]) && btn(tr('Commentaires, reactions, auteur', 'Comments, reactions, author'),
@@ -1121,6 +1182,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         )}
       </div>
     </div>
+    </ShotboardContext.Provider>
     </FluxBoardContext.Provider>
   )
 }

@@ -237,7 +237,7 @@ class BoardV3(unittest.TestCase):
         from flux_flows import board_templates
 
         got = {t["id"]: t for t in board_templates.list_templates()}
-        self.assertEqual(sorted(got), ["moodboard", "planning", "retro", "storyboard"])
+        self.assertEqual(sorted(got), ["moodboard", "planning", "retro", "shotboard", "storyboard"])
         for tpl in got.values():
             self.assertTrue(tpl["label_en"] and tpl["description"])
             keys = {i["key"] for i in tpl["items"]}
@@ -253,6 +253,51 @@ class BoardV3(unittest.TestCase):
                      {"board": 1, "items": [{"key": "a", "type": "note", "style": {}}]}):
             with self.assertRaises(FlowStoreError):
                 board_templates.parse_template(data)
+
+
+class BoardV5(unittest.TestCase):
+    """Separate move / text locks, shotboard and its shot cells (ADR 0083)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_board_v5_"))
+        self.folder = self.tmp / "wall"
+        self.board = _page().data[1]
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _put(self, fields, rid=None):
+        op = {"op": "put", "fields": fields, **({"rid": rid} if rid else {})}
+        return page_data.write_ops(self.folder, self.board, [op], user="ADAM")["rids"][0]
+
+    def test_text_lock_is_its_own_field(self) -> None:
+        rid = self._put({"type": "note", "x": 0, "y": 0, "locked": True})
+        self._put({"text_locked": False}, rid)
+        rec = page_data.read_records(self.folder)["records"][0]
+        self.assertEqual((rec["locked"], rec["text_locked"]), (True, False))
+        with self.assertRaises(FlowStoreError):
+            self._put({"type": "note", "text_locked": "yes"})
+
+    def test_shotboard_and_shot_cells(self) -> None:
+        sb = self._put({"type": "shotboard", "x": 0, "y": 0, "w": 1200, "h": 400})
+        self._put({"type": "shot", "target": sb, "ref": "shot:SEQ010/SH020", "frame_at": 0.5, "frame_at2": 1.0,
+                   "text": "idea"})
+        self.assertEqual(len(page_data.read_records(self.folder)["records"]), 2)
+        for bad in ({"frame_at": 1.5}, {"frame_at2": -0.1}, {"frame_at": True}):
+            with self.assertRaises(FlowStoreError):
+                self._put({"type": "shot", "target": sb, "ref": "shot:SEQ010/SH020", **bad})
+
+    def test_templates_come_move_locked_text_free(self) -> None:
+        from flux_flows import board_templates
+
+        for tpl in board_templates.list_templates():
+            for item in tpl["items"]:
+                if item.get("type") != "link":
+                    self.assertEqual((item["locked"], item["text_locked"]), (True, False), (tpl["id"], item["key"]))
+        tpl = board_templates.parse_template({"board": 1, "items": [{"key": "a", "type": "note", "locked": False}]})
+        self.assertFalse(tpl["items"][0]["locked"])
+        shot = next(t for t in board_templates.list_templates() if t["id"] == "shotboard")
+        self.assertEqual([i["type"] for i in shot["items"]], ["text", "shotboard"])
 
 
 class BoardV4(unittest.TestCase):
@@ -326,7 +371,7 @@ class DataRouter(unittest.TestCase):
     def test_board_templates_route(self) -> None:
         r = self.client.get("/flows/board_templates")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.json()["templates"]), 4)
+        self.assertEqual(len(r.json()["templates"]), 5)
 
     def test_artist_posts_and_reads(self) -> None:
         self._save(_page())

@@ -16,6 +16,7 @@ export interface ExportSource {
   byId: Map<string, Item>
   media: (it: Item) => string | undefined
   fluxText: (it: Item) => string       // "asset CHAR / bob" or similar
+  drawShotboard?: (ctx: CanvasRenderingContext2D, it: Item, b: Box) => void   // ADR 0083 (Shotboard.tsx)
 }
 
 function loadImage(url: string): Promise<HTMLImageElement | null> {
@@ -130,6 +131,9 @@ export async function renderBoard(src: ExportSource, region: Box, scale = 2): Pr
       }
       case 'text':
         textBlock(ctx, it, b, false, INK)
+        break
+      case 'shotboard':
+        if (src.drawShotboard) src.drawShotboard(ctx, it, b)
         break
       case 'flux':
         ctx.fillStyle = FILLS.white

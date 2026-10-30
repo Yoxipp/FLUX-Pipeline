@@ -4,9 +4,10 @@
 // the pointer), a FLUX card (FluxCard.tsx, read from Production through a context).
 
 import { memo, type PointerEvent as RPointerEvent } from 'react'
-import { Lock } from 'lucide-react'
+import { Lock, Type } from 'lucide-react'
 import { FluxCardBody } from './FluxCard'
-import { EMOJI, edgePoint, fillOf, fontOf, strokeOf, type Box, type Emoji, type Item } from './model'
+import { EMOJI, edgePoint, fillOf, fontOf, moveLocked, strokeOf, textLocked, type Box, type Emoji, type Item } from './model'
+import { ShotboardBody } from './Shotboard'
 
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'
 export interface ItemHandlers {
@@ -66,7 +67,7 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
       <div onPointerDown={e => on.down(e, it.rid)} onDoubleClick={e => { e.stopPropagation(); on.double(it.rid) }} title={title}
            style={{ position: 'absolute', left: x, top: y, width: w, height: h, zIndex: 0, boxSizing: 'border-box', borderRadius: 4,
                     background: `color-mix(in oklch, ${fillOf(it)} 30%, transparent)`, border: '1px solid var(--rule-2)',
-                    outline: ring, outlineOffset: 1, pointerEvents: 'auto', cursor: p.canEdit && !it.locked ? 'grab' : 'default' }}>
+                    outline: ring, outlineOffset: 1, pointerEvents: 'auto', cursor: p.canEdit && !moveLocked(it) ? 'grab' : 'default' }}>
         <div style={{ position: 'absolute', left: 0, bottom: '100%', marginBottom: 4, fontSize: 13, color: 'var(--ink-2)',
                       whiteSpace: 'nowrap', fontWeight: 600 }}>
           {editing(p)
@@ -76,8 +77,21 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
                      style={{ font: 'inherit', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 3, padding: '0 4px' }} />
             : it.text || p.placeholder}
         </div>
-        {it.locked && p.selected && <Lock size={12} style={{ position: 'absolute', right: 4, top: 4, color: 'var(--ink-3)' }} />}
+        {p.selected && lockIcons(it, { right: 4, top: 4 })}
         {p.handles && handles(it, on)}
+        {p.badges && badgeRow(it.rid, p.badges, on)}
+      </div>
+    )
+  }
+  if (type === 'shotboard') {
+    // Grid read from Production (Shotboard.tsx); its size follows the grid (BoardWidget).
+    return (
+      <div onPointerDown={e => on.down(e, it.rid)} title={title}
+           style={{ position: 'absolute', left: x, top: y, width: w, height: h, zIndex: 1, boxSizing: 'border-box', borderRadius: 6,
+                    background: 'oklch(95% 0.005 250)', border: '1px solid oklch(80% 0.01 250)', outline: ring, outlineOffset: 1,
+                    pointerEvents: 'auto', cursor: p.canEdit && !moveLocked(it) ? 'grab' : 'default', userSelect: 'none' }}>
+        <ShotboardBody it={it} />
+        {p.selected && lockIcons(it, { right: -16, top: -2 })}
         {p.badges && badgeRow(it.rid, p.badges, on)}
       </div>
     )
@@ -95,7 +109,7 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
                 onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur() }}
                 style={{ width: '100%', minHeight: Math.max(20, h - 20), border: 'none', outline: 'none', background: 'transparent',
                          color: 'inherit', font: 'inherit', resize: 'none', textAlign: centred ? 'center' : 'left', padding: 0 }} />
-    : (it.text || <span style={{ opacity: 0.45 }}>{p.canEdit && !it.locked ? p.placeholder : ''}</span>)
+    : (it.text || <span style={{ opacity: 0.45 }}>{p.canEdit && !textLocked(it) ? p.placeholder : ''}</span>)
   return (
     <div onPointerDown={e => on.down(e, it.rid)}
          onDoubleClick={e => { e.stopPropagation(); on.double(it.rid) }}
@@ -108,7 +122,7 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
                   color: fillOf(it) === 'transparent' ? 'var(--ink)' : INK,
                   boxShadow: type === 'note' || type === 'card' || isFlux ? '0 1px 2px oklch(0% 0 0 / 0.12)' : undefined,
                   overflow: isFlux ? 'hidden' : undefined,
-                  pointerEvents: 'auto', cursor: p.canEdit && !it.locked ? 'grab' : 'default',
+                  pointerEvents: 'auto', cursor: p.canEdit && !moveLocked(it) ? 'grab' : 'default',
                   fontSize: font, fontWeight: it.bold ? 650 : undefined, lineHeight: 1.35, whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word', userSelect: 'none', boxSizing: 'border-box',
                   display: centred ? 'flex' : undefined, alignItems: 'center', justifyContent: 'center', textAlign: centred ? 'center' : undefined }}>
@@ -118,7 +132,7 @@ export const BoardItem = memo(function BoardItem(p: ItemProps) {
                              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', borderRadius: 6 }} /> : null)
         : isFlux ? <FluxCardBody fluxRef={it.ref} />
         : <div style={{ position: 'relative', width: '100%' }}>{text}</div>}
-      {it.locked && p.selected && <Lock size={12} style={{ position: 'absolute', right: -16, top: -2, color: 'var(--ink-3)' }} />}
+      {p.selected && lockIcons(it, { right: -16, top: -2 })}
       {p.handles && handles(it, on)}
       {p.badges && badgeRow(it.rid, p.badges, on)}
     </div>
@@ -155,7 +169,18 @@ function handles(it: Item, on: ItemHandlers) {
   ))
 }
 
-function editing(p: ItemProps) { return p.editing && !p.it.locked && !['image', 'ink', 'flux'].includes(p.it.type ?? '') }
+function editing(p: ItemProps) { return p.editing && !textLocked(p.it) && !['image', 'ink', 'flux', 'shotboard'].includes(p.it.type ?? '') }
+
+// Move lock (padlock) and text lock (letter T), shown on a selected object.
+function lockIcons(it: Item, at: { right: number; top: number }) {
+  if (!moveLocked(it) && !textLocked(it)) return null
+  return (
+    <span style={{ position: 'absolute', ...at, display: 'inline-flex', flexDirection: 'column', gap: 2, color: 'var(--ink-3)' }}>
+      {moveLocked(it) && <Lock size={12} />}
+      {textLocked(it) && <Type size={12} />}
+    </span>
+  )
+}
 
 interface LinkProps {
   it: Item; a: Box; b: Box; aShape?: Item['shape']; bShape?: Item['shape']
