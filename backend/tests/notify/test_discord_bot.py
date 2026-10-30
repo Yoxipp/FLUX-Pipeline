@@ -99,6 +99,95 @@ class CommandTests(_SharedFolder):
         self.assertNotIn("pas ici", text)
 
 
+class Step2Tests(_SharedFolder):
+    """/chat [n] and /calendar (ADR 0073 step 2)."""
+
+    def _link(self, user="LEA", discord_id="111"):
+        store.add_link_code("P", "ABCD2345", discord_id, NOW)
+        store.link_discord("P", user, "ABCD2345", NOW)
+
+    def test_commands_are_registered(self):
+        names = {c["name"]: c for c in discord_bot.COMMANDS}
+        self.assertTrue({"link", "mentions", "chat", "calendar"} <= set(names))
+        self.assertEqual(names["chat"]["options"][0]["max_value"], discord_bot.CHAT_MAX)
+
+    def test_chat_and_calendar_refused_when_not_linked(self):
+        with mock.patch("features.activity.chat_manager.get_messages") as get:
+            self.assertEqual(discord_bot.cmd_chat("P", "999"), discord_bot.NOT_LINKED)
+        get.assert_not_called()
+        self.assertEqual(discord_bot.cmd_calendar("P", "999", "2026-10-30"), discord_bot.NOT_LINKED)
+        prefs = store.write_user("LEA", {"discord_id": "222"})    # typed by hand, never linked
+        self.assertFalse(store.is_linked(prefs))
+        self.assertEqual(discord_bot.cmd_chat("P", "222"), discord_bot.NOT_LINKED)
+
+    def test_chat_last_n_of_this_project(self):
+        self._link()
+        rows = [{"user": "TOM", "message": "salut\nla team", "date": "2026-10-30", "time": "10:00"},
+                {"user": "LEA", "message": "yo", "date": "2026-10-30", "time": "10:01"}]
+        with mock.patch("features.activity.chat_manager.get_messages", return_value=rows) as get:
+            text = discord_bot.answer("P", "chat", "111", NOW, {"n": 5})
+        get.assert_called_once_with(limit=5, project="P")
+        self.assertIn("**TOM** : salut la team", text)
+        self.assertLess(text.index("TOM"), text.index("**LEA**"))     # oldest first
+
+    def test_chat_n_is_clamped(self):
+        self._link()
+        with mock.patch("features.activity.chat_manager.get_messages", return_value=[]) as get:
+            discord_bot.answer("P", "chat", "111", NOW, {"n": 500})
+            discord_bot.answer("P", "chat", "111", NOW, {"n": "x"})
+        self.assertEqual([c.kwargs["limit"] for c in get.call_args_list],
+                         [discord_bot.CHAT_MAX, discord_bot.CHAT_DEFAULT])
+
+    def test_chat_keeps_newest_within_2000_chars(self):
+        self._link()
+        rows = [{"user": "TOM", "message": f"msg{i:02d} " + "x" * 290, "date": "2026-10-30", "time": "10:00"}
+                for i in range(20)]
+        with mock.patch("features.activity.chat_manager.get_messages", return_value=rows):
+            text = discord_bot.cmd_chat("P", "111", 20)
+        self.assertLessEqual(len(text), discord_bot.MAX_CHARS)
+        self.assertIn("msg19", text)
+        self.assertNotIn("msg00", text)
+        self.assertIn("plus ancien(s) dans FLUX", text)
+
+    def test_calendar_mine_and_proposals(self):
+        self._link()
+        items = [
+            {"id": "a", "title": "Rig Lea", "owner": "LEA", "created_by": "TOM", "start": "2026-11-02",
+             "end": "2026-11-05", "status": "proposed"},
+            {"id": "b", "title": "Skin", "owner": "LEA", "created_by": "LEA", "start": "2026-10-20",
+             "end": "2026-10-25", "status": "accepted"},
+            {"id": "c", "title": "Anim", "owner": "LEA", "created_by": "LEA", "start": "2026-10-30",
+             "end": "2026-10-30", "status": "in_progress"},
+            {"id": "d", "title": "Fini", "owner": "LEA", "created_by": "LEA", "start": "2026-10-01",
+             "end": "2026-10-01", "status": "done"},
+            {"id": "e", "title": "Refuse", "owner": "LEA", "created_by": "TOM", "start": "2026-10-01",
+             "end": "2026-10-01", "status": "declined"},
+            {"id": "f", "title": "Pas a moi", "owner": "TOM", "created_by": "LEA", "start": "2026-10-30",
+             "end": "2026-10-30", "status": "proposed"},
+        ]
+        with mock.patch("features.calendar.calendar_store.load", return_value={"items": items}) as load:
+            text = discord_bot.cmd_calendar("P", "111", "2026-10-30")
+        load.assert_called_once_with("P")
+        self.assertIn("1 proposition(s) a valider", text)
+        self.assertIn("2026-11-02 > 2026-11-05 **Rig Lea** (de TOM)", text)
+        self.assertIn("**Skin** (pas commence, en retard)", text)
+        self.assertIn("2026-10-30 **Anim** (en cours)", text)
+        for absent in ("Fini", "Refuse", "Pas a moi"):
+            self.assertNotIn(absent, text)
+
+    def test_calendar_empty_and_long(self):
+        self._link()
+        with mock.patch("features.calendar.calendar_store.load", return_value={"items": []}):
+            self.assertIn("Rien pour toi", discord_bot.cmd_calendar("P", "111", "2026-10-30"))
+        many = [{"id": str(i), "title": "t" * 200, "owner": "LEA", "created_by": "TOM", "start": "2026-11-01",
+                 "end": "2026-11-01", "status": "proposed"} for i in range(30)]
+        with mock.patch("features.calendar.calendar_store.load", return_value={"items": many}):
+            text = discord_bot.cmd_calendar("P", "111", "2026-10-30")
+        self.assertLessEqual(len(text), discord_bot.MAX_CHARS)
+        self.assertTrue(text.endswith("- (suite dans FLUX)"))       # whole lines only
+        self.assertTrue(all(line.endswith(")") for line in text.splitlines()[1:]))
+
+
 class ViaBotTests(_SharedFolder):
     def setUp(self):
         super().setUp()

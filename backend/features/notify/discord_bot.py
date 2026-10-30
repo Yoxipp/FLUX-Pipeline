@@ -1,8 +1,9 @@
-# discord_bot.py - the Discord bot of a project (ADR 0073, step 1).
+# discord_bot.py - the Discord bot of a project (ADR 0073, steps 1 and 2).
 #
 # Hosted by ONE PC: the one that holds the token (bot_secret, DPAPI). FLUX opens an
 # outgoing Gateway WebSocket to Discord, nothing listens on the network.
-#   - slash commands /link and /mentions, answered ephemerally (only the caller sees);
+#   - slash commands /link, /mentions, /chat [n] and /calendar, answered ephemerally
+#     (only the caller sees); all but /link need an account linked by /link;
 #   - private messages (DM) for the phone notifications of linked accounts;
 #   - DMs left by the other PCs in _flux_setup/notify_bot/ are sent from here.
 # No intent is requested (0): the bot never reads messages, only the commands typed to it.
@@ -32,11 +33,21 @@ PUMP_S = 5.0
 ALIVE_S = 30.0
 MAX_CHARS = 2000
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O/1/I
+CHAT_DEFAULT = 10
+CHAT_MAX = 20
+LIST_MAX = 10
+NOT_LINKED = "Ce compte Discord n'est pas lie a FLUX : tape /link."
 
 COMMANDS = [
     {"name": "link", "type": 1, "description": "Lier ton compte Discord a ton compte FLUX (code a coller dans FLUX)",
      "contexts": [0, 1]},
     {"name": "mentions", "type": 1, "description": "Tes mentions FLUX non lues dans ce projet",
+     "contexts": [0, 1]},
+    {"name": "chat", "type": 1, "description": "Les derniers messages du chat du projet",
+     "contexts": [0, 1],
+     "options": [{"name": "n", "type": 4, "description": f"Nombre de messages ({CHAT_DEFAULT} par defaut, {CHAT_MAX} max)",
+                  "required": False, "min_value": 1, "max_value": CHAT_MAX}]},
+    {"name": "calendar", "type": 1, "description": "Tes elements du calendrier et les propositions a valider",
      "contexts": [0, 1]},
 ]
 
@@ -116,29 +127,118 @@ def cmd_link(project: str, discord_id: str, now: float) -> str:
             f"Colle-le dans FLUX : Parametres > User > Notifications telephone > Lier Discord.")
 
 
+def _one_line(text, size: int = 300) -> str:
+    return " ".join(str(text or "").split())[:size]
+
+
+def _fit(lines: list[str]) -> str:
+    """Join whole lines up to MAX_CHARS; the rest is announced, never cut mid-line."""
+    tail = "- (suite dans FLUX)"
+    out: list[str] = []
+    size = 0
+    for line in lines:
+        if size + len(line) + 1 > MAX_CHARS - len(tail) - 1:
+            out.append(tail)
+            break
+        out.append(line)
+        size += len(line) + 1
+    return "\n".join(out)
+
+
 def cmd_mentions(project: str, discord_id: str, limit: int = 10) -> str:
     user = store.user_for_discord(discord_id)
     if not user:
-        return "Ce compte Discord n'est pas lie a FLUX : tape /link."
+        return NOT_LINKED
     from features.activity.chat_manager import get_mentions
     mine = [m for m in get_mentions(user, unread_only=True) if (m.get("project") or "") in ("", project)]
     if not mine:
         return f"Aucune mention non lue dans {project}."
     lines = [f"{len(mine)} mention(s) non lue(s) dans {project} :"]
     for m in mine[:limit]:
-        text = " ".join(str(m.get("text") or "").split())[:300]
-        lines.append(f"- {m.get('date', '')} {m.get('time', '')} **{m.get('from_user', '?')}** : {text}")
+        lines.append(f"- {m.get('date', '')} {m.get('time', '')} **{m.get('from_user', '?')}** : {_one_line(m.get('text'))}")
     if len(mine) > limit:
         lines.append(f"- et {len(mine) - limit} autres dans FLUX")
-    out = "\n".join(lines)
-    return out if len(out) <= MAX_CHARS else out[: MAX_CHARS - 3] + "..."
+    return _fit(lines)
 
 
-def answer(project: str, name: str, discord_id: str, now: float) -> str:
+def cmd_chat(project: str, discord_id: str, n: int = CHAT_DEFAULT) -> str:
+    """The last *n* messages of the project's chat, oldest first. When they do not
+    fit in one Discord message, the oldest ones are left out (never cut mid-line)."""
+    if not store.user_for_discord(discord_id):
+        return NOT_LINKED
+    n = max(1, min(int(n or CHAT_DEFAULT), CHAT_MAX))
+    from features.activity.chat_manager import get_messages
+    messages = get_messages(limit=n, project=project)
+    if not messages:
+        return f"Aucun message dans le chat de {project}."
+    head = f"Chat de {project}, {len(messages)} dernier(s) message(s) :"
+    lines: list[str] = []
+    size = len(head)
+    for m in reversed(messages):            # newest first, so the newest always fit
+        line = f"- {m.get('date', '')} {m.get('time', '')} **{m.get('user', '?')}** : " \
+               f"{_one_line(m.get('message') or m.get('text'))}"
+        if size + 1 + len(line) > MAX_CHARS - 40:
+            lines.append(f"- ({len(messages) - len(lines)} plus ancien(s) dans FLUX)")
+            break
+        lines.append(line)
+        size += 1 + len(line)
+    return "\n".join([head, *reversed(lines)])
+
+
+def _span(item: dict) -> str:
+    start, end = str(item.get("start") or ""), str(item.get("end") or "")
+    return start if start == end or not end else f"{start} > {end}"
+
+
+def cmd_calendar(project: str, discord_id: str, today: str, limit: int = LIST_MAX) -> str:
+    """Proposals waiting for my answer, then my open items (not done, not declined)."""
+    user = store.user_for_discord(discord_id)
+    if not user:
+        return NOT_LINKED
+    from features.accounts.alias_views import resolve_calendar_items
+    from features.accounts.aliases import same_user
+    from features.calendar import calendar_store
+    items = [i for i in resolve_calendar_items(calendar_store.load(project)["items"])
+             if isinstance(i, dict) and same_user(str(i.get("owner") or ""), user)]
+    by_start = lambda i: (str(i.get("start") or ""), str(i.get("end") or ""))  # noqa: E731
+    proposed = sorted((i for i in items if i.get("status") == "proposed"), key=by_start)
+    mine = sorted((i for i in items if i.get("status") in ("accepted", "in_progress")), key=by_start)
+    if not proposed and not mine:
+        return f"Rien pour toi dans le calendrier de {project}."
+    lines = []
+    if proposed:
+        lines.append(f"{len(proposed)} proposition(s) a valider dans {project} :")
+        for i in proposed[:limit]:
+            lines.append(f"- {_span(i)} **{_one_line(i.get('title'), 200)}** (de {i.get('created_by') or '?'})")
+        if len(proposed) > limit:
+            lines.append(f"- et {len(proposed) - limit} autres dans FLUX")
+        lines.append("Pour repondre : Calendrier dans FLUX.")
+    if mine:
+        lines.append(f"Tes elements en cours dans {project} :")
+        for i in mine[:limit]:
+            state = "en cours" if i.get("status") == "in_progress" else "pas commence"
+            if str(i.get("end") or "") < today:
+                state += ", en retard"
+            lines.append(f"- {_span(i)} **{_one_line(i.get('title'), 200)}** ({state})")
+        if len(mine) > limit:
+            lines.append(f"- et {len(mine) - limit} autres dans FLUX")
+    return _fit(lines)
+
+
+def answer(project: str, name: str, discord_id: str, now: float, options: dict | None = None) -> str:
+    options = options or {}
     if name == "link":
         return cmd_link(project, discord_id, now)
     if name == "mentions":
         return cmd_mentions(project, discord_id)
+    if name == "chat":
+        try:
+            n = int(options.get("n") or CHAT_DEFAULT)
+        except (TypeError, ValueError):
+            n = CHAT_DEFAULT
+        return cmd_chat(project, discord_id, n)
+    if name == "calendar":
+        return cmd_calendar(project, discord_id, time.strftime("%Y-%m-%d", time.localtime(now)))
     return "Commande inconnue."
 
 
@@ -280,11 +380,14 @@ class BotRunner:
         iid, itoken = data.get("id"), data.get("token")
         user = (data.get("member") or {}).get("user") or data.get("user") or {}
         name = (data.get("data") or {}).get("name", "")
+        options = {o.get("name"): o.get("value") for o in (data.get("data") or {}).get("options") or []
+                   if isinstance(o, dict)}
         # Defer at once (3 s limit, the shared folder can be slow), then edit the answer.
         await asyncio.to_thread(request_json, "POST", f"{API}/interactions/{iid}/{itoken}/callback",
                                 {"type": 5, "data": {"flags": EPHEMERAL}})
         try:
-            text = await asyncio.to_thread(answer, self.project, name, str(user.get("id") or ""), time.time())
+            text = await asyncio.to_thread(answer, self.project, name, str(user.get("id") or ""), time.time(),
+                                           options)
         except Exception as exc:  # noqa: BLE001
             log.warning("discord bot /%s failed: %s", name, exc)
             text = "FLUX n'a pas pu repondre, reessaie."

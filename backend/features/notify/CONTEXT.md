@@ -16,7 +16,7 @@ par defaut, URL remplacable). Un relais absent ou en erreur ne bloque jamais une
 | `relay_secrets.py` | Masquage `****` + 4 caracteres, sujet aleatoire, `redact`. |
 | `channels/` | `discord.py`, `ntfy.py` : HTTP stdlib (`urllib`), `SendResult` (ok, status, retry_after, permanent). `request_json` (toute methode + en-tetes) pour le bot. |
 | `bot_secret.py` | Jeton du bot sur le PC hebergeur seulement : `%APPDATA%/FluxPipeline/discord_bot_tokens.json`, chiffre DPAPI (compte Windows). Jamais dans le partage. |
-| `discord_bot.py` | Bot Discord (ADR 0073 etape 1) : Gateway sortant (`websockets`, intents 0), `/link` et `/mentions` en reponse ephemere, DM des notifs, envoi de la file partagee, fichier de presence. `FLUX_DISCORD_BOT=0` le coupe (et `FLUX_NOTIFY=0`). |
+| `discord_bot.py` | Bot Discord (ADR 0073 etapes 1 et 2) : Gateway sortant (`websockets`, intents 0), `/link`, `/mentions`, `/chat [n]` (10 par defaut, 20 max, les plus recents gardes si > 2000 car.) et `/calendar` (propositions a valider + mes elements non finis, retard marque) en reponse ephemere ; tout sauf `/link` exige un compte lie par `/link` (`store.user_for_discord`) ; DM des notifs, envoi de la file partagee, fichier de presence. `FLUX_DISCORD_BOT=0` le coupe (et `FLUX_NOTIFY=0`). |
 
 Bot, fichiers du partage (`_flux_setup/`, aucun jeton) : `collab.json` `notify.discord_bot` (`app_id`, `name`, `host`),
 `discord_bot_alive.json` (presence, ecrite par l'hebergeur toutes les 30 s, en ligne si < 120 s), `discord_links.json`
