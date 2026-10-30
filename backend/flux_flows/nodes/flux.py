@@ -1174,3 +1174,49 @@ def refuse_publish(ctx, inputs, params):
     if isinstance(probe, dict) and not probe.get("core_started"):
         probe["refused"] = message
     raise NodeError(message, code=REFUSED_CODE)
+
+
+# -- flux.team_reply (ADR 0081) -------------------------------------------------------
+
+def _reply_args(ctx, inputs) -> Tuple[str, Dict[str, Any]]:
+    text = _required_text(inputs.get("text"), "text")
+    return text, ctx.payload if ctx.payload.get("message_id") else {}
+
+
+def _simulate_team_reply(ctx, inputs, params):
+    text, cmd = _reply_args(ctx, inputs)
+    where = f"#{cmd.get('channel') or 'general'}" if cmd else "nulle part (run hors d'une commande)"
+    return {"lines": [_line("chat", f"repondrait dans {where} : {text}")], "outputs": {}}
+
+
+@flow_node("flux.team_reply", "TeamReply", icon="MessageSquareReply",
+           inputs=[_EXEC, port("text", "str", "Reponse", "Answer", "Zip pret : //server/proj/SEQ010.zip",
+                               required=True)],
+           outputs=list(_EXITS),
+           effect=True, simulate=_simulate_team_reply, shelf=50,
+           aliases=["repondre", "reponse", "chat", "team", "commande", "reply"],
+           doc_fr="Repond a la commande du chat Team (TeamCommand) : message signe FLUX dans le fil du message, meme "
+                  "canal. Lance autrement (Run de l'editeur), il ne poste rien et le note dans le journal.",
+           doc_en="Answers the Team chat command (TeamCommand): a message signed FLUX in the thread of the message, "
+                  "same channel. Started another way (editor Run), it posts nothing and says so in the log.")
+def team_reply(ctx, inputs, params):
+    from features.activity.chat_manager import post_message
+    from flux_flows.team_commands import REPLY_NAME
+
+    text, cmd = _reply_args(ctx, inputs)
+    if not cmd:
+        ctx.log(f"Pas de commande Team a qui repondre (run hors du chat) : {text}", "warn")
+        return {}
+    project = _text((ctx.context or {}).get("project"))
+    if not project:
+        raise NodeError("Pas de projet : le chat est celui d'un projet")
+    channel = cmd.get("channel") or "general"
+    audience = None
+    if channel != "general":   # a restricted channel: only those who see it are mentioned
+        from features.team import team_meta
+
+        audience = lambda who: channel not in team_meta.hidden_channels(project, who)  # noqa: E731
+    if post_message(REPLY_NAME, text, project, channel=channel, reply_to=cmd.get("thread") or cmd.get("message_id"),
+                    via=cmd.get("user"), audience=audience) is None:
+        raise NodeError("La reponse n'a pas pu etre ecrite dans le chat")
+    return {}

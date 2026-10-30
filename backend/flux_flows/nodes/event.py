@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path, PureWindowsPath as PurePath
+
 from flux_flows.nodes.registry import flow_node, port
 
 _THEN = port("then", "exec", "Suite du flow", "Next step")
@@ -217,3 +219,61 @@ async def publish_request(ctx, inputs, params):
     infos = publish_infos(name + ext if name and ext.startswith(".") else name, soft=soft,
                           project=c.get("project") or "", user=c.get("user") or "")
     return {**values, "values": values, "soft": soft, "infos": infos}
+
+
+# -- ADR 0081: a command typed in the Team chat (`/zip "<folder>"`) ---------------------------
+
+_COMMAND_EXAMPLE = {"command": "zip", "args": ["//server/proj/SEQ010"], "arg": "//server/proj/SEQ010",
+                    "text": '"//server/proj/SEQ010"', "user": "ADAM", "channel": "general", "message_id": ""}
+
+
+@flow_node("event.team_command", "TeamCommand", icon="SquareSlash",
+           outputs=[_THEN,
+                    port("arg", "str", "Premier argument (entre guillemets s'il a des espaces)",
+                         "First argument (in quotes when it has spaces)", "//server/proj/SEQ010"),
+                    port("path", "path", "Premier argument comme chemin (vide sans argument)",
+                         "First argument as a path (empty without an argument)", "//server/proj/SEQ010"),
+                    port("dir", "dir", "Le meme chemin si c'est un dossier existant, sinon vide (a zipper, a lister...)",
+                         "The same path when it is an existing folder, else empty (to zip, to list...)",
+                         "//server/proj/SEQ010"),
+                    port("parent", "dir", "Dossier qui contient ce chemin (ex. ou poser le zip)",
+                         "Folder that holds this path (e.g. where to put the zip)", "//server/proj"),
+                    port("args", "list[str]", "Tous les arguments", "All the arguments", ["//server/proj/SEQ010"]),
+                    port("text", "str", "Texte brut apres la commande", "Raw text after the command",
+                         '"//server/proj/SEQ010"'),
+                    port("user", "str", "Artiste qui a tape la commande", "Artist who typed the command", "ADAM"),
+                    port("channel", "str", "Canal du message", "Channel of the message", "general"),
+                    port("values", "dict", "Tout en un (pour Template : {arg}, {user}, {channel}...)",
+                         "All in one (for Template: {arg}, {user}, {channel}...)", _COMMAND_EXAMPLE)],
+           params=[port("name", "str", "Nom de la commande, sans / (minuscules, chiffres, - et _)",
+                        "Command name, without / (lower case, digits, - and _)", "zip", required=True,
+                        wirable=False),
+                   port("help", "str", "Aide montree pendant la saisie", "Help shown while typing",
+                        '"<dossier>" : zippe le dossier a cote de lui', wirable=False),
+                   port("channels", "pattern", "Canaux ou elle marche (espaces ou virgules), vide = tous",
+                        "Channels where it works (spaces or commas), empty = all", "general rendu", default="",
+                        wirable=False),
+                   port("confirm", "bool", "Demander une confirmation avant de lancer",
+                        "Ask for a confirmation before running", False, default=False, wirable=False)],
+           shelf=9, aliases=["commande", "chat", "team", "slash", "/"],
+           doc_fr="Part quand un artiste tape /nom dans le chat de la page Team (ex. /zip \"//serveur/projet/SEQ010\"). "
+                  "Le flow tourne sur le poste de l'artiste, s'il voit le canal ; flow perso = commande pour soi. "
+                  "TeamReply repond dans le fil du message.",
+           doc_en="Starts when an artist types /name in the chat of the Team page (e.g. /zip \"//server/proj/SEQ010\"). "
+                  "The flow runs on the workstation of the artist, if they see the channel; perso flow = a command for "
+                  "oneself. TeamReply answers in the thread of the message.")
+async def team_command(ctx, inputs, params):
+    p = ctx.payload
+    if not p.get("command"):   # a run by hand: example values
+        values = {**_COMMAND_EXAMPLE, "command": params.get("name") or "zip",
+                  "user": (ctx.context or {}).get("user") or "ADAM"}
+    else:
+        args = [str(a) for a in p.get("args") or []]
+        values = {"command": p.get("command"), "args": args, "arg": args[0] if args else "",
+                  "text": p.get("text") or "", "user": p.get("user") or "", "channel": p.get("channel") or "general",
+                  "message_id": p.get("message_id") or ""}
+    first = str(values["arg"] or "")
+    path = PurePath(first) if first else None
+    return {**{k: values[k] for k in ("arg", "args", "text", "user", "channel")}, "values": values,
+            "path": path.as_posix() if path else "", "dir": path.as_posix() if path and Path(first).is_dir() else "",
+            "parent": path.parent.as_posix() if path and path.parent != path else ""}

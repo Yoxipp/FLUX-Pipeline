@@ -4,14 +4,17 @@
 // link opens in the system browser; "Nouvelle reunion" makes a Jitsi link or opens Meet /
 // Teams to paste one, posts it in the channel and can notify everyone's phone.
 // Channels, call links and pins: leads. A reaction belongs to its author.
+// ADR 0081: a message starting with /name runs the active flows with a TeamCommand node of
+// that name, on this workstation; `/` completes the commands allowed in the channel.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Archive, Eye, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { setMyPresence, teamApi, type TeamAttachment, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
+import { flowsApi } from '../../api/flows'
 import { PresenceDot } from '../../hooks/usePresence'
 import { PeoplePanel } from '../../components/shared/PeoplePanel'
-import type { PageAccess, PageDataOp } from '../flow_editor/types'
+import type { PageAccess, PageDataOp, TeamCommand } from '../flow_editor/types'
 import { AccessPicker, cleanAccess, isEveryone } from './PageAccess'
 import { useTr } from '../flow_editor/useTr'
 import type { DataWidgetProps } from './DataWidgets'
@@ -20,6 +23,7 @@ const GENERAL = 'general'
 const REFRESH_MS = 4000
 const EMOJI: Record<TeamEmoji, string> = { like: '\u{1F44D}', love: '❤️', laugh: '\u{1F602}', question: '❓', check: '✅' }
 const URL_RE = /(https?:\/\/[^\s<>"]+)/g
+const COMMAND_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(\s|$)/
 const fail = (err: unknown) => toast.error((err as Error).message)
 
 export function openLink(url: string) {
@@ -66,6 +70,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
   const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined } | null>(null)
   const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null)   // right click on a channel (leads)
+  const [commands, setCommands] = useState<TeamCommand[]>([])
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
@@ -110,6 +115,10 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     return { names, byName, archived: recs.filter(r => r.archived && r.name !== GENERAL) }
   }, [records])
   const current = channels.names.includes(channel) ? channel : GENERAL
+  useEffect(() => {
+    if (!project || preview) { setCommands([]); return }
+    flowsApi.teamCommands(project, current).then(r => setCommands(r.commands)).catch(() => setCommands([]))
+  }, [project, preview, current])
   const chanRec = channels.byName.get(current)
   const roots = useMemo(() => messages.filter(m => chanOf(m) === current && !m.reply_to), [messages, current])
   const replies = useMemo(() => {
@@ -152,6 +161,14 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const send = async (body: { message: string; reply_to?: string; attachments?: TeamAttachment[]; notify_all?: boolean }) => {
     if (!project) return
     await teamApi.send(project, { ...body, channel: current === GENERAL ? undefined : current })
+    atBottom.current = true
+    load()
+  }
+  const runCommand = async (text: string, reply_to?: string) => {
+    if (!project) return
+    const r = await flowsApi.runTeamCommand({ project, text, reply_to, channel: current === GENERAL ? undefined : current })
+    const refused = r.runs.filter(x => x.status === 'refused' || x.status === 'skipped')
+    if (refused.length) toast.error(refused.map(x => `${x.flow} : ${x.error ?? x.status}`).join('\n'))
     atBottom.current = true
     load()
   }
@@ -304,6 +321,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
           ))}
         </div>
         <Composer users={users} project={project} placeholder={tr(`Message dans #${current} (@nom previent l’artiste)`, `Message in #${current} (@name notifies)`)}
+                  commands={commands} onCommand={text => runCommand(text)}
                   onSend={(message, attachments) => send({ message, attachments })} />
       </div>
 
@@ -341,6 +359,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
             ))}
           </div>
           <Composer users={users} project={project} placeholder={tr('Repondre dans le fil', 'Reply in the thread')}
+                    commands={commands} onCommand={text => runCommand(text, root.id)}
                     onSend={(message, attachments) => send({ message, attachments, reply_to: root.id })} />
         </div>
       )}
@@ -363,7 +382,8 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
          style={{ position: 'relative', padding: '5px 8px', borderRadius: 6, background: hover ? 'var(--paper-2)' : undefined }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 12 }}>
-        <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b><span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
+        <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b>
+        {m.via && <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{tr(`pour ${m.via}`, `for ${m.via}`)}</span>}<span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
         {pinned && <Pin size={10} style={{ color: 'var(--accent)' }} />}
       </div>
       <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><Text text={m.message} users={users} /></div>
@@ -398,17 +418,30 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
   )
 }
 
-function Composer({ users, project, placeholder, onSend }: {
-  users: string[]; project: string; placeholder: string; onSend: (message: string, attachments: TeamAttachment[]) => Promise<void>
+function Composer({ users, project, placeholder, commands, onCommand, onSend }: {
+  users: string[]; project: string; placeholder: string; commands: TeamCommand[]
+  onCommand: (text: string) => Promise<void>; onSend: (message: string, attachments: TeamAttachment[]) => Promise<void>
 }) {
   const { tr } = useTr()
   const [text, setText] = useState('')
   const [files, setFiles] = useState<TeamAttachment[]>([])
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState<string | null>(null)   // a command with confirm, waiting for Lancer
   const at = /@([A-Za-z0-9_.-]*)$/.exec(text)
   // A name already typed in full is not suggested again (Enter then sends).
   const suggest = at && !users.some(u => u.toUpperCase() === at[1].toUpperCase())
     ? users.filter(u => u.toUpperCase().startsWith(at[1].toUpperCase())).slice(0, 6) : []
+  // `/` at the start: the commands of the channel (one line per name, several flows may answer it).
+  const names = useMemo(() => [...new Map(commands.map(c => [c.name, c])).values()], [commands])
+  const slash = /^\/([A-Za-z0-9_-]*)$/.exec(text)
+  const cmdSuggest = slash && !names.some(c => c.name === slash[1].toLowerCase())
+    ? names.filter(c => c.name.startsWith(slash[1].toLowerCase())).slice(0, 8) : []
+  const typed = COMMAND_RE.exec(text)
+  const typedCmd = typed ? names.find(c => c.name === typed[1].toLowerCase()) : undefined
+  const runCmd = async (line: string) => {
+    setBusy(true)
+    try { await onCommand(line); setText(''); setAsking(null) } catch (err) { fail(err) } finally { setBusy(false) }
+  }
   const attachPaths = async (paths: string[]) => {
     for (const p of paths) {
       try { const a = await teamApi.attach(project, p); setFiles(f => [...f.filter(x => x.file !== a.file), a]) } catch (err) { fail(err) }
@@ -429,6 +462,13 @@ function Composer({ users, project, placeholder, onSend }: {
   const submit = async () => {
     const msg = text.trim()
     if ((!msg && !files.length) || busy) return
+    if (typed) {
+      if (!typedCmd) { toast.error(tr(`Commande /${typed[1]} inconnue dans ce canal (un espace devant envoie le texte tel quel).`, `Unknown command /${typed[1]} in this channel (a leading space sends the text as is).`)); return }
+      if (files.length) { toast.error(tr('Une commande ne prend pas de fichier joint.', 'A command takes no attached file.')); return }
+      if (typedCmd.confirm) { setAsking(msg); return }
+      await runCmd(msg)
+      return
+    }
     setBusy(true)
     try { await onSend(msg || files.map(f => f.name).join(', '), files); setText(''); setFiles([]) } catch (err) { fail(err) } finally { setBusy(false) }
   }
@@ -436,6 +476,7 @@ function Composer({ users, project, placeholder, onSend }: {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (suggest.length && at) { setText(text.slice(0, at.index) + `@${suggest[0]} `); return }
+      if (cmdSuggest.length) { setText(`/${cmdSuggest[0].name} `); return }
       void submit()
     }
   }
@@ -449,6 +490,26 @@ function Composer({ users, project, placeholder, onSend }: {
                                  <PresenceDot user={u} />@{u}</div>)}
         </div>
       )}
+      {cmdSuggest.length > 0 && (
+        <div style={{ position: 'absolute', bottom: '100%', left: 8, maxWidth: 420, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.15)', zIndex: 3 }}>
+          {cmdSuggest.map(c => <div key={c.name} onMouseDown={e => { e.preventDefault(); setText(`/${c.name} `) }}
+                                    style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
+                                    <b>/{c.name}</b><span style={{ color: 'var(--ink-3)' }}>{c.help}</span></div>)}
+        </div>
+      )}
+      {typedCmd && !asking && (
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
+          <b>/{typedCmd.name}</b> {typedCmd.help} <span style={{ color: 'var(--ink-4)' }}>
+            {tr(`(flow ${typedCmd.label}, lance sur ce poste)`, `(flow ${typedCmd.label}, runs on this workstation)`)}</span>
+        </div>
+      )}
+      {asking && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
+          <span style={{ flex: 1, wordBreak: 'break-all' }}>{tr(`Lancer ${asking} ?`, `Run ${asking}?`)}</span>
+          <button type="button" className="btn sm" disabled={busy} onClick={() => { void runCmd(asking) }}>{tr('Lancer', 'Run')}</button>
+          <button type="button" className="btn ghost sm" onClick={() => setAsking(null)}>{tr('Annuler', 'Cancel')}</button>
+        </div>
+      )}
       {files.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
           {files.map(f => <span key={f.file} className="tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -459,7 +520,7 @@ function Composer({ users, project, placeholder, onSend }: {
       <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
         {window.electronAPI?.openFiles && <button type="button" className="btn ghost sm" title={tr('Joindre un fichier (copie dans le projet)', 'Attach a file (copied into the project)')}
                                                  onClick={() => { void pick() }}><Paperclip size={13} /></button>}
-        <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={onKey} rows={2} placeholder={placeholder}
+        <textarea value={text} onChange={e => { setText(e.target.value); setAsking(null) }} onKeyDown={onKey} rows={2} placeholder={placeholder}
                   style={{ ...input, flex: 1, height: 'auto', resize: 'none', padding: 6, fontFamily: 'inherit' }} />
         <button type="button" className="btn sm" disabled={busy || (!text.trim() && !files.length)} onClick={() => { void submit() }}><Send size={13} /></button>
       </div>

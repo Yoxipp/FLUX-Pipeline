@@ -58,7 +58,18 @@ def send_message(
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
     notify_all: bool = False, audience=None,
 ) -> bool:
-    """Append a chat message to the team chat of *project*. Returns True on success.
+    """Append a chat message to the team chat of *project*. Returns True on success
+    (post_message gives the id of the message)."""
+    return post_message(user, message, project, path, channel=channel, reply_to=reply_to,
+                        attachments=attachments, notify_all=notify_all, audience=audience) is not None
+
+
+def post_message(
+    user: str, message: str, project: str | None = None, path: Path | None = None, *,
+    channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
+    notify_all: bool = False, audience=None, via: str | None = None,
+) -> str | None:
+    """Append a chat message to the team chat of *project*. Returns its id, None on failure.
 
     *path* (tests) overrides the project's chat file. Any @name that matches a known
     user (case-insensitive, never the author) is recorded as an unread mention so
@@ -68,6 +79,7 @@ def send_message(
     reads the same file; *notify_all* (a call link posted with "Prevenir l'equipe")
     sends a phone notification to every artist. *audience* (user -> bool): who may be
     mentioned or notified (a channel restricted to some artists); None = everyone.
+    *via* (ADR 0081): the artist whose team command made FLUX write this message.
     """
     date, time = _now()
     msg_id = _make_id(user)
@@ -85,13 +97,15 @@ def send_message(
         entry["reply_to"] = reply_to
     if attachments:
         entry["attachments"] = attachments
+    if via:
+        entry["via"] = via
     chat_path = path or resolve_chat_path(project)
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
     ok = get_repository().append_log(_CHAT_COLLECTION, str(chat_path), [entry])
     if not ok:
         log.error("Failed to write team chat at %s", chat_path)
-        return ok
+        return None
 
     # Record mentions (best-effort — never fail the send if this part errors).
     try:
@@ -106,7 +120,7 @@ def send_message(
             _notify_everyone(user, text, project, audience)
         except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
             log.warning("Notify everyone skipped: %s", exc)
-    return ok
+    return msg_id
 
 
 def _notify_everyone(user: str, text: str, project: str | None, audience=None) -> None:

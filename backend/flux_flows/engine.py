@@ -64,7 +64,8 @@ MAX_RUNNING = 4
 MAX_QUEUE = 20
 PUSH_TICK_S = 0.1          # node_state / link_value grouped: 10 pushes per second per run at most
 WRITE_EVERY_S = 1.0        # record rewritten once per second at most
-START_EVENTS = ("event.manual", "event.page_inputs", "event.button", "event.publish_request")
+START_EVENTS = ("event.manual", "event.page_inputs", "event.button", "event.publish_request",
+                "event.team_command")
 DRY_LIMITS_FR = ("Essai a blanc : apres un effet simule, les lectures voient le disque reel ; "
                  "l'essai estime, il ne garantit pas.")
 

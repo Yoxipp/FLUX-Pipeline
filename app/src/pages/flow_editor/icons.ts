@@ -9,10 +9,10 @@ import {
   Database, FileArchive, FileCode, FileInput, FileJson, FileOutput, FilePlus, FileSearch, FileText, Film, Flame,
   FolderInput, FolderKanban, FolderOpen, FolderPlus, FolderTree, Gauge, GitBranch, GitMerge, Globe, Hash, HeartPulse,
   History, Hourglass, ImageDown, Info, KeyRound, Layers, Link, List, ListChecks, ListFilter, ListOrdered, ListPlus,
-  ListStart, ListTree, LogIn, LogOut, Mailbox, Merge, MousePointerClick, PackageCheck, PackagePlus, PackageSearch,
+  ListStart, ListTree, LogIn, LogOut, Mailbox, Merge, MessageSquareReply, MousePointerClick, PackageCheck, PackagePlus, PackageSearch,
   PaintBucket, Palette, PenLine, Pencil, Play, Plug, Radar, Radio, RefreshCcw, RefreshCw, Repeat, Repeat1, Replace,
   Rocket, Route, Save, SaveAll, Scale, ScanSearch, Scissors, ScrollText, Search, ShieldCheck, Shirt, Shrink,
-  SlidersHorizontal, Split, SquareFunction, SquareTerminal, Tags, Terminal, ToggleLeft, Trash2, Type, Upload,
+  SlidersHorizontal, Split, SquareFunction, SquareSlash, SquareTerminal, Tags, Terminal, ToggleLeft, Trash2, Type, Upload,
   Variable, Video, Waypoints, Workflow, Zap, type LucideIcon,
 } from 'lucide-react'
 import { FAMILY_INFO } from './families'
@@ -24,10 +24,10 @@ const ICONS: Record<string, LucideIcon> = {
   Database, FileArchive, FileCode, FileInput, FileJson, FileOutput, FilePlus, FileSearch, FileText, Film, Flame,
   FolderInput, FolderKanban, FolderOpen, FolderPlus, FolderTree, Gauge, GitBranch, GitMerge, Globe, Hash, HeartPulse,
   History, Hourglass, ImageDown, Info, KeyRound, Layers, Link, List, ListChecks, ListFilter, ListOrdered, ListPlus,
-  ListStart, ListTree, LogIn, LogOut, Mailbox, Merge, MousePointerClick, PackageCheck, PackagePlus, PackageSearch,
+  ListStart, ListTree, LogIn, LogOut, Mailbox, Merge, MessageSquareReply, MousePointerClick, PackageCheck, PackagePlus, PackageSearch,
   PaintBucket, Palette, PenLine, Pencil, Play, Plug, Radar, Radio, RefreshCcw, RefreshCw, Repeat, Repeat1, Replace,
   Rocket, Route, Save, SaveAll, Scale, ScanSearch, Scissors, ScrollText, Search, ShieldCheck, Shirt, Shrink,
-  SlidersHorizontal, Split, SquareFunction, SquareTerminal, Tags, Terminal, ToggleLeft, Trash2, Type, Upload,
+  SlidersHorizontal, Split, SquareFunction, SquareSlash, SquareTerminal, Tags, Terminal, ToggleLeft, Trash2, Type, Upload,
   Variable, Video, Waypoints, Workflow, Zap,
 }
 

@@ -473,6 +473,12 @@ export interface PagePorts { outputs: Record<string, string>; labels: Record<str
 export interface PageListener { flow: string; scope: FlowScope; version: number; node: string }
 export interface PageUse { flow: string; scope: FlowScope; label: string; active: boolean; node: string; buttons: string[]; fields: string[] }
 export interface PageFlows { listeners: Record<string, PageListener[]>; uses: PageUse[] }
+// A command of the Team chat (ADR 0081): one TeamCommand node of an active flow.
+export interface TeamCommand {
+  name: string; help: string; confirm: boolean; channels: string
+  flow: string; scope: FlowScope; version: number; node: string; label: string
+}
+
 export interface PageClickRun { flow: string; scope: FlowScope; run_id: string; status: string; error?: string | null }
 // Generated Publisher panel: not a page, its button runs this flow event with every field.
 export interface PageTarget { flow: string; event: string }

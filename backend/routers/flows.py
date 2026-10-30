@@ -19,6 +19,9 @@
 # P6c: GET /flows/bridges (extension bridges + install state), POST
 # /flows/bridges/{soft}/install | uninstall (this machine, never a silent overwrite),
 # POST /flows/bridges/{soft}/flows (Team TD: its Instance and publish nodes in the team scope).
+# ADR 0081: GET /flows/team-commands (the `/` completion of the Team chat), POST
+# /flows/team-commands/run (posts the message, runs the TeamCommand flows on this backend,
+# a FLUX answer in the thread when a run fails).
 
 from __future__ import annotations
 
@@ -29,17 +32,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from flux_flows import (engine, events, locations, migrate_v1, page_data, page_inputs, page_links, page_store, pages,
                         patterns,
-                        resolver, rights, runs, scheduler, store, validate)
+                        resolver, rights, runs, scheduler, store, team_commands, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import NodeError
 
 router = APIRouter()
+_WATCHERS: set = set()      # tasks of _reply_when_failed, kept until they end (no garbage collection)
 TEAM_NODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 
 
@@ -480,6 +484,99 @@ async def click_page(page_id: str, body: PageClickBody) -> dict[str, Any]:
         out.append({"flow": t["flow"], "scope": t["scope"], "run_id": record["run_id"], "status": record["status"],
                     "error": record.get("error")})
     return {"runs": out}
+
+
+# -- ADR 0081: commands typed in the Team chat ------------------------------------------
+
+@router.get("/team-commands")
+async def get_team_commands(project: str, channel: Optional[str] = None) -> dict[str, Any]:
+    """Commands of the active flows (perso of the local user, team, project), for the `/`
+    completion of the Team chat; *channel* keeps those allowed there."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], project)
+    return {"commands": await _call(team_commands.commands, roots, channel or "general")}
+
+
+class TeamCommandBody(BaseModel):
+    project: str
+    text: str = Field(max_length=4000)
+    channel: Optional[str] = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
+    reply_to: Optional[str] = Field(default=None, max_length=80)
+
+
+def _channel_audience(project: str, channel: str, user: str):
+    """(sees, audience) of a channel for *user*: audience None = everyone (general)."""
+    from features.team import team_meta
+
+    if channel == "general":
+        return True, None
+    try:
+        records = team_meta.read(project)["records"]
+    except (OSError, RuntimeError):
+        records = []
+    sees = channel not in team_meta.hidden_channels(project, user, records)
+    return sees, (lambda who: channel not in team_meta.hidden_channels(project, who, records))
+
+
+async def _reply_when_failed(run: "engine.Run", project: str, cmd: dict[str, Any], audience) -> None:
+    """A FLUX answer in the thread when a command run does not end ok (ADR 0081)."""
+    from features.activity.chat_manager import post_message
+
+    if run.task is not None:
+        try:
+            await run.task
+        except (asyncio.CancelledError, Exception):   # noqa: BLE001 - the record says what happened
+            pass
+    status, error = run.record.get("status"), run.record.get("error")
+    if status == "ok":
+        return
+    why = {"cancelled": "annule", "skipped": "deja en cours"}.get(status or "", error or status or "erreur")
+    text = f"/{cmd['command']} : le flow {run.flow_name} n'a pas abouti ({why})"
+    await asyncio.to_thread(post_message, team_commands.REPLY_NAME, text, project, channel=cmd["channel"],
+                            reply_to=cmd["thread"], via=cmd["user"], audience=audience)
+
+
+@router.post("/team-commands/run")
+async def run_team_command(body: TeamCommandBody) -> dict[str, Any]:
+    """`/name args` typed in the Team chat: the message is posted (the team sees it), then
+    every active flow with a TeamCommand of that name runs on THIS backend (409 when none)."""
+    from features.activity.chat_manager import post_message
+
+    parsed = team_commands.parse(body.text)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail={"message": "Une commande commence par / suivi de son nom"})
+    name, args, rest = parsed
+    current = await asyncio.to_thread(rights.current_rights)
+    user = current["user"]
+    channel = body.channel or "general"
+    sees, audience = await asyncio.to_thread(_channel_audience, body.project, channel, user)
+    if not sees:
+        raise HTTPException(status_code=403, detail={"message": f"Tu ne vois pas le canal #{channel}"})
+    roots = _roots(user, body.project)
+    targets = await _call(team_commands.listeners, roots, name, channel)
+    if not targets:
+        raise HTTPException(status_code=409, detail={
+            "message": f"Aucun flow actif ne repond a /{name} dans #{channel} : un TD pose un TeamCommand "
+                       "dans un flow et l'active"})
+    message_id = await asyncio.to_thread(post_message, user, body.text, body.project, channel=channel,
+                                         reply_to=body.reply_to, audience=audience)
+    if message_id is None:
+        raise HTTPException(status_code=500, detail={"message": "Impossible d'envoyer le message"})
+    cmd = {"command": name, "args": args, "text": rest, "user": user, "channel": channel,
+           "message_id": message_id, "thread": body.reply_to or message_id}
+    out = []
+    for t in targets:
+        flow = (await _call(store.read_flow, roots, t["scope"], t["flow"], t["version"]))["flow"]
+        folder = runs.runs_dir(t["scope"], project=body.project, user=user)
+        new_run = engine.Run(flow, scope=t["scope"], project=body.project, user=user, version=t["version"],
+                             event=t["node"], payload=dict(cmd), folder=folder)
+        record = await engine.manager().submit(new_run)
+        watcher = asyncio.create_task(_reply_when_failed(new_run, body.project, cmd, audience))
+        _WATCHERS.add(watcher)
+        watcher.add_done_callback(_WATCHERS.discard)
+        out.append({"flow": t["flow"], "scope": t["scope"], "run_id": record["run_id"], "status": record["status"],
+                    "error": record.get("error")})
+    return {"message_id": message_id, "runs": out}
 
 
 @router.get("/pages/publish_panel/{soft}")

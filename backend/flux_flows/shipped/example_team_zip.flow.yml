@@ -1,0 +1,19 @@
+flux_flow: 2
+name: example_team_zip
+label: "Exemple : /zip dans le chat Team"
+description: "Commande du chat Team : /zip \"<dossier>\" zippe le dossier a cote de lui (SEQ010 -> SEQ010.zip) et repond dans le fil avec le chemin du zip. Tourne sur le poste de l'artiste qui tape la commande. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir, puis activer."
+run_policy: queue
+nodes:
+  commande: {type: event.team_command, pos: [0, 160], params: {name: zip, help: "\"<dossier>\" : zippe le dossier a cote de lui", channels: "", confirm: false}}
+  zipper: {type: action.zip_folder, pos: [360, 160], params: {overwrite: false}}
+  texte: {type: data.template, pos: [360, 400], params: {text: "Zip pret : {arg}.zip"}}
+  repondre: {type: flux.team_reply, pos: [720, 160], params: {}}
+links:
+  - {from: commande.then, to: zipper.exec}
+  - {from: commande.dir, to: zipper.folder}
+  - {from: commande.parent, to: zipper.dest}
+  - {from: commande.values, to: texte.values}
+  - {from: zipper.then, to: repondre.exec}
+  - {from: texte.text, to: repondre.text}
+notes:
+  - {id: k1, pos: [0, 560], text: "Dans le chat Team : /zip \"\\\\serveur\\projet\\SEQ010\"\nLe zip arrive a cote du dossier (jamais d'ecrasement). Une erreur (dossier introuvable, zip deja la) repond toute seule dans le fil."}

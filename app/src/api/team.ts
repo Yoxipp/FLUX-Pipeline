@@ -9,6 +9,7 @@ export interface TeamAttachment { name: string; file: string; size: number; imag
 export interface TeamMessage {
   id: string; user: string; message: string; date: string; time: string
   channel?: string; reply_to?: string; attachments?: TeamAttachment[]
+  via?: string   // a FLUX answer to a chat command: the artist who typed it (ADR 0081)
 }
 export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {

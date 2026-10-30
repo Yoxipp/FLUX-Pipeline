@@ -3,7 +3,7 @@
 // The TD boxes themselves (flows_td, flows_team_td) are written through /settings/user-data.
 
 import { apiCall, BASE_URL } from './client'
-import type { BoardTemplate, ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget, ExamplePage } from '../pages/flow_editor/types'
+import type { BoardTemplate, ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget, ExamplePage, TeamCommand } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -116,6 +116,11 @@ export const flowsApi = {
     apiCall('GET', `/flows/pages/${encodeURIComponent(page)}/flows${qs({ project })}`),
   clickPage: (page: string, body: { button: string; values: Record<string, unknown>; project?: string }): Promise<{ runs: PageClickRun[] }> =>
     apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/click`, body),
+  // Team chat commands (ADR 0081): `/name args` runs the TeamCommand flows on this backend.
+  teamCommands: (project: string, channel?: string): Promise<{ commands: TeamCommand[] }> =>
+    apiCall('GET', `/flows/team-commands${qs({ project, channel })}`),
+  runTeamCommand: (body: { project: string; text: string; channel?: string; reply_to?: string }): Promise<{ message_id: string; runs: PageClickRun[] }> =>
+    apiCall('POST', '/flows/team-commands/run', body),
   // Generated Publisher panel of an extension software (04 §7): interface of its flow publish_<soft>.
   publishPanel: (soft: string, project?: string): Promise<{ soft: string; flow: string; page: PageDoc; issues: PageIssue[]; target: PageTarget }> =>
     apiCall('GET', `/flows/pages/publish_panel/${encodeURIComponent(soft)}${qs({ project })}`),
