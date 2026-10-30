@@ -235,6 +235,12 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   Rendu DOM + SVG avec culling sur grille grossiere + couche memoisee (`BoardLayer`) : un pan ne re-rend pas les objets ;
   un glisser n'ecrit qu'au lacher. `board/model.ts` (types, palettes, geometrie, ops), `board/BoardItem.tsx` (objet, lien),
   `board/BoardMinimap.tsx`. Vue, selection et pile d'undo par spectateur, jamais ecrites.
+  Lot B (ADR 0074) : cadres (`frame`, derriere tout, deplacer un cadre deplace ce qui est dedans, mode presentation dans
+  l'ordre de lecture, plein ecran, fleches / Echap), stylo / surligneur (trait `ink` ecrit au lacher, points simplifies) et
+  gomme (traits entiers), images collees (Ctrl+V d'une capture : `electronAPI.saveClipboardImage`) ou deposees de
+  l'explorateur (`electronAPI.pathForFile`), copiees par le backend ; cartes FLUX (`board/FluxCard.tsx` : ref seule, relue
+  dans `GET /production/<projet>` toutes les 30 s, statuts `taskStatus`, dernier publish, liens Production `openFavorite` /
+  Folder Manager `openPath`) ; modeles livres (`flowsApi.boardTemplates`, inseres comme un collage).
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
