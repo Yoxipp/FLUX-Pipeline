@@ -10,6 +10,7 @@ import type { FlowsWsMessage, PageDataOp, PageList, PageRecord } from '../pages/
 import { useFlowsWs } from './useFlowsWs'
 
 const DATA_REFRESH_MS = 5000
+const DATA_MAX_OPS = 200   // page_data.MAX_OPS: a bigger write goes in several requests
 
 export function usePageList(project: string | null | undefined) {
   const [list, setList] = useState<PageList | null>(null)
@@ -75,20 +76,36 @@ export function usePageData(page: string, collection: string, project: string | 
   }, [page, collection, refresh]), refresh)
 
   const write = useCallback(async (ops: PageDataOp[]) => {
-    const r = await flowsApi.writePageData(page, collection, ops, project || undefined)
-    refresh()
-    return r.rids
+    // Optimistic for known rids: a board drag or an undo must not jump back for a round trip.
+    // A failed write is undone by the refresh that follows it.
+    if (ops.some(o => o.rid)) setRecords(rs => {
+      const byRid = new Map(rs.map(r => [r.rid, r]))
+      for (const op of ops) {
+        if (!op.rid) continue
+        if (op.op === 'del') byRid.delete(op.rid)
+        else if (byRid.has(op.rid)) byRid.set(op.rid, { ...byRid.get(op.rid)!, ...op.fields })
+        else if (op.restore) byRid.set(op.rid, { rid: op.rid, _created_by: '', _created_at: null, _by: '', _at: null, ...op.fields })
+      }
+      return [...byRid.values()]
+    })
+    const rids: string[] = []
+    try {
+      for (let i = 0; i < ops.length; i += DATA_MAX_OPS) {
+        const r = await flowsApi.writePageData(page, collection, ops.slice(i, i + DATA_MAX_OPS), project || undefined)
+        rids.push(...r.rids)
+      }
+    } finally {
+      refresh()
+    }
+    return rids
   }, [page, collection, project, refresh])
 
   const put = useCallback(async (fields: Record<string, unknown>, rid?: string) => {
-    // Optimistic: the record moves at once (a board drag must not jump back for a round trip).
-    if (rid) setRecords(rs => rs.map(r => r.rid === rid ? { ...r, ...fields } : r))
     const rids = await write([rid ? { op: 'put', rid, fields } : { op: 'put', fields }])
     return rids[0]
   }, [write])
 
   const del = useCallback(async (rid: string) => {
-    setRecords(rs => rs.filter(r => r.rid !== rid))
     await write([{ op: 'del', rid }])
   }, [write])
 

@@ -485,5 +485,5 @@ export type PageDataRead =
   | { etag: string; unchanged: true; write?: 'all' | 'team_td' }
   | { etag: string; unchanged: false; records: PageRecord[]; write: 'all' | 'team_td' }
 export type PageDataOp =
-  | { op: 'put'; rid?: string; fields: Record<string, unknown> }
+  | { op: 'put'; rid?: string; fields: Record<string, unknown>; restore?: boolean }
   | { op: 'del'; rid: string }
