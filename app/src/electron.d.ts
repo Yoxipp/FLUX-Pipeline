@@ -7,6 +7,7 @@ declare global {
       openFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
       saveClipboardImage?: () => Promise<string | null>
       pathForFile?: (file: File) => string
+      saveBytes?: (defaultName: string, filters: { name: string; extensions: string[] }[], data: Uint8Array) => Promise<string | null>
       openFiles: (filters?: { name: string; extensions: string[] }[]) => Promise<string[]>
       openFolderFiles: (extensions?: string[]) => Promise<string[]>
       saveFile: (defaultName?: string, filters?: { name: string; extensions: string[] }[]) => Promise<string | null>

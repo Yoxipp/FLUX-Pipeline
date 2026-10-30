@@ -345,6 +345,16 @@ ipcMain.handle('clipboard:saveImage', () => {
   return file
 })
 
+// Board export (ADR 0075): bytes made by the page (PNG / PDF), written where the user picks.
+// IPC, not the HTTP API (ADR 0005). Returns the path, null when cancelled.
+ipcMain.handle('file:saveBytes', async (_event, opts: { defaultName: string; filters?: { name: string; extensions: string[] }[]; data: Uint8Array }) => {
+  if (!win) return null
+  const result = await dialog.showSaveDialog(win, { defaultPath: opts.defaultName, filters: opts.filters })
+  if (result.canceled || !result.filePath) return null
+  fs.writeFileSync(result.filePath, Buffer.from(opts.data))
+  return result.filePath
+})
+
 // Settings > "Desinstaller FLUX": start the NSIS uninstaller that sits next to FLUX.exe
 // ("Uninstall FLUX.exe") and quit so it can delete the app. The uninstaller itself
 // removes what FLUX added to the DCCs (scripts/installer.nsh, customUnInstall), so the

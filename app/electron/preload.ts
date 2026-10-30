@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveClipboardImage: (): Promise<string | null> =>
     ipcRenderer.invoke('clipboard:saveImage'),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  // Board export (ADR 0075): save dialog, then the bytes are written by the main process.
+  saveBytes: (defaultName: string, filters: { name: string; extensions: string[] }[], data: Uint8Array): Promise<string | null> =>
+    ipcRenderer.invoke('file:saveBytes', { defaultName, filters, data }),
 
   openFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openFolder'),
