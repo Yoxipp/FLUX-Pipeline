@@ -265,6 +265,9 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   son propre statut + message. `components/shared/PeoplePanel.tsx` : colonne repliable a droite du chat de l'accueil et du
   widget `chat` (tous les artistes de `USER/`, ordre alphabetique, rond vert / gris, ouvert / ferme memorise par chat).
   Pas encore : assignee Production, calendrier (filtre par personne), Login.
+  ADR 0081 : `/` en debut de message liste les commandes du canal (`flowsApi.teamCommands`), Entree complete, aide
+  sous la saisie, `confirm` = barre Lancer / Annuler, envoi `flowsApi.runTeamCommand` (le backend poste le message et lance
+  les flows sur ce poste) ; `/inconnu` n'est pas envoye ; une reponse FLUX affiche "pour <artiste>" (`via`).
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
