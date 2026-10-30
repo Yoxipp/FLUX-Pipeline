@@ -1,4 +1,4 @@
-// ShareSummary.tsx: farm use per team against the school's Shares (engine limits.config, husk tag), and the
+// ShareSummary.tsx: farm use per team against the engine's Shares (engine limits.config, husk tag), and the
 // teams outside the Shares grouped as "default". Read only, an estimate: Tractor decides at each dispatch.
 // A team above its part gives blades back as its running tasks end (nothing is killed); the jobs listed
 // are the ones whose next task ends free those blades.
@@ -58,8 +58,8 @@ export function ShareSummary({ farm, project, shares }: {
   }, [shares, farm, jobs, pool])
 
   if (!shares) {
-    return <Section title={tr('Parts de la farm', 'Farm shares')}><div style={hint}>{tr("Parts de l'ecole inconnues : moteur injoignable, ou FLUX a relancer apres une mise a jour",
-      'School shares unknown: engine unreachable, or FLUX to restart after an update')}</div></Section>
+    return <Section title={tr('Parts de la farm', 'Farm shares')}><div style={hint}>{tr("Parts de la farm inconnues : moteur injoignable, ou FLUX a relancer apres une mise a jour",
+      'Farm shares unknown: engine unreachable, or FLUX to restart after an update')}</div></Section>
   }
   const waiting = (except: string) => rows.some(r => r.name !== except && r.pending > 0)
 

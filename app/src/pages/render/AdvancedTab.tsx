@@ -8,6 +8,7 @@ import { ChevronDown, ChevronRight, Plus, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
 import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse } from '../../api/client'
 import { EnvPanel } from './EnvPanel'
+import { StudioEnvPanel } from './StudioEnvPanel'
 import { MachinePicker } from './MachinePicker'
 import { Banner, Check, Row, Section, Toggle, btn, disabledIf, errMsg, hint, input, lbl, useTr, warnText } from './renderUi'
 
@@ -18,7 +19,7 @@ function changedKeys(a: RenderSettings, b: RenderSettings): Key[] {
 }
 
 export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSaved }: {
-  project: string; settings: RenderSettings; warning: string | null; farm: RenderFarm | null
+  project: string; settings: RenderSettings & { value_sources?: Record<string, string> }; warning: string | null; farm: RenderFarm | null
   farmTeams: string[]   // Shares of the engine limits.config: the only team names the farm knows
   onSaved: (r: RenderSettingsResponse) => void
 }) {
@@ -47,6 +48,8 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
   const changed = useMemo(() => changedKeys(settings, draft), [settings, draft])
   const set = <K extends Key>(k: K, v: RenderSettings[K]) => setDraft(d => ({ ...d, [k]: v }))
   const blades = farm?.blades ?? []
+  // Value the studio environment provides (backend value_sources): shown as the placeholder of an empty field.
+  const envHint = (k: Key) => (settings.value_sources?.[k] === 'studio' ? String(settings[k] ?? '') : '')
 
   const save = async () => {
     if (!changed.length) return
@@ -106,12 +109,12 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
               <span style={hint}>{tr('Equipes de la farm :', 'Farm teams:')}</span>
               {farmTeams.map(name => (
-                <button key={name} type="button" title={tr('Part de la farm reglee par l\'ecole (limits.config)', 'Farm share set by the school (limits.config)')}
+                <button key={name} type="button" title={tr('Part de la farm reglee par le studio (limits.config)', 'Farm share set by the studio (limits.config)')}
                   style={{ ...btn(), background: draft.tractor_project === name ? 'var(--accent-soft)' : 'var(--paper-2)' }}
                   onClick={() => set('tractor_project', name)}>{name}</button>
               ))}
               {draft.tractor_project && !farmTeams.includes(draft.tractor_project) && (
-                <span style={warnText}>{tr('Inconnue de la farm : part "default" (limitee)', 'Unknown to the farm: "default" share (limited)')}</span>
+                <span style={warnText}>{tr('Inconnue de la farm : part par defaut (limitee)', 'Unknown to the farm: default share (limited)')}</span>
               )}
             </div>
           ) : knownProjects.length > 0 && (
@@ -129,8 +132,8 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
           {num('chunk_size', tr('Images par tache', 'Frames per task'))}
         </div>
         {warning && <div style={warnText}>{warning}</div>}
-        <div style={hint}>{tr("Part de la farm : reglee par l'ecole pour chaque equipe (limits.config), Tractor equilibre lui-meme.",
-          "Farm share: set by the school per team (limits.config), Tractor balances by itself.")}</div>
+        <div style={hint}>{tr("Part de la farm : reglee par le studio pour chaque equipe (limits.config), Tractor equilibre lui-meme.",
+          "Farm share: set by the studio per team (limits.config), Tractor balances by itself.")}</div>
       </Section>
 
       <Section title={tr('Groupes de PC', 'PC groups')}>
@@ -184,6 +187,7 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
               <Row label={tr('Moteur par defaut', 'Default renderer')}>
                 <Toggle value={draft.renderer} onChange={id => set('renderer', id as RenderSettings['renderer'])}
                   options={[{ id: 'karma', label: 'Karma' }, { id: 'renderman', label: 'RenderMan' }]} />
+                {!draft.renderer && <div style={hint}>{tr('Aucun : a choisir au lancement', 'None: pick at launch')}</div>}
               </Row>
               <Row label={tr('Gel par defaut', 'Freeze by default')}>
                 <Check label={tr('Geler la version', 'Freeze the version')} checked={draft.freeze_by_default} onChange={v => set('freeze_by_default', v)} />
@@ -192,13 +196,13 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
                 <Toggle value={draft.freeze_when} onChange={id => set('freeze_when', id as RenderFreezeWhen)}
                   options={[{ id: 'start', label: tr('Au demarrage', 'At start') }, { id: 'submit', label: tr('Au lancement', 'At submit') }]} />
               </Row>
-              {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), 'C:/Program Files/Side Effects Software/Houdini 20.5.445')}
-              {txt('denoise_path', tr('denoise_batch des blades (RenderMan)', 'Blades denoise_batch (RenderMan)'), 'C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe')}
+              {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), envHint('houdini_path'))}
+              {txt('denoise_path', tr('denoise_batch des blades (RenderMan)', 'Blades denoise_batch (RenderMan)'), envHint('denoise_path'))}
               <Row label={tr('Denoise par defaut', 'Default denoise')}>
                 <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={draft.denoise_crossframe} onChange={v => set('denoise_crossframe', v)} />
               </Row>
-              {txt('service_karma', 'Service Karma', 'PixarRender')}
-              {txt('service_renderman', 'Service RenderMan', 'PixarRender')}
+              {txt('service_karma', 'Service Karma', envHint('service_karma'))}
+              {txt('service_renderman', 'Service RenderMan', envHint('service_renderman'))}
               <Row label={tr('Envkeys (separes par des virgules)', 'Envkeys (comma separated)')}>
                 <input style={input} value={draft.envkeys.join(', ')}
                   onChange={e => set('envkeys', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
@@ -232,7 +236,7 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
               </Row>
               {txt('husk_path', 'Husk')}
               {txt('engine', 'Engine (host:port)', 'TRACTOR_ENGINE')}
-              {txt('engine_user', tr('Login moteur', 'Engine login'), 'root')}
+              {txt('engine_user', tr('Login moteur', 'Engine login'), envHint('engine_user'))}
               {txt('bridge_python', 'Bridge Python')}
               {txt('bridge_script', 'Bridge script')}
             </div>
@@ -241,6 +245,8 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
           </div>
         )}
       </div>
+
+      <StudioEnvPanel project={project} onChanged={() => { void api.renderSettings(project).then(onSaved).catch(() => undefined) }} />
 
       <EnvPanel project={project} configDir={settings.engine_config_dir} onDirSaved={onSaved} />
 

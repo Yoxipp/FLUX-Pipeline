@@ -23,7 +23,6 @@ JOB_ACTIONS = ("kill", "retry", "pause", "resume", "skip_errors", "restart", "ar
 VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace", "priority",
          "reload_limits") + JOB_ACTIONS
 _JID_VERBS = ("tasks", "log", "maxactive", "trace", "priority") + JOB_ACTIONS
-DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
 _SIMULATION_MSG = "Mode simulation : aucune action sur la farm"
@@ -47,7 +46,7 @@ def _check_configured(settings: dict) -> tuple:
     python = str(settings.get("bridge_python") or "").strip()
     script = str(settings.get("bridge_script") or "").strip()
     if not python or not script or not Path(python).is_file() or not Path(script).is_file():
-        raise BridgeError("Pont Tractor non configure (reglages avances : python et script du pont)")
+        raise BridgeError("Pont Tractor non configure (python du pont : reglages avances ou environnement du studio)")
     return python, script
 
 
@@ -70,7 +69,8 @@ def _run(verb: str, settings: dict, user: str, timeout: int, args: dict) -> dict
     python, script = _check_configured(settings)
 
     request = {"verb": verb, "engine": settings.get("engine") or "", "user": user or "",
-               "login": settings.get("engine_user") or DEFAULT_LOGIN}
+               # Empty engine_user (studio environment): the bridge logs in as the FLUX user name.
+               "login": settings.get("engine_user") or ""}
     request.update(args)
     kwargs = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     try:
@@ -182,7 +182,7 @@ def _normalize(job: dict) -> dict:
     meta = _metadata(job.get("metadata"))
     out = dict(job)
     out["metadata"] = meta
-    # Every school job is owned by the shared Windows login: the FLUX user lives in the metadata.
+    # Every job is owned by the shared Windows login: the FLUX user lives in the metadata.
     out["flux_user"] = str(meta.get("user") or "")
     out["state"] = job_state(job)
     out["percent"] = job_percent(job)

@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
+from features.accounts.aliases import same_user
+from features.accounts.alias_views import resolve_calendar_items
 from features.calendar import calendar_store as store
 from utils import project_utils
 
@@ -84,7 +86,7 @@ async def get_calendar(project: str) -> dict:
     _ensure_project(project)
     loop = asyncio.get_running_loop()
     data = await loop.run_in_executor(None, lambda: store.load(project))
-    return {"items": data["items"], "me": _user()}
+    return {"items": resolve_calendar_items(data["items"]), "me": _user()}
 
 
 class CreateRequest(BaseModel):
@@ -118,7 +120,7 @@ async def respond(project: str, item_id: str, req: RespondRequest) -> dict:
     item = await _mutate(project, lambda d: store.respond(
         d, item_id, by, req.action, req.start or None, req.end or None))
     words = {"accept": "a accepte", "postpone": "a decale puis accepte", "decline": "a refuse"}
-    if item.get("created_by") and item["created_by"].lower() != by.lower():
+    if item.get("created_by") and not same_user(item["created_by"], by):
         _ping(project, by, item["created_by"], f"{words.get(req.action, req.action)} : {item['title']} ({_span(item)})")
     return {"item": item}
 

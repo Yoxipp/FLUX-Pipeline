@@ -142,7 +142,7 @@ class SpoolTests(BridgeTestCase):
 
     def test_invalid_spec_raises_validation_error(self):
         with self.assertRaises(jb.JobValidationError):
-            tb.spool(_spec(output_pattern="C:/r/a.$F4.exr"), self.settings(), "adam", self.tmp / "r")
+            tb.spool(_spec(output_pattern="C:/r/a.$F4.exr", forbid_drive_letters=True), self.settings(), "adam", self.tmp / "r")
 
 
 class QueryAndActionTests(BridgeTestCase):
@@ -157,12 +157,12 @@ class QueryAndActionTests(BridgeTestCase):
         self.assertEqual([(j["jid"], j["state"], j["flux_user"]) for j in out["jobs"]],
                          [(7, "done", "adam"), (8, "error", "")])
         echo = out["jobs"][0]["echo"]
-        self.assertEqual((echo["login"], echo["user"]), ("root", "adam"))  # login is not the owner
+        self.assertEqual((echo["login"], echo["user"]), ("", "adam"))  # no engine_user: the bridge falls back to the FLUX user
         self.assertEqual((echo["days"], echo["project"], echo.get("owner")), (14, "team_a", None))
         self.assertEqual(out["jobs"][0]["metadata"], {"user": "adam"})
 
     def test_jobs_mine_uses_flux_metadata(self):
-        # Every school job is owned by the shared Windows login, so "mine" reads the metadata.
+        # Every job is owned by the shared Windows login, so "mine" reads the metadata.
         self.assertEqual([j["jid"] for j in tb.jobs(self.settings(), "adam", mine=True)["jobs"]], [7])
 
     def test_reads_hit_engine_in_dry_run_when_configured(self):
@@ -201,7 +201,7 @@ class QueryAndActionTests(BridgeTestCase):
             self.assertEqual(fn(self.settings(), "adam", 7), {"jid": 7})
 
     def test_actions_refused_on_other_jobs(self):
-        # FLUX logs in as root: it must not touch jobs another user (or Nuke, Maya) spooled.
+        # FLUX logs in with one account: it must not touch jobs another user (or Nuke, Maya) spooled.
         for user in ("tom", ""):
             with self.assertRaises(tb.BridgeError) as ctx:
                 tb.kill(self.settings(), user or "nobody", 7)

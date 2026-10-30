@@ -103,6 +103,7 @@ async def put_project_config(project_name: str, payload: ProjectSettingsPayload)
     project_path = get_project_path(project_name)
     if not is_direct_project_dir(project_path, get_projects_dir()):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    _require_role(project_name, "project_settings")
     loop = asyncio.get_running_loop()
     try:
         config = await loop.run_in_executor(None, lambda: write_project_settings(project_path, payload.settings))
@@ -132,6 +133,7 @@ async def put_work_profiles(project_name: str, payload: WorkProfilesPayload) -> 
     project_path = get_project_path(project_name)
     if not is_direct_project_dir(project_path, get_projects_dir()):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    _require_role(project_name, "project_settings")
     loop = asyncio.get_running_loop()
     try:
         profiles = await loop.run_in_executor(None, lambda: write_work_profiles(project_path, payload.profiles))
@@ -157,8 +159,26 @@ async def post_project(req: ProjectCreate) -> dict:
             None, lambda: create_project(req.name, painter_presets=req.painter_presets))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # The creator is the project's supervisor (ADR 0064).
+    from core import config
+    from features.roles import project_roles
+    try:
+        await loop.run_in_executor(
+            None, lambda: project_roles.init_project_roles(path.name, config.get_current_user()))
+    except OSError as e:
+        log.warning("roles.json not written for %s: %s", path.name, e)
     # The folder name is the formatted token (e.g. "my proj" -> "MY_PROJ").
     return {"name": path.name, "path": str(path)}
+
+
+def _require_role(project: str, action: str) -> None:
+    """403 when the active user's project role is too low (ADR 0064)."""
+    from features.roles import project_roles
+
+    try:
+        project_roles.require(project, action)
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 @router.delete("/projects/{project_name}")
@@ -172,6 +192,7 @@ async def delete_project(project_name: str) -> dict:
     name = project_name.strip()
     if not name or not project_exists(name):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {name}")
+    _require_role(name, "delete_project")
 
     projects_dir = get_projects_dir().resolve()
     project_path = get_project_path(name).resolve()
@@ -789,6 +810,10 @@ async def delete_item(req: ItemDelete) -> dict:
 
     if not is_subpath(item_path.resolve(), project_path.resolve()):
         raise HTTPException(status_code=403, detail="Chemin non autorisé")
+    # Emptying the archives is permanent: lead or supervisor (ADR 0064).
+    top = (req.subpath or req.name).replace("\\", "/").split("/")[0]
+    if top.upper() == "ARCHIVE":
+        _require_role(req.project, "hard_delete")
 
     if not item_path.exists():
         raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")

@@ -10,6 +10,7 @@ from pathlib import Path
 from core.logger import get_logger
 from core.paths import get_activity_path, get_activity_read_path
 from core.repository_factory import get_repository
+from features.accounts.aliases import load_aliases, resolve_user, same_user
 from features.activity.read_state import is_read, load_read_ids, mark_read
 
 log = get_logger(__name__)
@@ -33,6 +34,16 @@ def _read_path(path: Path | None) -> Path:
     return p.with_name(f"{p.stem}_read.json")
 
 
+def _shown(event: dict, table: dict[str, str], read: bool | None = None) -> dict:
+    """Copy of *event* with the current artist name (the cached dict is shared)."""
+    out = dict(event)
+    if "user" in out:
+        out["user"] = resolve_user(out["user"], table)
+    if read is not None:
+        out["read"] = read
+    return out
+
+
 # ── read ──────────────────────────────────────────────────────────────────────
 
 def get_all_events(
@@ -44,9 +55,10 @@ def get_all_events(
 ) -> list[dict]:
     """Return events sorted newest-first, with optional filters."""
     events = _load(path)
+    table = load_aliases()
 
     if user:
-        events = [e for e in events if e.get("user") == user]
+        events = [e for e in events if same_user(e.get("user"), user, table)]
     if action:
         events = [e for e in events if e.get("action") == action]
     if project:
@@ -54,7 +66,7 @@ def get_all_events(
 
     # sort newest first using date + time strings (lexicographic = correct for ISO format)
     events.sort(key=lambda e: (e.get("date", ""), e.get("time", "")), reverse=True)
-    return events[:limit]
+    return [_shown(e, table) for e in events[:limit]]
 
 
 def get_unread_events(path: Path | None = None) -> list[dict]:
@@ -89,16 +101,17 @@ def get_events_and_unread(
     events = _load(path, sig=sig)
     read_ids = load_read_ids(_read_path(path))
     unread = sum(1 for e in events if not is_read(e, read_ids))
+    table = load_aliases()
 
     if user:
-        events = [e for e in events if e.get("user") == user]
+        events = [e for e in events if same_user(e.get("user"), user, table)]
     if action:
         events = [e for e in events if e.get("action") == action]
     if project:
         events = [e for e in events if e.get("project") == project]
 
     events.sort(key=lambda e: (e.get("date", ""), e.get("time", "")), reverse=True)
-    out = [{**e, "read": is_read(e, read_ids)} for e in events[:limit]]
+    out = [_shown(e, table, read=is_read(e, read_ids)) for e in events[:limit]]
     return out, unread
 
 

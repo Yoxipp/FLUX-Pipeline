@@ -55,7 +55,14 @@ class PathTests(unittest.TestCase):
 
     def test_spec_with_drive_letter_refused(self):
         with self.assertRaises(jb.JobValidationError):
-            jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr"))
+            jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr", forbid_drive_letters=True))
+
+    def test_drive_letter_accepted_unless_studio_forbids_it(self):
+        self.assertIn("C:/render/a.$F4.exr", jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr")))
+        with self.assertRaises(jb.JobValidationError):
+            jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr", forbid_drive_letters=True))
+        # simulation (strict=False) accepts them even when the studio forbids them
+        jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr", forbid_drive_letters=True), strict=False)
 
     def test_simulation_accepts_drive_letter(self):
         self.assertIn("C:/render/a.$F4.exr", jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr"), strict=False))
@@ -103,14 +110,20 @@ class DenoiseTests(unittest.TestCase):
     """RenderMan denoise_batch after the render, same job (2026-10-23)."""
 
     def test_render_then_denoise_in_order(self):
-        alf = jb.to_alf(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE))
+        alf = jb.to_alf(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE,
+                             denoise_tag="Denoise"))
         self.assertIn("-serialsubtasks 1", alf.splitlines()[1])
         self.assertLess(alf.index("Task -title {rendu} -subtasks {"), alf.index("Task -title {denoise} -subtasks {"))
         self.assertEqual(alf.count("Task -title {denoise "), 3)  # one per render chunk
-        self.assertEqual(alf.count("-tags {Denoise}"), 3)        # the school's Denoise Share
+        self.assertEqual(alf.count("-tags {Denoise}"), 3)        # the studio's denoise limit tag
         out = "//srv/flux/PROJ/shot/SQ01/SH010/render/v003"
         self.assertIn(f"-cf --frame-include 1006-1010 -o {out}/denoised {out}/SQ01_SH010.####.exr 1001-1012", alf)
         self.assertIn("{C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe} -p -t", alf)
+
+    def test_no_denoise_tag_means_no_tags_option(self):
+        alf = jb.to_alf(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE))
+        self.assertNotIn("-tags", alf)
+        self.assertEqual(alf.count("Task -title {denoise "), 3)
 
     def test_without_crossframe_only_the_chunk(self):
         cmd = jb.denoise_command(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE, denoise_crossframe=False),

@@ -151,7 +151,7 @@ th { background:var(--soft); color:#fff; }
 <section class="cover">
   <div class="logo">FLUX</div>
   <div class="sub">Manuel de FLUX</div>
-  <p>Le pipeline 3D / VFX des équipes ESMA : projets, nommage, publish, import dans les logiciels, USD, production, rendu. Partie A : utilisation. Partie B : fonctionnement interne.</p>
+  <p>Le pipeline 3D / VFX des équipes de studio ou d'école : projets, nommage, publish, import dans les logiciels, USD, production, rendu. Partie A : utilisation. Partie B : fonctionnement interne.</p>
   <div class="go"><a class="pill-link" href="#sommaire">Sommaire</a><a class="pill-link" href="#partie-a">A. Utilisation</a><a class="pill-link" href="#partie-b">B. Technique</a><a class="pill-link" href="#a21">Index des fonctions</a></div>
   <div class="meta">Version du document : 1er octobre 2026 · livré avec FLUX, copié dans <code>FLUX_UPDATE</code> à chaque lancement · Licence Apache-2.0</div>
 </section>
@@ -262,7 +262,7 @@ th { background:var(--soft); color:#fff; }
 <h3>Installer</h3>
 <ol>
 <li>Lance <code>FLUX-Setup-x.x.xxx.exe</code> (fourni par l'équipe, dossier <code>FLUX_UPDATE</code> du serveur ou de OneDrive).</li>
-<li>Au premier lancement, l'écran <b>Premier lancement</b> demande le <b>workspace</b> (dossier racine FLUX : local, OneDrive ou serveur ESMA) et ton <b>nom d'utilisateur</b>.</li>
+<li>Au premier lancement, l'écran <b>Premier lancement</b> demande le <b>workspace</b> (dossier racine FLUX : local, OneDrive ou serveur du studio) et ton <b>nom d'utilisateur</b>.</li>
 <li>FLUX crée dans le workspace : <code>DOSSIER_PROJETS/</code> (les projets), <code>USER/</code> (réglages par personne), <code>CONFIG/</code> (réglages d'équipe), <code>FLUX_UPDATE/</code> (installeurs).</li>
 </ol>
 <h3>Lancer</h3>
@@ -608,7 +608,8 @@ th { background:var(--soft); color:#fff; }
 <li>Contenu : FLUX Sequence + COMMON_LIGHTS, puis par shot : FLUX Shot → SHOT_LIGHTS → Karma Cryptomatte → Karma Render Settings (résolution projet, AOV) → OUT + ROP Karma.</li>
 <li>Light rig de séquence (plus faible) + light rig de shot (au-dessus). Publish LIGHT → couche lighting du stage.</li>
 <li>Rendu Karma (usdrender / husk) en <code>.exr</code> multi-parties avec AOV et cryptomattes.</li>
-<li>Farm Tractor ESMA : <span class="tag todo">prévu</span>. À la soumission, chaque LAST sera remplacé par sa vNNN (la farm ne lira jamais un LAST).</li>
+<li>Farm Tractor du studio : <span class="tag todo">prévu</span>. À la soumission, chaque LAST sera remplacé par sa vNNN (la farm ne lira jamais un LAST).</li>
+<li>Environnement du studio : tout ce qui est propre à la farm d'un studio (moteur Tractor, chemins Houdini et denoise des blades, tags de limite, motif des salles) est dans un fichier d'environnement lié depuis <code>CONFIG/studio.json</code> (clé <code>environment</code>, chemin relatif au dossier FLUX ou réseau). Il est vide par défaut. Il se règle dans Rendu &gt; Avancé &gt; Environnement du studio (rôle lead ou supervisor). Priorité : réglage du projet (<code>render.json</code>), puis environnement, puis vide.</li>
 </ol>
 </section>
 
@@ -686,7 +687,7 @@ th { background:var(--soft); color:#fff; }
 <table>
 <tr><th>Principe</th><th>Conséquence</th></tr>
 <tr><td>Artiste d'abord</td><td>App desktop + shelves / menus dans chaque DCC, jamais de ligne de commande.</td></tr>
-<tr><td>Local-first</td><td>Fonctionne sur un poste seul, dossier projet local, OneDrive ou serveur ESMA.</td></tr>
+<tr><td>Local-first</td><td>Fonctionne sur un poste seul, dossier projet local, OneDrive ou serveur du studio.</td></tr>
 <tr><td>Zéro token de licence (ADR 0007)</td><td>Aucune étape ne consomme une licence DCC : pas d'<code>imaketx</code>, pas de Houdini pour le proxy. OpenImageIO, pxr pip, fast-simplification.</td></tr>
 <tr><td>Open source permissif</td><td>Apache-2.0, dépendances MIT / BSD / Apache, pas de GPL liée (pas de pymeshlab).</td></tr>
 <tr><td>Octets hors API (ADR 0005)</td><td>Les fichiers lourds passent par le filesystem, jamais par HTTP.</td></tr>
@@ -694,7 +695,7 @@ th { background:var(--soft); color:#fff; }
 <tr><td>Versions immuables (ADR 0009 / 0017)</td><td><code>vNNN</code> jamais écrasé, <code>LAST</code> dérivé.</td></tr>
 <tr><td>Windows seulement (ADR 0013)</td><td>Chemins DCC, COM Photoshop, winreg, NSIS.</td></tr>
 </table>
-<p>Cible 2028 : 4 équipes sur le serveur ESMA avec un service de métadonnées central (ADR 0003), rendu farm Tractor avec versions gelées (ADR 0009, 0015), extensions YAML + plugins Python (ADR 0014).</p>
+<p>Cible 2028 : 4 équipes sur le serveur du studio avec un service de métadonnées central (ADR 0003), rendu farm Tractor avec versions gelées (ADR 0009, 0015), extensions YAML + plugins Python (ADR 0014).</p>
 </section>
 
 <section class="chap" id="b2">
@@ -724,7 +725,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
                                    |
    MetadataRepository (JSON | SQLite | remote)     StorageLocator (local | object)
                                    |
-                  FLUX_ROOT (local / OneDrive / serveur ESMA)</pre>
+                  FLUX_ROOT (local / OneDrive / serveur du studio)</pre>
 <table>
 <tr><th>Couche</th><th>Emplacement</th><th>Rôle</th></tr>
 <tr><td>Shell desktop</td><td><code>app/electron/</code> (<code>main.ts</code>, <code>preload.ts</code>, <code>python_bridge.ts</code>, <code>updater.ts</code>)</td><td>Fenêtres, lancement du sidecar Python, jeton API, mises à jour.</td></tr>
@@ -844,7 +845,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <tr><th>Backend</th><th>Fichier</th><th>Usage</th></tr>
 <tr><td>JSON (défaut)</td><td><code>core/json_repository.py</code></td><td>Fichiers JSON dans le workspace. Seul choix pour un workspace partagé.</td></tr>
 <tr><td>SQLite</td><td><code>core/sqlite_repository.py</code> (WAL, 2 tables)</td><td>Mono-poste, disque local. Refusé sur OneDrive, UNC ou lecteur réseau (repli JSON + warning).</td></tr>
-<tr><td>Remote</td><td><code>core/remote_repository.py</code></td><td><span class="tag todo">prévu</span> service central sur le serveur ESMA (ADR 0003).</td></tr>
+<tr><td>Remote</td><td><code>core/remote_repository.py</code></td><td><span class="tag todo">prévu</span> service central sur le serveur du studio (ADR 0003).</td></tr>
 </table>
 <ul>
 <li>Factory : <code>core/repository_factory.py</code>, lit <code>metadata_backend</code>.</li>
@@ -1033,7 +1034,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <tr><td>0010 → 0025</td><td>Chemins USD portables, résolution en paliers</td></tr>
 <tr><td>0011</td><td>Unités USD, Houdini référence</td></tr>
 <tr><td>0012</td><td>Templates Houdini .hip</td></tr>
-<tr><td>0013</td><td>Périmètre ESMA, Windows, web plus tard</td></tr>
+<tr><td>0013</td><td>Périmètre école/studio, Windows, web plus tard</td></tr>
 <tr><td>0014</td><td>Extensibilité YAML + plugins Python</td></tr>
 <tr><td>0015</td><td>Soumission farm</td></tr>
 <tr><td>0018 / 0023 / 0024</td><td>Component USD : auto puis manuel, blocks et links</td></tr>

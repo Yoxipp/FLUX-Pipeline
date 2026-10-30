@@ -11,8 +11,8 @@ from core.json_manager import read_json, write_json
 
 SCHEMA_VERSION = 1
 STORE_NAME = "render_exit_codes.json"
-# What FLUX knows for sure (seen on the school farm); other codes stay unexplained.
-KNOWN: Dict[int, str] = {10111: "Tue par Tractor : duree max d'un morceau depassee (job 34031)"}
+# What FLUX knows for sure (seen on a real farm); other codes stay unexplained.
+KNOWN: Dict[int, str] = {10111: "Tue par Tractor : duree max d'un morceau depassee"}
 # A timeout kill is not transient: retrying it would hit the same bound again.
 NEVER_PROPOSED = frozenset({10111})
 _RENDER_PROGRAMS = ("husk",)

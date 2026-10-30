@@ -115,10 +115,11 @@ class EditShares(unittest.TestCase):
     """Environment screen. Never the real engine: temp folders and a mocked engine only."""
 
     def test_unlock(self):
-        fl.check_unlock("Understand", "root")
-        for phrase, password in (("understand", "root"), ("Understand", ""), ("", "root"), ("Understand", "Root")):
+        fl.check_unlock("Understand")
+        self.assertFalse(hasattr(fl, "ENV_PASSWORD"))  # no shared password any more: the project role decides
+        for phrase in ("understand", "", "Understand "):
             with self.assertRaises(fl.LimitsError):
-                fl.check_unlock(phrase, password)
+                fl.check_unlock(phrase)
 
     def test_check_teams(self):
         for bad in ({}, {"A": {"nominal": 0.2, "cap": 0.5}},  # no default
@@ -149,7 +150,7 @@ class EditShares(unittest.TestCase):
     def test_write_backs_up_then_replaces(self):
         folder = self._folder()
         with mock.patch.object(fl, "engine_text", return_value=SAMPLE):
-            out = fl.write_shares(str(folder), "eng", TEAMS, "Understand", "root")
+            out = fl.write_shares(str(folder), "eng", TEAMS, "Understand")
         self.assertEqual(out["shares"]["husk"], TEAMS)
         written = (folder / "limits.config").read_bytes().decode("utf-8")
         self.assertEqual(fl.parse_shares(written)["husk"], TEAMS)
@@ -164,11 +165,11 @@ class EditShares(unittest.TestCase):
         before = (folder / "limits.config").read_bytes()
         for served in (None, SAMPLE.replace("0.1}", "0.2}")):
             with mock.patch.object(fl, "engine_text", return_value=served), self.assertRaises(fl.LimitsError):
-                fl.write_shares(str(folder), "eng", TEAMS, "Understand", "root")
+                fl.write_shares(str(folder), "eng", TEAMS, "Understand")
         with mock.patch.object(fl, "engine_text", return_value=SAMPLE), self.assertRaises(fl.LimitsError):
-            fl.write_shares(str(folder), "eng", TEAMS, "Understand", "wrong")
+            fl.write_shares(str(folder), "eng", TEAMS, "wrong")
         with self.assertRaises(fl.LimitsError):
-            fl.write_shares("", "eng", TEAMS, "Understand", "root")
+            fl.write_shares("", "eng", TEAMS, "Understand")
         self.assertEqual((folder / "limits.config").read_bytes(), before)
         self.assertEqual([p.name for p in folder.iterdir()], ["limits.config"])  # no backup either
 

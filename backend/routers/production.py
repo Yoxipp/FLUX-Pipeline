@@ -20,6 +20,7 @@ from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
 from core.executors import HEAVY
 from core.logger import get_logger
 from core.paths import get_project_path
+from features.accounts.alias_views import alias_etag, resolve_production_doc
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
 from features.folder_manager.tokens import load_tokens, remove_token
@@ -56,6 +57,16 @@ class CommentNotify(BaseModel):
 def _ensure_project(project: str) -> None:
     if not project_utils.project_exists(project):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+
+def _require_role(project: str, action: str) -> None:
+    """403 when the active user's project role is too low (ADR 0064)."""
+    from features.roles import project_roles
+
+    try:
+        project_roles.require(project, action)
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 # In-process cache of parsed modif_logs.json, keyed by folder path → (mtime,
@@ -158,9 +169,13 @@ async def get_production(project: str, request: Request):
             "sequences_on_disk": [],
             "shots_on_disk": [],
         }
+    # A rename changes the shown names without touching production.json.
+    etag = alias_etag(etag)
     if _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
-    return JSONResponse(result, headers={"ETag": etag})
+    # Renamed artists: resolve on a copy (result is shared by scan_cache, never mutate it).
+    shown = {**result, "production": resolve_production_doc(result.get("production"))}
+    return JSONResponse(shown, headers={"ETag": etag})
 
 
 async def _compute_production(project: str) -> dict:
@@ -290,6 +305,10 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     prod_archive.keep_archived_out(payload.production, previous)
     # Locked seq / shot records come back as stored (2026-09-30).
     locked_kept = prod_lock.keep_locked(payload.production, previous)
+    # A junior changes task progress, not the seq / shot records (2026-10-24).
+    from features.roles import project_roles
+    if not project_roles.can(project, "edit_entity"):
+        locked_kept += prod_lock.keep_all_records(payload.production, previous)
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
@@ -382,6 +401,7 @@ async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
     """Move an entity folder into <project>/ARCHIVE/<timestamp>/. The frontend
     removes the logical entity from production.json AFTER this succeeds."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
     try:
@@ -419,6 +439,7 @@ async def delete_seq_shot(project: str, payload: DeleteSeqShotRequest) -> dict:
     its tokens and remove it from production.json in one go, with a tombstone so neither
     an old publish nor a stale save brings it back."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     if payload.kind not in ("seq", "shot"):
         raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
     project_path = get_project_path(project)
@@ -458,6 +479,7 @@ async def rename_seq_shot(project: str, payload: RenameSeqShotRequest) -> dict:
     from features.production import rename as prod_rename
 
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     if payload.kind not in ("seq", "shot"):
         raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
     project_path = get_project_path(project)
@@ -606,6 +628,7 @@ async def archive_token(project: str, payload: ArchiveTokenRequest) -> dict:
     """Archive a composer token's folder (into ARCHIVE/) and drop the token from
     tokens.json. Never hard-deletes — mirrors the entity archive flow."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
 
