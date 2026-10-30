@@ -1,9 +1,15 @@
 // preload.ts — bridge sécurisé Electron ↔ React (contextIsolation).
 // Seul endroit où Node.js et le renderer se parlent.
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Board (ADR 0074): clipboard image saved as a temp PNG (null: no image), and the local
+  // path of a file dropped from the explorer ('' for a file that has none).
+  saveClipboardImage: (): Promise<string | null> =>
+    ipcRenderer.invoke('clipboard:saveImage'),
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
+
   openFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openFolder'),
 

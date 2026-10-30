@@ -5,6 +5,8 @@ declare global {
     electronAPI?: {
       openFolder: () => Promise<string | null>
       openFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
+      saveClipboardImage?: () => Promise<string | null>
+      pathForFile?: (file: File) => string
       openFiles: (filters?: { name: string; extensions: string[] }[]) => Promise<string[]>
       openFolderFiles: (extensions?: string[]) => Promise<string[]>
       saveFile: (defaultName?: string, filters?: { name: string; extensions: string[] }[]) => Promise<string | null>

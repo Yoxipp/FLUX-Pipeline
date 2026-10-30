@@ -1,6 +1,6 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen, session, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, screen, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import http from 'http'
@@ -324,6 +324,25 @@ ipcMain.handle('notification:show', (_event, { title, body }: { title: string; b
 
 ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
+})
+
+// Board paste (ADR 0074): the clipboard image written as a temp PNG, its path returned, so the
+// backend copies a file and the bytes never go through the API (ADR 0005). Older pastes go.
+const PASTE_PREFIX = 'flux_board_paste_'
+ipcMain.handle('clipboard:saveImage', () => {
+  const image = clipboard.readImage()
+  if (image.isEmpty()) return null
+  const dir = app.getPath('temp')
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith(PASTE_PREFIX)) continue
+      const full = path.join(dir, name)
+      if (Date.now() - fs.statSync(full).mtimeMs > 3600_000) fs.rmSync(full, { force: true })
+    }
+  } catch { /* cleanup is best effort */ }
+  const file = path.join(dir, `${PASTE_PREFIX}${Date.now()}.png`)
+  fs.writeFileSync(file, image.toPNG())
+  return file
 })
 
 // Settings > "Desinstaller FLUX": start the NSIS uninstaller that sits next to FLUX.exe
