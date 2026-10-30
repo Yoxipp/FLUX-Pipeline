@@ -124,6 +124,26 @@ def rename_user(old: str, new: str) -> tuple[bool, str]:
     return True, f"{old} renommé en {new}"
 
 
+def follow_rename(name: str | None) -> str | None:
+    """Saved user of this machine renamed on another one: return the new name.
+
+    A machine keeps the old name in its prefs; without this it would keep writing as
+    the retired name and recreate an empty USER/<old> next to USER/<new>. Unchanged
+    when the name was never renamed, still has its own folder, or FLUX_ROOT is unset.
+    """
+    if not name:
+        return name
+    try:
+        from features.accounts import aliases
+        new = aliases.resolve_user(name.strip().upper())
+        if new != name.strip().upper() and not user_exists(name) and user_exists(new):
+            log.info("Saved user '%s' was renamed '%s', following", name, new)
+            return new
+    except (OSError, RuntimeError) as exc:
+        log.warning("follow_rename %s: %s", name, exc)
+    return name
+
+
 def delete_user(name: str) -> tuple[bool, str]:
     """Delete artist *name* (removes FLUX_ROOT/USER/<name> and its data).
 

@@ -55,6 +55,17 @@ async def lifespan(app: FastAPI):
     log.info("[FLUX] Backend starting on port %d", PORT)
     saved_user = config.get("username")
     if saved_user:
+        # Renamed on another machine (aliases, ADR 0065): follow the new name.
+        from utils import user_utils
+        renamed = user_utils.follow_rename(saved_user)
+        if renamed != saved_user:
+            saved_user = renamed
+            config.set("username", saved_user)
+            try:
+                from core import paths as _paths
+                _paths.set_config_username(saved_user)
+            except (OSError, RuntimeError):
+                pass
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
     # Self-heal frozen installs whose config.json drifted from prefs.json (older

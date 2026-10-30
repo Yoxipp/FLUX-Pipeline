@@ -48,6 +48,14 @@ class IdentifierTests(unittest.TestCase):
         self.assertEqual(identity.ascii_upper("Lætitia Œuvre"), "LAETITIAOEUVRE")
         self.assertEqual(identity.ascii_upper("  "), "")
 
+    def test_initials_of_each_last_name_word(self):
+        self.assertEqual(identity.make_user_id("Adam", "Fresne-Roux", set()), "ADAM_FR")
+        self.assertEqual(identity.make_user_id("Eva", "de la Tour", set()), "EVA_DLT")
+        self.assertEqual(identity.make_user_id("Léa", "Le Bœuf", set()), "LEA_LB")
+        # Initials taken: back to the shortest free prefix of the whole last name.
+        self.assertEqual(identity.make_user_id("Adam", "Fresne-Roux", {"ADAM_FR"}), "ADAM_F")
+        self.assertEqual(identity.make_user_id("Adam", "Fresne-Roux", {"ADAM_FR", "ADAM_F"}), "ADAM_FRE")
+
     def test_shortest_free_prefix_then_suffix(self):
         self.assertEqual(identity.make_user_id("Adam", "Colin", set()), "ADAM_C")
         taken = {"ADAM_C"}
@@ -127,6 +135,17 @@ class AliasTests(_TempWorkspace):
         ok, _ = uu.rename_user("ROBERT", "BOB")       # his own old name: allowed
         self.assertTrue(ok)
         self.assertEqual(aliases.load_aliases(), {"ROBERT": "BOB"})
+
+    def test_other_machine_follows_rename(self):
+        # Another machine still has the old name saved: it follows the alias.
+        ok, _ = uu.rename_user("BOB", "ROBERT")
+        self.assertTrue(ok)
+        self.assertEqual(uu.follow_rename("BOB"), "ROBERT")
+        self.assertEqual(uu.follow_rename("bob"), "ROBERT")
+        self.assertEqual(uu.follow_rename("ALICE"), "ALICE")
+        self.assertIsNone(uu.follow_rename(None))
+        (self.users / "BOB").mkdir()                   # a live BOB folder again: keep it
+        self.assertEqual(uu.follow_rename("BOB"), "BOB")
 
 
 class AccountRouteTests(_TempWorkspace):

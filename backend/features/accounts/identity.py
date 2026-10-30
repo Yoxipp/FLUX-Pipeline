@@ -1,8 +1,9 @@
 # identity.py - artist identifier from first + last name, and the display profile.
 #
-# A new artist gets FIRSTNAME_<start of the last name>, upper case, without accents
-# (2026-10-24): the shortest free prefix of the last name (ADAM_C, then
-# ADAM_CO, ADAM_COM...), then the full last name with _1, _2... Existing artists
+# A new artist gets FIRSTNAME_<initials of the last name>, upper case, without accents
+# (ADR 0079, 2026-10-30): one letter per word of the last name (Fresne-Roux -> FR,
+# Colin -> C). Taken = the shortest free prefix of the last name (ADAM_CO,
+# ADAM_COM... ADR 0065), then the full last name with _1, _2... Existing artists
 # keep their identifier. First / last name live in User.json for display only.
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ _SPECIAL_LETTERS = str.maketrans({
     "ß": "ss", "đ": "d", "Đ": "D", "ł": "l", "Ł": "L",
 })
 _NOT_ID_CHAR = re.compile(r"[^A-Z0-9]")
+_WORD_SEPARATORS = re.compile(r"[\s\-'’_.]+")
 
 
 def ascii_upper(text: str) -> str:
@@ -43,8 +45,10 @@ def make_user_id(first_name: str, last_name: str, taken: set[str] | list[str]) -
     if not first or not last:
         raise ValueError("Prénom et nom requis (lettres ou chiffres).")
     used = {str(t).strip().upper() for t in taken}
-    for length in range(1, len(last) + 1):
-        candidate = f"{first}_{last[:length]}"
+    words = [w for w in (ascii_upper(part) for part in _WORD_SEPARATORS.split(last_name or "")) if w]
+    initials = "".join(w[0] for w in words)
+    for suffix in [initials] + [last[:length] for length in range(1, len(last) + 1)]:
+        candidate = f"{first}_{suffix}"
         if candidate not in used:
             return candidate
     base = f"{first}_{last}"
