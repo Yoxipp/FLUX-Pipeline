@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -129,14 +130,16 @@ async def get_project(project: str) -> dict:
 
 
 def _bot_status(project: str, cfg: dict) -> dict:
-    from features.notify import discord_bot
+    from features.notify import bot_host, bot_secret, discord_bot
     info = cfg.get("discord_bot") or {}
     if not info:
         return {"configured": False}
+    # hosted_here = the token is on this PC (the bot may run in this FLUX or headless, ADR 0076).
     return {"configured": True, "name": info.get("name", ""), "host": info.get("host", ""),
-            "hosted_here": bool(discord_bot.hosted_token(project)),
+            "hosted_here": project in bot_secret.hosted_projects(),
             "online": store.bot_alive(project, time.time()),
-            "invite_url": discord_bot.invite_url(info.get("app_id", ""))}
+            "invite_url": discord_bot.invite_url(info.get("app_id", "")),
+            **bot_host.status()}
 
 
 class BotRequest(BaseModel):
@@ -162,6 +165,35 @@ async def put_bot(project: str, req: BotRequest) -> dict:
     cfg = await _io(lambda: store.set_bot(project, {**info, "host": discord_bot.host_name()}, user))
     discord_bot.start(project)
     log.info("discord bot of %s hosted here, set by %s", project, user)
+    return {"bot": await _io(lambda: _bot_status(project, cfg))}
+
+
+class BackgroundRequest(BaseModel):
+    enabled: bool
+
+
+@router.put("/project/{project}/bot/background")
+async def put_bot_background(project: str, req: BackgroundRequest) -> dict:
+    """Keep the bots of THIS PC online when FLUX is closed (ADR 0076): a shortcut in the
+    user's Startup folder runs `--discord-bot`. Only on the PC that holds the token."""
+    _ensure_project(project)
+    from features.notify import bot_host, bot_secret, discord_bot
+    if project not in bot_secret.hosted_projects():
+        raise HTTPException(status_code=400, detail="Le bot de ce projet n'est pas heberge sur ce PC")
+    try:
+        if req.enabled:
+            await _io(bot_host.install_startup)
+            discord_bot.stop_all()              # hand over to the headless process
+            await _io(bot_host.spawn)
+        else:
+            await _io(bot_host.remove_startup)
+            await _io(bot_host.stop_headless)
+            discord_bot.start_all()             # back in this FLUX
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("discord bot background %s failed: %s", "on" if req.enabled else "off", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="FLUX n'a pas pu changer le demarrage du bot sur ce PC")
+    log.info("discord bot background %s on this PC", "on" if req.enabled else "off")
+    cfg = await _io(lambda: store.read_project(project))
     return {"bot": await _io(lambda: _bot_status(project, cfg))}
 
 

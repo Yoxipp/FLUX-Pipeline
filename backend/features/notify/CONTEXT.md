@@ -18,6 +18,8 @@ par defaut, URL remplacable). Un relais absent ou en erreur ne bloque jamais une
 | `bot_secret.py` | Jeton du bot sur le PC hebergeur seulement : `%APPDATA%/FluxPipeline/discord_bot_tokens.json`, chiffre DPAPI (compte Windows). Jamais dans le partage. |
 | `discord_bot.py` | Bot Discord (ADR 0073 etapes 1 et 2) : Gateway sortant (`websockets`, intents 0), `/link`, `/mentions`, `/chat [n]` (10 par defaut, 20 max, les plus recents gardes si > 2000 car.) et `/calendar` (propositions a valider + mes elements non finis, retard marque) en reponse ephemere ; tout sauf `/link` exige un compte lie par `/link` (`store.user_for_discord`) ; DM des notifs, envoi de la file partagee, fichier de presence. `FLUX_DISCORD_BOT=0` le coupe (et `FLUX_NOTIFY=0`). |
 
+| `bot_host.py` | Un seul hebergeur par PC (ADR 0076) : verrou local `%APPDATA%/FluxPipeline/discord_bot.lock` (pid, `app` / `headless`, repris si le process est mort). Mode sans fenetre `main.py --discord-bot` (aucun port, aucune API), lance a l'ouverture de session par un raccourci du dossier Demarrage utilisateur ; attend tant que FLUX tient les bots, reprend quand FLUX se ferme, relit les jetons chaque minute. |
+
 Bot, fichiers du partage (`_flux_setup/`, aucun jeton) : `collab.json` `notify.discord_bot` (`app_id`, `name`, `host`),
 `discord_bot_alive.json` (presence, ecrite par l'hebergeur toutes les 30 s, en ligne si < 120 s), `discord_links.json`
 (codes `/link` hashes sha256, 10 min, retires une fois utilises), `notify_bot/<AUTEUR>.json` (DM deposes par les autres
@@ -25,7 +27,7 @@ postes, 24 h). Envoi Discord pour un compte lie : ce PC heberge -> DM direct ; b
 bot hors ligne -> webhook s'il existe, sinon nouvel essai. Un identifiant tape a la main n'est jamais lie (`discord_linked_at` vide).
 
 Router : `routers/notify.py` (`/notify/me`, `/notify/me/test`, `/notify/me/discord_link`, `/notify/project/{p}` (PUT = role
-`project_settings`), `/notify/project/{p}/bot` (PUT jeton = heberger ici, DELETE, role `project_settings`), `/notify/status`).
+`project_settings`), `/notify/project/{p}/bot` (PUT jeton = heberger ici, DELETE, role `project_settings`), `/notify/project/{p}/bot/background` (PUT, PC qui a le jeton : raccourci Demarrage + lancement / arret du mode sans fenetre), `/notify/status`).
 Demarrage : `main.py` lifespan `discord_bot.start_all()` (projets dont le jeton est sur ce PC), `stop_all()` a l'arret.
 Front : `app/src/api/notify.ts`, `app/src/pages/settings/NotifySettings.tsx` (Parametres > User et > Projet, QR code `qrcode` MIT).
 

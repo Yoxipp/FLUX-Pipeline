@@ -23,6 +23,12 @@ if "--uninstall-cleanup" in sys.argv:
     from features.system.uninstall import run_cleanup_cli
     sys.exit(run_cleanup_cli())
 
+# Headless Discord bot host (ADR 0076): started at Windows logon from the Startup
+# shortcut, no HTTP, no window. Exits before the port file and the app are set up.
+if "--discord-bot" in sys.argv:
+    from features.notify.bot_host import run_cli as run_discord_bot_cli
+    sys.exit(run_discord_bot_cli())
+
 from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION

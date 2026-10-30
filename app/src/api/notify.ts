@@ -41,6 +41,8 @@ export interface NotifyBot {
   hosted_here?: boolean
   online?: boolean
   invite_url?: string
+  background?: boolean       // this PC keeps its bots online when FLUX is closed (ADR 0076)
+  runs_in?: '' | 'app' | 'headless'
 }
 
 export interface NotifyProject {
@@ -67,4 +69,6 @@ export const notifyApi = {
   setBot: (project: string, token: string) =>
     apiCall<{ bot: NotifyBot }>('PUT', `/notify/project/${enc(project)}/bot`, { token }),
   removeBot: (project: string) => apiCall<{ bot: NotifyBot }>('DELETE', `/notify/project/${enc(project)}/bot`),
+  setBotBackground: (project: string, enabled: boolean) =>
+    apiCall<{ bot: NotifyBot }>('PUT', `/notify/project/${enc(project)}/bot/background`, { enabled }),
 }

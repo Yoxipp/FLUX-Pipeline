@@ -292,12 +292,23 @@ class BotRunner:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._main, name=f"flux-discord-bot-{project}", daemon=True)
         self.online = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._ws = None
 
     def start(self) -> None:
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        # Close the Gateway now: the loop would only see the flag at the next message
+        # (up to a heartbeat, ~40 s), and a handover to another process (ADR 0076) must
+        # not leave two connections on one token.
+        loop, ws = self._loop, self._ws
+        if loop and ws and not loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(ws.close(), loop)
+            except RuntimeError:
+                pass
 
     def _main(self) -> None:
         backoff = 5.0
@@ -316,6 +327,7 @@ class BotRunner:
     async def _session(self) -> None:
         from websockets.asyncio.client import connect
         async with connect(GATEWAY, max_size=2 ** 22) as ws:
+            self._loop, self._ws = asyncio.get_running_loop(), ws
             hello = json.loads(await ws.recv())
             interval = float((hello.get("d") or {}).get("heartbeat_interval", 41250)) / 1000.0
             await ws.send(json.dumps({"op": 2, "d": {"token": self.token, "intents": 0,
@@ -418,6 +430,10 @@ def start(project: str) -> bool:
                 return False        # the team removed the bot: this PC's token is left unused
         except Exception:  # noqa: BLE001 - project folder unreachable now: try at next start
             return False
+        from features.notify import bot_host
+        if not bot_host.claim():
+            log.info("discord bot %s: hosted by another FLUX process of this PC", project)
+            return False
         runner = BotRunner(project, token)
         _runners[project] = runner
         runner.start()
@@ -427,8 +443,12 @@ def start(project: str) -> bool:
 def stop(project: str) -> None:
     with _lock:
         runner = _runners.pop(project, None)
+        last = not _runners
     if runner:
         runner.stop()
+    if last:
+        from features.notify import bot_host
+        bot_host.release()
 
 
 def start_all() -> list[str]:
@@ -438,6 +458,19 @@ def start_all() -> list[str]:
 def stop_all() -> None:
     for project in list(_runners):
         stop(project)
+    from features.notify import bot_host
+    bot_host.release()
+
+
+def refresh() -> list[str]:
+    """Headless loop (ADR 0076): drop the bots that stopped or whose token changed or left
+    this PC, then start the missing ones (a share offline at logon comes back here)."""
+    for project, runner in list(_runners.items()):
+        if not runner._thread.is_alive() or runner.token != bot_secret.load_token(project):
+            with _lock:
+                _runners.pop(project, None)
+            runner.stop()
+    return start_all()
 
 
 def hosted_token(project: str) -> str:
