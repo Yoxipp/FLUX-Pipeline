@@ -109,6 +109,31 @@ def _seconds_to_midnight(now: float) -> float:
 
 # ── flush ─────────────────────────────────────────────────────────────────────
 
+def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float):
+    """Private message through the project's bot (ADR 0073) for a linked account.
+
+    This PC hosts the bot: send now. Another PC hosts it and is online: leave the DM in
+    the shared queue (the host sends it). Bot offline: None = use the webhook if there is
+    one, else retry later. Not linked or no bot: None.
+    """
+    if not cfg.get("discord_bot") or not store.is_linked(prefs):
+        return None
+    from features.notify import discord_bot
+    from features.notify.channels import SendResult
+    token = discord_bot.hosted_token(project)
+    if token:
+        return discord_bot.send_dm(token, prefs["discord_id"], text)
+    if store.bot_alive(project, now):
+        from core import config
+        item = {"id": outbox.new_item({}, "", now=now)["id"], "discord_id": prefs["discord_id"],
+                "text": text, "created": now}
+        ok = store.bot_queue_add(project, config.get_current_user() or "", item, now)
+        return SendResult(ok, 200 if ok else 0)
+    if cfg.get("discord_webhook"):
+        return None
+    return SendResult(False, 0)
+
+
 def _send_group(project: str, who: str, items: list[dict], now: float) -> str:
     """Send one person's ready items. Returns sent | held | retry | dropped | no_channel."""
     cfg = store.read_project(project)
@@ -136,14 +161,18 @@ def _send_group(project: str, who: str, items: list[dict], now: float) -> str:
         if result.ok:
             _ntfy_bump()
     else:
-        hook = cfg["discord_webhook"]
-        if _discord_cooldown.get(hook, 0.0) > now:
-            for i in items:
-                i["next_try"] = _discord_cooldown[hook]
-            return "held"
-        result = discord.send(hook, text, [prefs["discord_id"]])
-        if result.retry_after:
-            _discord_cooldown[hook] = now + result.retry_after
+        result = _via_bot(project, cfg, prefs, text, now)
+        if result is not None:
+            channel = "discord bot"
+        else:
+            hook = cfg["discord_webhook"]
+            if _discord_cooldown.get(hook, 0.0) > now:
+                for i in items:
+                    i["next_try"] = _discord_cooldown[hook]
+                return "held"
+            result = discord.send(hook, text, [prefs["discord_id"]])
+            if result.retry_after:
+                _discord_cooldown[hook] = now + result.retry_after
     types = ",".join(sorted({e.get("type", "?") for e in events}))
     if result.ok:
         log.info("notify %s via %s: sent (%d)", types, channel, len(items))
@@ -197,7 +226,9 @@ def send_test(project: str, who: str) -> dict:
         if result.ok:
             _ntfy_bump()
     else:
-        result = discord.send(cfg["discord_webhook"], text, [prefs["discord_id"]])
+        result = _via_bot(project, cfg, prefs, text, time.time()) if project else None
+        if result is None:
+            result = discord.send(cfg["discord_webhook"], text, [prefs["discord_id"]])
     log.info("notify test via %s: %s", prefs["channel"], "sent" if result.ok else f"HTTP {result.status}")
     return {"ok": result.ok, "status": result.status, "channel": prefs["channel"]}
 

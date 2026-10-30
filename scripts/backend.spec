@@ -34,6 +34,8 @@ hidden = (
     # and the dispatcher lazily from them (ADR 0067): invisible to the static analysis.
     + collect_submodules("flux_flows.nodes")
     + collect_submodules("features.dispatcher")
+    # Discord bot Gateway (ADR 0073): imported inside a function of features/notify/discord_bot.py.
+    + collect_submodules("websockets")
 )
 
 # Non-Python files the backend reads next to its own modules (Path(__file__)...).

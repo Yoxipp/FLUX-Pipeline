@@ -14,9 +14,19 @@ par defaut, URL remplacable). Un relais absent ou en erreur ne bloque jamais une
 | `outbox.py` | File locale `%APPDATA%/FluxPipeline/notify_queue.jsonl` (un fichier par poste), ecriture atomique, backoff 30 s a 1 h, abandon apres 24 h. La cible (webhook, sujet) est relue a l'envoi. |
 | `store.py` | Reglages projet `_flux_setup/collab.json` (webhook, serveur ntfy, delai, nom du projet, `include_text`) et personne `User.json` `notify` (canal, Discord ID, sujet). Sorties publiques masquees. |
 | `relay_secrets.py` | Masquage `****` + 4 caracteres, sujet aleatoire, `redact`. |
-| `channels/` | `discord.py`, `ntfy.py` : HTTP stdlib (`urllib`), `SendResult` (ok, status, retry_after, permanent). |
+| `channels/` | `discord.py`, `ntfy.py` : HTTP stdlib (`urllib`), `SendResult` (ok, status, retry_after, permanent). `request_json` (toute methode + en-tetes) pour le bot. |
+| `bot_secret.py` | Jeton du bot sur le PC hebergeur seulement : `%APPDATA%/FluxPipeline/discord_bot_tokens.json`, chiffre DPAPI (compte Windows). Jamais dans le partage. |
+| `discord_bot.py` | Bot Discord (ADR 0073 etape 1) : Gateway sortant (`websockets`, intents 0), `/link` et `/mentions` en reponse ephemere, DM des notifs, envoi de la file partagee, fichier de presence. `FLUX_DISCORD_BOT=0` le coupe (et `FLUX_NOTIFY=0`). |
 
-Router : `routers/notify.py` (`/notify/me`, `/notify/me/test`, `/notify/project/{p}` (PUT = role `project_settings`), `/notify/status`).
+Bot, fichiers du partage (`_flux_setup/`, aucun jeton) : `collab.json` `notify.discord_bot` (`app_id`, `name`, `host`),
+`discord_bot_alive.json` (presence, ecrite par l'hebergeur toutes les 30 s, en ligne si < 120 s), `discord_links.json`
+(codes `/link` hashes sha256, 10 min, retires une fois utilises), `notify_bot/<AUTEUR>.json` (DM deposes par les autres
+postes, 24 h). Envoi Discord pour un compte lie : ce PC heberge -> DM direct ; bot en ligne ailleurs -> file partagee ;
+bot hors ligne -> webhook s'il existe, sinon nouvel essai. Un identifiant tape a la main n'est jamais lie (`discord_linked_at` vide).
+
+Router : `routers/notify.py` (`/notify/me`, `/notify/me/test`, `/notify/me/discord_link`, `/notify/project/{p}` (PUT = role
+`project_settings`), `/notify/project/{p}/bot` (PUT jeton = heberger ici, DELETE, role `project_settings`), `/notify/status`).
+Demarrage : `main.py` lifespan `discord_bot.start_all()` (projets dont le jeton est sur ce PC), `stop_all()` a l'arret.
 Front : `app/src/api/notify.ts`, `app/src/pages/settings/NotifySettings.tsx` (Parametres > User et > Projet, QR code `qrcode` MIT).
 
 ## Regles

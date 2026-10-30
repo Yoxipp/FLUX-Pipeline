@@ -107,7 +107,18 @@ async def lifespan(app: FastAPI):
             notify_dispatch.kick()
     except Exception as exc:  # never block startup on notifications
         log.warning("[FLUX] Notify queue skipped: %s", exc)
+    # Discord bot (ADR 0073): only for the projects whose token is on THIS PC.
+    try:
+        from features.notify import discord_bot
+        discord_bot.start_all()
+    except Exception as exc:  # never block startup on the bot
+        log.warning("[FLUX] Discord bot skipped: %s", exc)
     yield
+    try:
+        from features.notify import discord_bot
+        discord_bot.stop_all()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("[FLUX] Discord bot stop skipped: %s", exc)
     try:
         from flux_flows import scheduler as flows_scheduler
         await flows_scheduler.stop()

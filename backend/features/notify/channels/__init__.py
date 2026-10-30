@@ -43,6 +43,29 @@ def post_json(url: str, payload: dict, timeout: float = TIMEOUT_S) -> tuple[int,
         return 0, {}, b""
 
 
+def request_json(method: str, url: str, payload: dict | list | None = None, *,
+                 headers: dict | None = None, timeout: float = TIMEOUT_S) -> tuple[int, dict, bytes]:
+    """Any method, optional JSON body and extra headers (Discord bot REST, ADR 0073).
+    Same contract as post_json: never raises, status 0 = no answer, no secret in errors."""
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    all_headers = {"User-Agent": "DiscordBot (https://flux.local, 1)", **(headers or {})}
+    if data is not None:
+        all_headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=all_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - Discord API
+            return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read()
+    except urllib.error.HTTPError as exc:
+        hdrs = {k.lower(): v for k, v in (exc.headers or {}).items()}
+        try:
+            body = exc.read()
+        except Exception:  # noqa: BLE001
+            body = b""
+        return exc.code, hdrs, body
+    except Exception:  # noqa: BLE001
+        return 0, {}, b""
+
+
 def retry_after_s(headers: dict, body: bytes) -> float:
     """Seconds from a Retry-After header or a JSON ``retry_after`` field, else 0."""
     for key in ("retry-after", "x-ratelimit-reset-after"):
