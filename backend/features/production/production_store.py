@@ -223,6 +223,37 @@ def add_retake(
     return retake
 
 
+def add_shot_retake_comment(data: dict, seq: str, shot: str, task: str, text: str,
+                            author: str, date: str, time: str) -> dict:
+    """Append a 'retake' comment (the kind the task panel and the home "Tes retakes" read)
+    to task *task* of shot *seq*/*shot* (ADR 0083, shotboard idea sent to Production).
+    *task* must be one of the shot's tasks (its own, or its sequence's when inherited).
+    Raises ValueError when the shot or the task is unknown or the text is empty."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("retake vide")
+    seq_entry = next((s for s in data.get("sequences", []) if str(s.get("name", "")).upper() == seq.upper()), None)
+    shot_entry = None if seq_entry is None else next(
+        (sh for sh in data.get("shots", [])
+         if sh.get("seq_id") == seq_entry.get("id") and str(sh.get("name", "")).upper() == shot.upper()), None)
+    if shot_entry is None:
+        raise ValueError(f"shot {seq}/{shot} introuvable dans Production")
+    tasks = list(shot_entry.get("tasks") or [])
+    if shot_entry.get("inherit_tasks", True):
+        tasks += list(seq_entry.get("tasks") or [])
+    name = next((str(t.get("name")) for t in tasks if str(t.get("name", "")).upper() == task.upper()), None)
+    if name is None:
+        raise ValueError(f"tache {task} inconnue pour {seq}/{shot}")
+    details = shot_entry.setdefault("task_details", {})
+    # The task panel keys details by the task name as written; reuse a key of another case.
+    key = next((k for k in details if k.upper() == name.upper()), name)
+    detail = details.setdefault(key, {})
+    comment = {"id": new_id("c"), "text": text[:10_000], "author": (author or "unknown").upper(),
+               "date": date, "time": time, "kind": "retake"}
+    detail.setdefault("comments", []).append(comment)
+    return comment
+
+
 def collect_project_type_tokens(data: dict) -> list[str]:
     """Return every TYPE token currently used across all tasks (for suggestions)."""
     seen: set[str] = set()

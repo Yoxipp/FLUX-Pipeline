@@ -14,6 +14,7 @@ import type {
   HoudiniPublishResult,
   HoudiniState,
   Preset,
+  ProductionComment,
   ProductionPayload,
   ProductionState,
   PublishPayload,
@@ -1333,6 +1334,10 @@ export const api = {
   keyframeStatus: () => apiCall<KeyframeStatus>('GET', '/review/keyframe/status', undefined, 8000),
   keyframeOpen: (project: string, items: Array<{ rel_path?: string; path?: string; label?: string }>, title = 'FLUX', siblings = true) =>
     apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
+
+  // Shotboard idea -> one 'retake' comment of a shot task (ADR 0083).
+  addShotRetake: (project: string, body: { seq: string; shot: string; task: string; text: string }) =>
+    apiCall<{ ok: boolean; comment: ProductionComment }>('POST', `/production/${encodeURIComponent(project)}/retake`, body),
 
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
   refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref', rev?: number | string) => {

@@ -370,6 +370,56 @@ async def notify_comment(project: str, payload: CommentNotify) -> dict:
     return {"success": True}
 
 
+class ShotRetake(BaseModel):
+    seq:  str
+    shot: str
+    task: str
+    text: str
+
+
+@router.post("/{project}/retake")
+async def add_shot_retake(project: str, payload: ShotRetake) -> dict:
+    """Add one 'retake' comment to a shot task (ADR 0083: an idea of the board shotboard
+    sent to Production). Read, append, save in one step on the backend: the board never
+    PUTs the whole production.json. A locked shot still takes it (task progress stays
+    editable on a locked record, features/production/lock.py)."""
+    _ensure_project(project)
+    user = config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+
+    def _do() -> dict:
+        import copy
+        from datetime import datetime
+        production = store.load_production(project)
+        previous = copy.deepcopy(production)
+        now = datetime.now()
+        comment = store.add_shot_retake_comment(production, payload.seq, payload.shot, payload.task,
+                                                payload.text, user, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"))
+        if not store.save_production(project, production):
+            raise RuntimeError("Écriture production.json échouée")
+        return {"previous": previous, "production": production, "comment": comment}
+
+    try:
+        res = await loop.run_in_executor(None, _do)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.exception("shot retake failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    # Same side effects as a retake typed in the task panel: phone notify, Activity event.
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_production(project, res["previous"], res["production"], user)
+    except Exception as e:  # noqa: BLE001 — the retake is saved
+        log.warning("Notify after board retake skipped for %r: %s", project, e)
+    try:
+        filename = "_".join([payload.seq.upper(), payload.shot.upper(), payload.task.upper()])
+        await loop.run_in_executor(None, lambda: log_event(user, "comment", project, filename=filename, dest_folder=None))
+    except Exception as e:  # noqa: BLE001
+        log.warning("Activity event after board retake skipped for %r: %s", project, e)
+    return {"ok": True, "comment": res["comment"]}
+
+
 # ── Delete = archive (never hard-delete) ──────────────────────────────────────
 
 class ArchiveRequest(BaseModel):
