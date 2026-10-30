@@ -254,7 +254,7 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus par
   canal (localStorage). Appels par lien : lien permanent du canal (lead) ouvert par `electronAPI.openExternal` (https
   seulement), "Nouvelle reunion" = lien Jitsi genere ou page Meet / Teams ouverte puis lien colle, poste dans le canal,
-  "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". `hooks/usePresenceHeartbeat.ts`
+  "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". ADR 0080 : clic droit sur un canal (leads) = Qui voit (`AccessPicker` de `PageAccess.tsx`, champ `access`), Lien d'appel, Archiver ; cadenas sur un canal restreint ; lien d'appel du canal aussi dans le menu Nouvelle reunion. `hooks/usePresenceHeartbeat.ts`
   (monte dans `App.tsx`) reecrit le fichier de presence de l'artiste toutes les 60 s. Presence visible (P2b) : une seule
   lecture `GET /team/presence` toutes les 30 s pour toute l'app (`hooks/usePresence.tsx`, `PresenceProvider` dans `App.tsx`,
   relue apres `flux:presence`), `PresenceDot` = couleur du statut quand connecte (fichier de moins de 150 s) : vert disponible,

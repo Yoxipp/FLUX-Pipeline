@@ -249,13 +249,24 @@ async def get_chat(
     # messages would never appear). The USER dir stat stays a real filesystem
     # validator — the @-autocomplete list is folders on disk, not a repo doc.
     validator = get_repository().version_token("chat_log", str(chat_path))
-    etag = _etag(validator, f"c:{project}:{limit}:{users_validator}") if validator != "0" else None
+    # Channels the artist does not see (Team, access per channel): their state is part of the view.
+    from features.team import team_meta
+    from flux_flows import page_data
+    me = config.get_current_user() or ""
+    try:
+        meta_tag = page_data.etag(team_meta.folder(project))
+    except (OSError, RuntimeError, ValueError):
+        meta_tag = ""
+    etag = _etag(validator, f"c:{project}:{limit}:{users_validator}:{me}:{meta_tag}") if validator != "0" else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
     loop = asyncio.get_running_loop()
     # get_messages caches internally (burst window); the stat above is the ETag's.
     messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit, path=chat_path))
+    hidden = await loop.run_in_executor(None, lambda: team_meta.hidden_channels(project, me))
+    if hidden:
+        messages = [m for m in messages if m.get("channel") not in hidden]
     users = await loop.run_in_executor(None, get_user_list)
     if etag:
         response.headers["ETag"] = etag
@@ -275,9 +286,19 @@ async def post_chat(req: ChatMessage) -> dict:
     except RuntimeError:
         raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
     loop = asyncio.get_running_loop()
+    audience = None
+    if req.channel:
+        # A restricted channel: only the artists who see it may post, be @mentioned or notified.
+        from features.team import team_meta
+        records = await loop.run_in_executor(None, lambda: team_meta.read(req.project)["records"])
+        if req.channel in await loop.run_in_executor(None, lambda: team_meta.hidden_channels(req.project, user, records)):
+            raise HTTPException(status_code=403, detail=f"Tu ne vois pas le canal #{req.channel}")
+        channel = req.channel
+        audience = lambda who: channel not in team_meta.hidden_channels(req.project, who, records)  # noqa: E731
     ok = await loop.run_in_executor(
         None, lambda: send_message(user, req.message, project=req.project, channel=req.channel, reply_to=req.reply_to,
-                                   attachments=[a.model_dump() for a in req.attachments], notify_all=req.notify_all),
+                                   attachments=[a.model_dump() for a in req.attachments], notify_all=req.notify_all,
+                                   audience=audience),
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")

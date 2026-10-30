@@ -4,15 +4,21 @@
 # same per author journals as the board (flux_flows/page_data.py), in
 #   DOSSIER_PROJETS/<project>/_flux_setup/team/<AUTHOR>.jsonl
 # The messages themselves stay in the team chat (features/activity/chat_manager.py).
+#
+# Who sees a channel (2026-10-30): a channel may carry `access` (JSON text, the shape of
+# a TOOL page's access, ADR 0078: people, roles, departments). Empty = everyone; #general is
+# always everyone; leads and supervisors see every channel (they manage them). This is what
+# FLUX shows and notifies, not secrecy: the chat file stays readable on the share.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 from flux_flows import page_data
-from flux_flows.pages import DataSpec
+from flux_flows.pages import Access, DataSpec, page_for
 from flux_flows.store import FlowStoreError
 
 GENERAL = "general"
@@ -29,6 +35,7 @@ SPEC = DataSpec.model_validate({
         {"id": "topic", "type": "text"},         # channel description
         {"id": "call_link", "type": "str"},      # https link of the channel's call (Discord, Teams, Meet, Jitsi)
         {"id": "archived", "type": "bool"},
+        {"id": "access", "type": "text"},        # who sees the channel: JSON {users, roles, departments}
         {"id": "target", "type": "str"},         # message id (reaction, pin)
         {"id": "emoji", "type": "select", "options": [{"value": e} for e in EMOJIS]},
     ],
@@ -59,6 +66,10 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
     if op.get("op") == "put":
         if "call_link" in fields:
             check_link(fields["call_link"])
+        if fields.get("access") not in (None, ""):
+            if (fields.get("name") or current.get("name")) == GENERAL:
+                raise FlowStoreError("#general est vu par toute l'equipe", 422)
+            parse_access(fields["access"], strict=True)
         name = fields.get("name")
         if kind == "channel" and op.get("rid") is None:
             if not isinstance(name, str) or not CHANNEL_RE.match(name):
@@ -88,3 +99,40 @@ def write(project: str, ops: List[Dict[str, Any]], *, user: str, is_lead: bool) 
 
 def read(project: str, known_etag: str | None = None) -> Dict[str, Any]:
     return page_data.read_records(folder(project), known_etag)
+
+
+def parse_access(value: Any, strict: bool = False) -> Optional[Access]:
+    """Access of a channel from its stored JSON text, None = everyone. *strict* raises on a
+    malformed value (write); a read treats it as everyone."""
+    if value in (None, ""):
+        return None
+    try:
+        raw = json.loads(value) if isinstance(value, str) else None
+        access = Access.model_validate(raw)
+    except (ValueError, TypeError) as exc:
+        if strict:
+            raise FlowStoreError(f"acces du canal : {exc}", 422)
+        return None
+    return None if access.is_everyone() else access
+
+
+def hidden_channels(project: str, user: str, records: Optional[List[Dict[str, Any]]] = None) -> Set[str]:
+    """Channels *user* does not see on *project* (empty for a lead or a supervisor)."""
+    from features.roles import project_roles
+
+    if records is None:
+        try:
+            records = read(project)["records"]
+        except (OSError, RuntimeError):
+            return set()
+    restricted = {r.get("name"): parse_access(r.get("access")) for r in records
+                  if r.get("kind") == "channel" and r.get("name") and r.get("name") != GENERAL}
+    restricted = {n: a for n, a in restricted.items() if a is not None}
+    if not restricted:
+        return set()
+    roles = project_roles.read_roles(project)
+    if project_roles.can(project, "team_channels", user=user, roles=roles):
+        return set()
+    role = project_roles.role_of(project, user, roles)
+    departments = project_roles.departments_of(project, user, roles)
+    return {n for n, a in restricted.items() if not page_for(a, user, role, departments)}

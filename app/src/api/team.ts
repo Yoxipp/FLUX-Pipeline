@@ -14,6 +14,7 @@ export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {
   kind?: 'channel' | 'reaction' | 'pin'
   name?: string; topic?: string; call_link?: string; archived?: boolean
+  access?: string | null   // who sees the channel: JSON {users, roles, departments}, empty = everyone
   target?: string; emoji?: TeamEmoji
 }
 export type TeamMetaRead =

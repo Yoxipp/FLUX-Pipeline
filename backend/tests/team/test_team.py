@@ -68,6 +68,26 @@ class TeamMeta(unittest.TestCase):
         kinds = sorted(r["kind"] for r in team_meta.read("ALPHA")["records"])
         self.assertEqual(kinds, ["pin", "reaction"])
 
+    def test_channel_access_who_sees_what(self) -> None:
+        # 2026-10-30: a channel for some people / roles / departments; leads see all.
+        rig = json.dumps({"users": ["bob"], "departments": ["RIG"]})
+        self._w([{"op": "put", "fields": {"kind": "channel", "name": "rig", "access": rig}},
+                 {"op": "put", "fields": {"kind": "channel", "name": "leads", "access": json.dumps({"roles": ["lead"]})}},
+                 {"op": "put", "fields": {"kind": "channel", "name": "open", "access": json.dumps({})}}], lead=True)
+        for bad in ('{"roles": ["boss"]}', "not json", '{"users": ["a b"]}'):
+            with self.assertRaises(FlowStoreError):
+                self._w([{"op": "put", "fields": {"kind": "channel", "name": "x", "access": bad}}], lead=True)
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "fields": {"kind": "channel", "name": "general", "access": rig}}], lead=True)
+        roles = {"created_by": None, "members": {"LEA": "lead", "SUP": "supervisor"},
+                 "departments": {"EVA": ["RIG"]}, "legacy": False}
+        with mock.patch("features.roles.project_roles.read_roles", return_value=roles):
+            hidden = {u: team_meta.hidden_channels("ALPHA", u) for u in ("BOB", "EVA", "CLEO", "LEA", "SUP")}
+        self.assertEqual(hidden["BOB"], {"leads"})            # named in #rig
+        self.assertEqual(hidden["EVA"], {"leads"})            # RIG department
+        self.assertEqual(hidden["CLEO"], {"rig", "leads"})
+        self.assertEqual((hidden["LEA"], hidden["SUP"]), (set(), set()))
+
 
 class Presence(unittest.TestCase):
     def setUp(self) -> None:
@@ -149,6 +169,15 @@ class ChatFields(unittest.TestCase):
         self.assertEqual(len(call), 1)
         self.assertEqual(sorted(call[0][1]), ["BOB", "CLEO"])
 
+    def test_restricted_channel_mentions_only_its_audience(self) -> None:
+        sees = {"ADAM", "BOB"}.__contains__
+        cm.send_message("ADAM", "@BOB @CLEO regardez", project="ALPHA", channel="rig", audience=sees)
+        cm.send_message("ADAM", "appel", project="ALPHA", channel="rig", notify_all=True, audience=sees)
+        mention = [n for n in self.notified if n[2] == "ALPHA" and n[4] != "appel"]
+        self.assertEqual(mention[0][1], ["BOB"])
+        call = [n for n in self.notified if n[4] == "appel"]
+        self.assertEqual(call[0][1], ["BOB"])
+
 
 class Routes(unittest.TestCase):
     def setUp(self) -> None:
@@ -180,6 +209,37 @@ class Routes(unittest.TestCase):
         att = self.client.post("/team/ALPHA/files", json={"path": str(src)}).json()
         self.assertEqual(self.client.get(f"/team/ALPHA/files/{att['file']}").content, b"%PDF-1.4")
         self.assertEqual(self.client.post("/team/ALPHA/files", json={"path": str(self.tmp / "x.bat")}).status_code, 422)
+
+    def test_hidden_channel_left_out_of_chat_and_meta(self) -> None:
+        from routers import activity as activity_router
+        app = FastAPI()
+        app.include_router(activity_router.router, prefix="/activity")
+        client = TestClient(app)
+        (self.tmp / "ALPHA").mkdir()
+        (self.tmp / "USER").mkdir()
+        jm.invalidate_cache()
+        roles = {"created_by": None, "members": {}, "departments": {}, "legacy": False}
+        for p in (mock.patch.object(cm, "get_project_chat_path", lambda name: self.tmp / name / "teamChat.json"),
+                  mock.patch.object(cm, "get_mentions_path", lambda: self.tmp / "chatMentions.json"),
+                  mock.patch.object(cm, "get_user_list", lambda: ["ADAM", "BOB"]),
+                  mock.patch.object(activity_router, "get_users_dir", lambda: self.tmp / "USER"),
+                  mock.patch("features.roles.project_roles.read_roles", return_value=roles),
+                  mock.patch("features.notify.hooks.on_mentions")):
+            p.start()
+            self.addCleanup(p.stop)
+        self.lead = True
+        only_bob = json.dumps({"users": ["BOB"]})
+        self.client.post("/team/ALPHA/meta", json={"ops": [{"op": "put", "fields": {"kind": "channel", "name": "secret", "access": only_bob}}]})
+        self.assertEqual(client.post("/activity/chat", json={"project": "ALPHA", "message": "lead", "channel": "secret"}).status_code, 200)
+        cm.send_message("BOB", "pour bob", project="ALPHA", channel="secret")
+        cm.send_message("BOB", "tout le monde", project="ALPHA")
+        self.assertEqual(len(client.get("/activity/chat", params={"project": "ALPHA"}).json()["messages"]), 3)
+        self.lead = False                                   # ADAM, a plain artist, not in #secret
+        got = client.get("/activity/chat", params={"project": "ALPHA"}).json()["messages"]
+        self.assertEqual([m["message"] for m in got], ["tout le monde"])
+        self.assertEqual(self.client.get("/team/ALPHA/meta").json()["records"], [])
+        r = client.post("/activity/chat", json={"project": "ALPHA", "message": "hop", "channel": "secret"})
+        self.assertEqual(r.status_code, 403)
 
 
 if __name__ == "__main__":

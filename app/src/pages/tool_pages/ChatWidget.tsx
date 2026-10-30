@@ -6,12 +6,13 @@
 // Channels, call links and pins: leads. A reaction belongs to its author.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { Archive, Hash, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, X } from 'lucide-react'
+import { Archive, Eye, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { setMyPresence, teamApi, type TeamAttachment, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
 import { PresenceDot } from '../../hooks/usePresence'
 import { PeoplePanel } from '../../components/shared/PeoplePanel'
-import type { PageDataOp } from '../flow_editor/types'
+import type { PageAccess, PageDataOp } from '../flow_editor/types'
+import { AccessPicker, cleanAccess, isEveryone } from './PageAccess'
 import { useTr } from '../flow_editor/useTr'
 import type { DataWidgetProps } from './DataWidgets'
 
@@ -39,6 +40,13 @@ function Text({ text, users }: { text: string; users: Set<string> }) {
         ? <b key={`${i}-${j}`} style={{ color: 'var(--accent)' }}>{bit}</b> : <span key={`${i}-${j}`}>{bit}</span>))}</>
 }
 
+// Access of a channel record (stored as JSON text), undefined = everyone.
+function accessOf(r: TeamRecord | undefined): PageAccess | undefined {
+  if (!r?.access) return undefined
+  try { const a = JSON.parse(r.access) as PageAccess; return isEveryone(a) ? undefined : a } catch { return undefined }
+}
+const accessLabel = (a: PageAccess) => [...(a.users ?? []), ...(a.roles ?? []), ...(a.departments ?? [])].join(', ')
+
 // fill: the built-in Team page (/team) shows it at the full height of the window.
 export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProps & { fill?: boolean }) {
   const { tr } = useTr()
@@ -56,6 +64,16 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [paste, setPaste] = useState<{ label: string } | null>(null)
   const [notifyAll, setNotifyAll] = useState(true)
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
+  const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined } | null>(null)
+  const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null)   // right click on a channel (leads)
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const key = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', key)
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', key) }
+  }, [menu])
   const etag = useRef<string | undefined>(undefined)
   const listRef = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -158,6 +176,13 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     void meta(chanRec ? [{ op: 'put', rid: chanRec.rid, fields: { call_link: link } }] : [{ op: 'put', fields: { kind: 'channel', name: current, call_link: link } }])
     setLinkEdit(null)
   }
+  // Who sees the channel (leads): people, roles, departments, like a TOOL page (ADR 0078).
+  const saveAccess = (value: PageAccess | undefined) => {
+    const clean = value ? cleanAccess(value) : undefined
+    const access = clean ? JSON.stringify(clean) : null
+    void meta(chanRec ? [{ op: 'put', rid: chanRec.rid, fields: { access } }] : [{ op: 'put', fields: { kind: 'channel', name: current, access } }])
+    setAccessEdit(null)
+  }
   const join = (url: string) => { openLink(url); void setMyPresence('meeting') }
   const postCall = (label: string, url: string) => {
     if (!/^https:\/\/\S+$/.test(url)) { toast.error(tr('Colle un lien https://', 'Paste an https:// link')); return }
@@ -189,9 +214,10 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
         <div style={{ flex: 1, overflow: 'auto' }}>
           {channels.names.map(n => (
             <div key={n} onClick={() => { setChannel(n); setThread(null) }}
+                 onContextMenu={e => { if (!lead || n === GENERAL) return; e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12.5,
                           background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400 }}>
-              <Hash size={12} style={{ opacity: 0.6 }} />
+              {accessOf(channels.byName.get(n)) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</span>
               {channels.byName.get(n)?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
               {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
@@ -214,14 +240,25 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
            onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
           <b style={{ fontSize: 13 }}># {current}</b>
+          {accessOf(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel(accessOf(chanRec)!)}><Lock size={9} /> {tr('restreint', 'restricted')}</span>}
           <span style={{ flex: 1 }} />
           {chanRec?.call_link && <button type="button" className="btn sm" onClick={() => join(chanRec.call_link!)}
                                          title={chanRec.call_link}><Phone size={12} /> {tr('Rejoindre l’appel', 'Join the call')}</button>}
           <button type="button" className="btn ghost sm" onClick={() => setCallMenu(s => !s)} style={{ background: callMenu ? 'var(--paper-2)' : undefined }}>
             <Video size={12} /> {tr('Nouvelle reunion', 'New meeting')}</button>
-          {lead && <button type="button" className="btn ghost sm" title={tr('Lien d’appel permanent du canal (Discord, Teams, Meet, Jitsi)', 'Permanent call link of the channel')}
-                           onClick={() => setLinkEdit(chanRec?.call_link ?? '')}>{tr('Lien d’appel', 'Call link')}</button>}
         </div>
+        {accessEdit && (
+          <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+            <AccessPicker value={accessEdit.value} onChange={value => setAccessEdit({ value })} project={project} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span className="tp-note" style={{ flex: 1, color: 'var(--ink-4)' }}>
+                {tr('Les leads et superviseurs voient tous les canaux. Visible dans FLUX seulement : le fichier du chat reste lisible sur le partage.',
+                    'Leads and supervisors see every channel. FLUX visibility only: the chat file stays readable on the share.')}</span>
+              <button type="button" className="btn sm" onClick={() => saveAccess(accessEdit.value)}>{tr('Enregistrer', 'Save')}</button>
+              <button type="button" className="btn ghost sm" onClick={() => setAccessEdit(null)}><X size={12} /></button>
+            </div>
+          </div>
+        )}
         {(callMenu || paste || linkEdit !== null) && (
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
             {linkEdit !== null ? <>
@@ -239,6 +276,8 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
               <button type="button" className="btn sm" onClick={() => newMeeting('jitsi')} title={tr('Lien genere tout de suite, sans compte (le premier arrive se connecte sur meet.jit.si)', 'Link made at once, no account')}>Jitsi</button>
               <button type="button" className="btn sm" onClick={() => newMeeting('meet')}>Google Meet</button>
               <button type="button" className="btn sm" onClick={() => newMeeting('teams')}>Teams</button>
+              {lead && <button type="button" className="btn ghost sm" title={tr('Lien d’appel permanent du canal (Discord, Teams, Meet, Jitsi) : bouton Rejoindre', 'Permanent call link of the channel: Join button')}
+                               onClick={() => { setCallMenu(false); setLinkEdit(chanRec?.call_link ?? '') }}><Phone size={12} /> {tr('Lien d’appel du canal', 'Channel call link')}</button>}
               <label className="cap" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
                 <input type="checkbox" checked={notifyAll} onChange={e => setNotifyAll(e.target.checked)} />
                 {tr('Prevenir l’equipe (telephone)', 'Notify the team (phone)')}</label>
@@ -267,6 +306,23 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
         <Composer users={users} project={project} placeholder={tr(`Message dans #${current} (@nom previent l’artiste)`, `Message in #${current} (@name notifies)`)}
                   onSend={(message, attachments) => send({ message, attachments })} />
       </div>
+
+      {menu && (
+        <div onMouseDown={e => e.stopPropagation()}
+             style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 80, minWidth: 180, padding: 4, background: 'var(--paper)',
+                      border: '1px solid var(--rule-2)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.2)', display: 'flex', flexDirection: 'column' }}>
+          <div className="cap" style={{ padding: '3px 8px' }}># {menu.name}</div>
+          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                  onClick={() => { setChannel(menu.name); setThread(null); setAccessEdit({ value: accessOf(channels.byName.get(menu.name)) }); setMenu(null) }}>
+            <Eye size={12} /> {tr('Qui voit ce canal...', 'Who sees this channel...')}</button>
+          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                  onClick={() => { setChannel(menu.name); setThread(null); setLinkEdit(channels.byName.get(menu.name)?.call_link ?? ''); setMenu(null) }}>
+            <Phone size={12} /> {tr('Lien d’appel du canal...', 'Channel call link...')}</button>
+          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                  onClick={() => { void meta([{ op: 'put', rid: channels.byName.get(menu.name)!.rid, fields: { archived: true } }]); if (current === menu.name) setChannel(GENERAL); setMenu(null) }}>
+            <Archive size={12} /> {tr('Archiver', 'Archive')}</button>
+        </div>
+      )}
 
       {/* thread */}
       {root && (

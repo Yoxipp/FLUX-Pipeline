@@ -71,6 +71,13 @@ async def get_meta(project: str, etag: Optional[str] = None) -> dict[str, Any]:
 
     result = await asyncio.to_thread(team_meta.read, project, etag)
     lead = await asyncio.to_thread(project_roles.can, project, "team_channels")
+    if result.get("records") is not None and not lead:
+        # Channels this artist does not see are left out (their messages too, GET /activity/chat).
+        user = config.get_current_user() or ""
+        hidden = await asyncio.to_thread(team_meta.hidden_channels, project, user, result["records"])
+        if hidden:
+            result = {**result, "records": [r for r in result["records"]
+                                            if not (r.get("kind") == "channel" and r.get("name") in hidden)]}
     return {**result, "lead": lead, "files_dir": str(files.files_dir(project))}
 
 

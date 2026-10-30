@@ -56,7 +56,7 @@ def resolve_chat_path(project: str | None) -> Path:
 def send_message(
     user: str, message: str, project: str | None = None, path: Path | None = None, *,
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
-    notify_all: bool = False,
+    notify_all: bool = False, audience=None,
 ) -> bool:
     """Append a chat message to the team chat of *project*. Returns True on success.
 
@@ -66,7 +66,8 @@ def send_message(
     Team page (ADR 0077): *channel* (absent = general), *reply_to* (thread), *attachments*
     (files copied by features.team.files) are stored only when given, so the home chat
     reads the same file; *notify_all* (a call link posted with "Prevenir l'equipe")
-    sends a phone notification to every artist.
+    sends a phone notification to every artist. *audience* (user -> bool): who may be
+    mentioned or notified (a channel restricted to some artists); None = everyone.
     """
     date, time = _now()
     msg_id = _make_id(user)
@@ -96,21 +97,22 @@ def send_message(
     try:
         _record_mentions(
             from_user=user, msg_id=msg_id, text=text, date=date, time=time, project=project,
+            audience=audience,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to record chat mentions: %s", exc)
     if notify_all:
         try:
-            _notify_everyone(user, text, project)
+            _notify_everyone(user, text, project, audience)
         except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
             log.warning("Notify everyone skipped: %s", exc)
     return ok
 
 
-def _notify_everyone(user: str, text: str, project: str | None) -> None:
+def _notify_everyone(user: str, text: str, project: str | None, audience=None) -> None:
     """Phone notification to every artist but the author (a call posted in the chat)."""
     table = load_aliases()
-    targets = [u for u in get_user_list() if not same_user(u, user, table)]
+    targets = [u for u in get_user_list() if not same_user(u, user, table) and (audience is None or audience(u))]
     if targets and project:
         from features.notify import hooks as notify_hooks
         notify_hooks.on_mentions(user, targets, project, "mention", "appel", "chat", text)
@@ -147,7 +149,7 @@ def parse_pings(message: str) -> list[str]:
 def _record_mentions(
     from_user: str, msg_id: str, text: str, date: str, time: str, project: str | None = None,
     *, notify_kind: str = "mention", notify_detail: str = "", notify_entity: str = "",
-    notify_text: str | None = None,
+    notify_text: str | None = None, audience=None,
 ) -> None:
     """Persist an unread mention entry for each valid @name in *text*.
 
@@ -169,7 +171,7 @@ def _record_mentions(
     targets: list[str] = []
     for name in raw:
         real = users.get(name.lower())
-        if real and not same_user(real, from_user, table) and real not in targets:
+        if real and not same_user(real, from_user, table) and real not in targets                 and (audience is None or audience(real)):
             targets.append(real)
     if not targets:
         return
