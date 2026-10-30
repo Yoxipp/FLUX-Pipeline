@@ -217,3 +217,27 @@ class StudioConfigTests(_Workspace):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RenamedArtistTests(_Workspace):
+    # ADR 0079: roles.json is read with current names, an old entry follows its alias.
+    def test_renamed_member_keeps_role_and_departments(self):
+        from features.accounts import aliases
+        pr.init_project_roles("PROJ", "ADAM")
+        pr.set_departments("PROJ", "ADAM", ["RIG"])
+        aliases.record_rename("ADAM", "ADAM_FR")
+        self.user = "ADAM_FR"
+        roles = pr.read_roles("PROJ")
+        self.assertEqual(roles["members"], {"ADAM_FR": "supervisor"})
+        self.assertEqual(pr.role_of("PROJ", "ADAM_FR"), "supervisor")
+        self.assertEqual(pr.departments_of("PROJ", "ADAM_FR"), ["RIG"])
+        self.assertIn("ADAM", self.stored()["members"])        # file untouched on read
+        pr.set_role("PROJ", "EVA", "lead")
+        self.assertEqual(set(self.stored()["members"]), {"ADAM_FR", "EVA"})   # next write saves new names
+
+    def test_live_entry_wins_over_old_name(self):
+        from features.accounts import aliases
+        path = self.root / "DOSSIER_PROJETS" / "PROJ" / "_flux_setup" / "roles.json"
+        path.write_text(json.dumps({"schema_version": 1, "members": {"BOB": "supervisor", "ROBERT": "junior"}}), encoding="utf-8")
+        aliases.record_rename("BOB", "ROBERT")
+        self.assertEqual(pr.read_roles("PROJ")["members"], {"ROBERT": "junior"})

@@ -84,8 +84,28 @@ def _clean_departments(raw) -> dict[str, list[str]]:
     return out
 
 
+def _current_names(table: dict) -> dict:
+    """*table* keyed by current artist names (renames, ADR 0079). The file is not rewritten
+    here; the next role / department change saves the current names. A live name's own
+    entry wins over the entry of an old name renamed into it."""
+    from features.accounts import aliases
+
+    try:
+        table_aliases = aliases.load_aliases()
+    except (OSError, RuntimeError):
+        return table
+    if not table_aliases:
+        return table
+    out = {aliases.resolve_user(n, table_aliases): v for n, v in table.items()
+           if aliases.resolve_user(n, table_aliases) != n}
+    out.update({n: v for n, v in table.items() if aliases.resolve_user(n, table_aliases) == n})
+    return out
+
+
 def read_roles(project_name: str) -> dict:
-    """{created_by, members {NAME: role}, departments {NAME: [DEPT]}, legacy}. Never raises."""
+    """{created_by, members {NAME: role}, departments {NAME: [DEPT]}, legacy}. Never raises.
+
+    Names are the current ones: an artist renamed since keeps role and departments."""
     try:
         path = roles_path(project_name)
     except RuntimeError:
@@ -93,11 +113,11 @@ def read_roles(project_name: str) -> dict:
     raw = read_json(path) if path.is_file() else None
     if not isinstance(raw, dict):
         # Created before roles: the studio names its supervisors (empty by default).
-        members = {name: SUPERVISOR for name in studio_config.legacy_supervisors()}
-        return {"created_by": None, "members": members, "departments": {}, "legacy": True}
+        members = {_norm(name): SUPERVISOR for name in studio_config.legacy_supervisors() if _norm(name)}
+        return {"created_by": None, "members": _current_names(members), "departments": {}, "legacy": True}
     return {"created_by": _norm(raw.get("created_by")) or None,
-            "members": _clean_members(raw.get("members")),
-            "departments": _clean_departments(raw.get("departments")), "legacy": False}
+            "members": _current_names(_clean_members(raw.get("members"))),
+            "departments": _current_names(_clean_departments(raw.get("departments"))), "legacy": False}
 
 
 def _write(project_name: str, doc: dict, actor: str | None) -> None:

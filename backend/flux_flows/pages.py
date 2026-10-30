@@ -286,6 +286,15 @@ def page_for(access: Optional[Access], user: Optional[str], role: Optional[str] 
     user = (user or "").strip().upper()
     if user and user in access.users:
         return True
+    if user and access.users:
+        # A person picked before a rename keeps access under the new name (ADR 0079).
+        from features.accounts import aliases
+        try:
+            table = aliases.load_aliases()
+        except (OSError, RuntimeError):
+            table = {}
+        if any(aliases.resolve_user(u, table) == user for u in access.users if u in table):
+            return True
     if role and role in access.roles:
         return True
     return bool(set(access.departments) & {d.upper() for d in departments or []})

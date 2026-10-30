@@ -113,6 +113,10 @@ class PagesRouter(unittest.TestCase):
         self.assertTrue(pages.page_for(access, "X", "lead", []))
         self.assertTrue(pages.page_for(access, "X", "artist", ["anim"]))
         self.assertFalse(pages.page_for(access, "X", "artist", ["RIG"]))
+        # A person picked before a rename keeps access under the new name (ADR 0079).
+        with mock.patch("features.accounts.aliases.load_aliases", return_value={"ADAM": "ADAM_FR"}):
+            self.assertTrue(pages.page_for(pages.Access(users=["ADAM"]), "ADAM_FR"))
+            self.assertFalse(pages.page_for(pages.Access(users=["ADAM"]), "EVA"))
         with mock.patch.object(flows_router, "_viewer", return_value=("artist", ["ANIM"])):
             self.boxes = {"flows_team_td": True}
             doc = dict(_page(), access={"departments": ["ANIM"]})
