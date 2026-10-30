@@ -223,9 +223,18 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   `table` (`columns`, `editable` : double clic = formulaire), `cards` (kanban par `group_by`, glisser entre colonnes),
   `calendar` (mois, champ `date` / `end`, double clic sur un jour = ajouter), `members` (comptes FLUX), et une source
   `{flow, output}` = sortie du dernier run ok (`outputs` du record de run). Donnees par `hooks/usePages.ts`
-  (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`).
-* `BoardWidget.tsx` (ADR 0066 n°1) : board facon Miro dans sa ligne : notes, cartes, images (copiees par le backend),
-  liens, couleurs a plat, pan (glisser le fond), zoom a la molette, "Tout voir", Suppr. Vue par spectateur, jamais ecrite.
+  (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`). `write` est optimiste pour les rids
+  connus (put, del, restore) et coupe en lots de 200 ops.
+* `BoardWidget.tsx` (ADR 0066 n°1, v2 ADR 0071) : board facon Miro dans sa ligne : notes, cartes, formes (rect, arrondi,
+  ellipse, losange), texte libre, images (copiees par le backend, ratio reel), liens (fleches debut / fin, libelle, trait /
+  tirets / pointilles, accroches aux bords). Selection rectangle / Maj+clic, deplacer / dupliquer / supprimer la selection,
+  copier / coller (Ctrl+C / X / V, aussi entre boards sauf images, texte colle = note), poignees de taille, fond / bord /
+  taille de police / gras, devant / derriere, grouper, verrouiller, magnetisme (grille 8 + alignement, Alt l'ignore),
+  mini-carte, "Tout voir" (Maj+1), recherche (Ctrl+F, Entree = suivant). Pan : bouton du milieu / droit, Espace ou outil Main.
+  Undo / redo local (`board/useBoardHistory.ts`, ops inverses dans son journal, `restore` pour une suppression).
+  Rendu DOM + SVG avec culling sur grille grossiere + couche memoisee (`BoardLayer`) : un pan ne re-rend pas les objets ;
+  un glisser n'ecrit qu'au lacher. `board/model.ts` (types, palettes, geometrie, ops), `board/BoardItem.tsx` (objet, lien),
+  `board/BoardMinimap.tsx`. Vue, selection et pile d'undo par spectateur, jamais ecrites.
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
