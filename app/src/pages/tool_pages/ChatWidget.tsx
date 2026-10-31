@@ -73,6 +73,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined } | null>(null)
   const [menu, setMenu] = useState<{ name: string; group?: TeamRecord; x: number; y: number } | null>(null)   // right click on a channel / group (leads)
   const [commands, setCommands] = useState<TeamCommand[]>([])
+  const [askArchive, setAskArchive] = useState<{ label: string; note?: string; run: () => void } | null>(null)   // archive asks first (2026-10-31)
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
@@ -333,7 +334,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                       {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
                       {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
                       {lead && n !== GENERAL && n === current && (
-                        <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) }}
+                        <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); setAskArchive({ label: `#${n}`, run: () => { void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) } }) }}
                                 style={iconBtn}><Archive size={11} /></button>
                       )}
                     </div>
@@ -456,7 +457,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
               <Hash size={12} /> {tr('Renommer...', 'Rename...')}</button>
             <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
                     title={tr('Ses canaux restent, sans groupe', 'Its channels stay, without a group')}
-                    onClick={() => { void meta([{ op: 'put', rid: menu.group!.rid, fields: { archived: true } }]); setMenu(null) }}>
+                    onClick={() => { const g = menu.group!; setAskArchive({ label: tr(`le groupe ${g.name}`, `the group ${g.name}`), note: tr('Ses canaux restent, sans groupe.', 'Its channels stay, without a group.'), run: () => void meta([{ op: 'put', rid: g.rid, fields: { archived: true } }]) }); setMenu(null) }}>
               <Archive size={12} /> {tr('Archiver le groupe', 'Archive the group')}</button>
           </> : <>
           <div className="cap" style={{ padding: '3px 8px' }}># {menu.name}</div>
@@ -472,9 +473,25 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                   onClick={() => { setChannel(menu.name); setThread(null); setLinkEdit(channels.byName.get(menu.name)?.call_link ?? ''); setMenu(null) }}>
             <Phone size={12} /> {tr('Lien d’appel du canal...', 'Channel call link...')}</button>
           <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { void meta([{ op: 'put', rid: channels.byName.get(menu.name)!.rid, fields: { archived: true } }]); if (current === menu.name) setChannel(GENERAL); setMenu(null) }}>
+                  onClick={() => { const name = menu.name, rid = channels.byName.get(name)!.rid; setAskArchive({ label: `#${name}`, run: () => { void meta([{ op: 'put', rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } }); setMenu(null) }}>
             <Archive size={12} /> {tr('Archiver', 'Archive')}</button>
           </>}
+        </div>
+      )}
+
+      {askArchive && (
+        <div onMouseDown={() => setAskArchive(null)}
+             style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'oklch(0% 0 0 / 0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onMouseDown={e => e.stopPropagation()}
+               style={{ width: 320, padding: 14, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8, boxShadow: '0 4px 16px oklch(0% 0 0 / 0.25)' }}>
+            <b style={{ fontSize: 13 }}>{tr(`Archiver ${askArchive.label} ?`, `Archive ${askArchive.label}?`)}</b>
+            <div className="tp-note" style={{ color: 'var(--ink-3)', margin: '6px 0 12px' }}>
+              {askArchive.note ?? tr('Les messages restent. Recreer un canal du meme nom le fait revenir.', 'Messages stay. Creating a channel with the same name brings it back.')}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+              <button type="button" className="btn ghost sm" autoFocus onClick={() => setAskArchive(null)}>{tr('Annuler', 'Cancel')}</button>
+              <button type="button" className="btn sm" onClick={() => { askArchive.run(); setAskArchive(null) }}><Archive size={12} /> {tr('Archiver', 'Archive')}</button>
+            </div>
+          </div>
         </div>
       )}
 
