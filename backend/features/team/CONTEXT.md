@@ -21,3 +21,14 @@ crayon (auteur), corbeille avec confirmation (auteur, lead), "(modifie)".
 
 Routes : `routers/team.py` (`/team/presence`, `/team/{project}/meta`, `/team/{project}/files`, `/team/{project}/discord`). Les messages passent par
 `POST /activity/chat` (champs optionnels `channel`, `reply_to`, `attachments`, `notify_all`). Tests : `tests/team/`.
+
+Options facon Discord (P5, ADR 0084 ajout 2026-10-31) : canal `title` (renommer), `topic`, `read_only` (envoi 403 aux
+non-leads dans `POST /activity/chat`), types `text voice forum announcement` (annonces = lecture seule), vocal
+`user_limit` (0 a 99) et `voice_status` (FLUX seulement) ; `#general` ne se renomme pas et reste texte ouvert. Groupe
+`access` herite par ses canaux sans acces propre (`effective_access`, utilise par `hidden_channels`). `mutes.py` :
+`USER/<artiste>/team_mutes.json` (`GET` / `PUT /team/{project}/mutes`), canaux / groupes en sourdine : pas de telephone
+pour "Prevenir l'equipe" (`send_message(quiet=...)`), une @mention passe. `ChatWidget` : clic droit pour tous (marquer
+comme lu, sourdine, copier le lien `/team?channel=..&message=..` que `pages/Team.tsx` ouvre), leads en plus (renommer,
+sujet, lecture seule, type, limite / statut du vocal, dupliquer, qui voit, lien d'appel, archiver) ; groupe : nouveau
+canal / vocal, qui voit ce groupe. Sujet sous l'en-tete, panneau epingles + fils actifs, vue forum (titre = premiere
+ligne du message racine).
