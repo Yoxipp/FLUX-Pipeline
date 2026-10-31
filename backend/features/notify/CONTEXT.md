@@ -26,8 +26,8 @@ Pont Team (ADR 0084) : intents GUILDS + GUILD_MESSAGES + MESSAGE_CONTENT + GUILD
 l'active (sinon 0) ; jamais DIRECT_MESSAGES (aucun DM lu). Code de fermeture 4014 (intent non coche dans le portail) :
 le bot revient sans intents, le pont s'arrete, l'erreur s'affiche dans Parametres > Projet ; nouvel essai 15 min apres. Le lien d'invitation demande
 Manage Channels, Manage Roles, Manage Webhooks, View / Send / Embed / Attach / History (jamais Administrator). Pas de
-fils (threads), pas d'edition ni de suppression de message reportees, pas d'historique Discord copie a la premiere
-liaison. Tests : `tests/notify/test_discord_sync.py` contre `tests/notify/_fake_discord.py` (REST en memoire) et un
+fils (threads), pas d'edition ni de suppression de message reportees, historique Discord copie une fois a la
+premiere liaison d'un salon (500 derniers, date gardee, sans notification). Tests : `tests/notify/test_discord_sync.py` contre `tests/notify/_fake_discord.py` (REST en memoire) et un
 Gateway websocket local.
 
 Bot, fichiers du partage (`_flux_setup/`, aucun jeton) : `collab.json` `notify.discord_bot` (`app_id`, `name`, `host`),
