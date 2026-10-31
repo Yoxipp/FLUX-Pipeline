@@ -6,11 +6,16 @@
 // Channels, call links and pins: leads. A reaction belongs to its author.
 // ADR 0081: a message starting with /name runs the active flows with a TeamCommand node of
 // that name, on this workstation; `/` completes the commands allowed in the channel.
+// P5 (Discord-like options, 2026-10-31): right click on a channel / group for everyone
+// (mark as read, mute, copy a link); leads also rename, write the topic, make it read only,
+// change its type (text, voice, forum, announcement), duplicate it, set who sees a group.
+// A forum lists its posts (the first line of a root message is the post title).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { Archive, ChevronDown, ChevronRight, Eye, FolderPlus, Hash, Lock, MessageSquareReply, Paperclip, Pencil, Phone, Pin, PinOff, Plus, Send, Trash2, Video, Volume2, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Archive, Bell, BellOff, CheckCheck, ChevronDown, ChevronRight, Copy, Eye, FolderPlus, Hash, Link2, Lock, Megaphone, MessageSquareReply, MessagesSquare, Paperclip, Pencil, Phone, Pin, PinOff, Plus, Send, Trash2, Users, Video, Volume2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { setMyPresence, teamApi, type TeamAttachment, type TeamDiscord, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
+import { setMyPresence, teamApi, type TeamAttachment, type TeamChannelType, type TeamDiscord, type TeamEmoji, type TeamMessage, type TeamMutes, type TeamRecord } from '../../api/team'
 import { flowsApi } from '../../api/flows'
 import { PresenceDot } from '../../hooks/usePresence'
 import { PeoplePanel } from '../../components/shared/PeoplePanel'
@@ -39,13 +44,21 @@ const byOrder = (a: TeamRecord, b: TeamRecord) => ((a.order ?? Infinity) - (b.or
 const textFirst = (a: TeamRecord, b: TeamRecord) => Number(a.type === 'voice') - Number(b.type === 'voice')
 const sizeTxt = (n: number) => n > 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`
 
+// Internal link of a channel / message (P5 "Copier le lien"): opens the Team page there.
+export const teamLink = (channel: string, message?: string) =>
+  `/team?channel=${encodeURIComponent(channel)}${message ? `&message=${encodeURIComponent(message)}` : ''}`
+const TEAM_LINK_RE = /(\/team\?channel=[a-z0-9_-]+(?:&message=[A-Za-z0-9_.:%-]+)?)/g
+
 function Text({ text, users }: { text: string; users: Set<string> }) {
-  // Links open in the system browser; @names of real artists stand out.
+  // Links open in the system browser; FLUX /team links open the Team page; @names of real artists stand out.
+  const navigate = useNavigate()
   const parts = text.split(URL_RE)
   return <>{parts.map((part, i) => i % 2
     ? <a key={i} href={part} onClick={e => { e.preventDefault(); openLink(part) }} style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>{part}</a>
-    : part.split(/(@[A-Za-z0-9_.-]+)/g).map((bit, j) => bit.startsWith('@') && users.has(bit.slice(1).toUpperCase())
-        ? <b key={`${i}-${j}`} style={{ color: 'var(--accent)' }}>{bit}</b> : <span key={`${i}-${j}`}>{bit}</span>))}</>
+    : part.split(TEAM_LINK_RE).map((seg, k) => k % 2
+      ? <a key={`${i}-${k}`} href={seg} onClick={e => { e.preventDefault(); navigate(seg) }} style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>{seg}</a>
+      : seg.split(/(@[A-Za-z0-9_.-]+)/g).map((bit, j) => bit.startsWith('@') && users.has(bit.slice(1).toUpperCase())
+        ? <b key={`${i}-${k}-${j}`} style={{ color: 'var(--accent)' }}>{bit}</b> : <span key={`${i}-${k}-${j}`}>{bit}</span>)))}</>
 }
 
 // Access of a channel record (stored as JSON text), undefined = everyone.
@@ -54,9 +67,25 @@ function accessOf(r: TeamRecord | undefined): PageAccess | undefined {
   try { const a = JSON.parse(r.access) as PageAccess; return isEveryone(a) ? undefined : a } catch { return undefined }
 }
 const accessLabel = (a: PageAccess) => [...(a.users ?? []), ...(a.roles ?? [])].join(', ')
+const TYPES: TeamChannelType[] = ['text', 'voice', 'forum', 'announcement']
+const TYPE_LABEL: Record<TeamChannelType, [string, string]> = {
+  text: ['Canal texte', 'Text channel'], voice: ['Canal vocal', 'Voice channel'],
+  forum: ['Forum', 'Forum'], announcement: ['Annonces', 'Announcements'],
+}
+const readOnly = (r?: TeamRecord) => !!r && (!!r.read_only || r.type === 'announcement')
+// A forum post: the first line of its root message is its title (a Discord thread copied in starts "Fil : ").
+const postTitle = (m: TeamMessage) => (m.message.split('\n')[0] || '').replace(/^Fil : /, '').slice(0, 120)
+function ChanIcon({ rec, size = 12 }: { rec?: TeamRecord; size?: number }) {
+  const st = { opacity: 0.6, flex: 'none' as const }
+  if (rec?.type === 'voice') return <Volume2 size={size} style={st} />
+  if (rec?.type === 'announcement') return <Megaphone size={size} style={st} />
+  if (rec?.type === 'forum') return <MessagesSquare size={size} style={st} />
+  return accessOf(rec) ? <Lock size={size - 1} style={st} /> : <Hash size={size} style={st} />
+}
 
 // fill: the built-in Team page (/team) shows it at the full height of the window.
-export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProps & { fill?: boolean }) {
+// focus: open a channel (and a message) from a /team?channel=..&message=.. link (P5).
+export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWidgetProps & { fill?: boolean; focus?: { channel?: string; message?: string } }) {
   const { tr } = useTr()
   const [messages, setMessages] = useState<TeamMessage[]>([])
   const [users, setUsers] = useState<string[]>([])
@@ -68,13 +97,20 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [error, setError] = useState<string | null>(null)
   const [channel, setChannel] = useState(() => { try { return localStorage.getItem(`flux.team.channel.${project}`) || GENERAL } catch { return GENERAL } })
   const [thread, setThread] = useState<string | null>(null)
-  const [newChannel, setNewChannel] = useState<{ name: string; type: 'text' | 'voice'; group: string } | null>(null)
+  const [newChannel, setNewChannel] = useState<{ name: string; type: TeamChannelType; group: string } | null>(null)
   const [groupEdit, setGroupEdit] = useState<{ rid?: string; name: string } | null>(null)   // new group (no rid) or rename
   const [callMenu, setCallMenu] = useState(false)
   const [paste, setPaste] = useState<{ label: string } | null>(null)
   const [notifyAll, setNotifyAll] = useState(true)
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
-  const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined } | null>(null)
+  // Who sees a channel or a group (leads). inherit: a channel of a restricted group follows it.
+  const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined; kind: 'channel' | 'group'; rid?: string; name: string; inherit?: boolean } | null>(null)
+  // One line edits of a channel (leads): name shown, topic, voice status, voice limit.
+  const [fieldEdit, setFieldEdit] = useState<{ rid?: string; name: string; field: 'title' | 'topic' | 'voice_status' | 'user_limit'; value: string } | null>(null)
+  const [mutes, setMutes] = useState<TeamMutes>({ channels: [], groups: [] })   // this artist's (USER/<artist>/team_mutes.json)
+  const [panel, setPanel] = useState(false)          // pinned messages and active threads of the channel
+  const [flash, setFlash] = useState<string | null>(null)   // message highlighted after a link
+  const [seenTick, setSeenTick] = useState(0)        // "mark as read" re-counts the unread
   const [menu, setMenu] = useState<{ name: string; group?: TeamRecord; x: number; y: number } | null>(null)   // right click on a channel / group (leads)
   const [commands, setCommands] = useState<TeamCommand[]>([])
   const [askArchive, setAskArchive] = useState<{ label: string; note?: string; run: () => void } | null>(null)   // archive asks first (2026-10-31)
@@ -112,6 +148,14 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     import('../../api/flows').then(m => m.flowsApi.getRights()).then(r => setMe(r.user ?? '')).catch(() => setMe(''))
   }, [])
   useEffect(() => { try { if (project) localStorage.setItem(`flux.team.channel.${project}`, channel) } catch { /* private mode */ } }, [channel, project])
+  useEffect(() => {
+    if (!project || preview) return
+    teamApi.mutes(project).then(setMutes).catch(() => setMutes({ channels: [], groups: [] }))
+  }, [project, preview])
+  useEffect(() => {
+    if (focus?.channel) { setChannel(focus.channel); setThread(null) }
+    if (focus?.message) setFlash(focus.message)
+  }, [focus?.channel, focus?.message])
   useEffect(() => { const el = listRef.current; if (el && atBottom.current) el.scrollTop = el.scrollHeight }, [messages, channel])
 
   // -- derived ---------------------------------------------------------------
@@ -181,16 +225,24 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   }, [records, me])
   const pins = useMemo(() => new Map(records.filter(r => r.kind === 'pin' && r.target).map(r => [r.target!, r])), [records])
   const pinned = messages.filter(m => pins.has(m.id) && chanOf(m) === current)
+  const muted = useCallback((name: string) => {
+    const g = channels.byName.get(name)?.group
+    return mutes.channels.includes(name) || (!!g && mutes.groups.includes(g))
+  }, [mutes, channels.byName])
   const unread = useMemo(() => {
     // Messages of the other channels since this viewer last opened them (kept on this machine).
+    // A muted channel counts only the messages that @mention this artist (P5).
     const out: Record<string, number> = {}
+    const tag = me ? `@${me.toUpperCase()}` : ''
     for (const name of channels.names) {
       let seen = ''
       try { seen = localStorage.getItem(`flux.team.seen.${project}.${name}`) || '' } catch { /* private mode */ }
-      out[name] = messages.filter(m => chanOf(m) === name && `${m.date} ${m.time}` > seen && m.user !== me).length
+      const quiet = muted(name)
+      out[name] = messages.filter(m => chanOf(m) === name && `${m.date} ${m.time}` > seen && m.user !== me
+                                       && (!quiet || (!!tag && m.message.toUpperCase().includes(tag)))).length
     }
     return out
-  }, [messages, channels.names, project, me])
+  }, [messages, channels.names, project, me, muted, seenTick])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const last = roots[roots.length - 1]
     if (last) try { localStorage.setItem(`flux.team.seen.${project}.${current}`, `${last.date} ${last.time}`) } catch { /* private mode */ }
@@ -220,7 +272,61 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     const pin = pins.get(msg)
     void meta(pin ? [{ op: 'del', rid: pin.rid }] : [{ op: 'put', fields: { kind: 'pin', target: msg } }])
   }
-  const createChannel = ({ name, type, group }: { name: string; type: 'text' | 'voice'; group: string }) => {
+  const markRead = (names: string[]) => {
+    for (const n of names) {
+      const last = messages.filter(m => chanOf(m) === n).pop()
+      if (last) try { localStorage.setItem(`flux.team.seen.${project}.${n}`, `${last.date} ${last.time}`) } catch { /* private mode */ }
+    }
+    setSeenTick(t => t + 1)
+  }
+  const toggleMute = (what: { channel?: string; group?: string }) => {
+    if (!project) return
+    const next = { channels: [...mutes.channels], groups: [...mutes.groups] }
+    const list = what.group ? next.groups : next.channels
+    const id = (what.group ?? what.channel)!
+    const at = list.indexOf(id)
+    if (at >= 0) list.splice(at, 1); else list.push(id)
+    setMutes(next)
+    teamApi.setMutes(project, next).then(setMutes).catch(fail)
+  }
+  const copyLink = (channelKey: string, message?: string) => {
+    navigator.clipboard.writeText(teamLink(channelKey, message))
+      .then(() => toast.success(tr('Lien copie : colle-le dans un message', 'Link copied: paste it in a message')))
+      .catch(fail)
+  }
+  // Same type, group, access, topic, read only and limit; no messages; "<name>-copie" (P5).
+  const duplicate = (key: string) => {
+    const r = channels.byName.get(key)
+    if (!r) return
+    const base = `${shownName(key).slice(0, 26)}-copie`
+    let n = base
+    for (let i = 2; channels.names.some(k => shownName(k) === n); i++) n = `${base.slice(0, 32 - String(i).length - 1)}-${i}`
+    let k = n
+    for (let i = 2; channels.byName.has(k) || k === GENERAL; i++) k = `${n.slice(0, 32 - String(i).length - 1)}-${i}`
+    void meta([{ op: 'put', fields: { kind: 'channel', name: k, ...(k !== n ? { title: n } : {}), type: r.type ?? null, group: r.group ?? null,
+                                      access: r.access ?? null, topic: r.topic ?? null, read_only: r.read_only ?? null,
+                                      user_limit: r.user_limit ?? null, order: (r.order ?? channels.names.length) + 0.5 } }])
+    setChannel(k)
+  }
+  const saveField = () => {
+    if (!fieldEdit) return
+    const { rid, name, field, value } = fieldEdit
+    let v: unknown = value.trim() || null
+    if (field === 'title') {
+      const t = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+/, '').slice(0, 32)
+      v = t && t !== name ? t : null
+    }
+    if (field === 'user_limit') { const n = parseInt(value, 10); v = Number.isFinite(n) && n > 0 ? Math.min(n, 99) : null }
+    void meta(rid ? [{ op: 'put', rid, fields: { [field]: v } }] : [{ op: 'put', fields: { kind: 'channel', name, [field]: v } }])
+    setFieldEdit(null)
+  }
+  const editField = (key: string, field: 'title' | 'topic' | 'voice_status' | 'user_limit') => {
+    const r = channels.byName.get(key)
+    const value = field === 'title' ? shownName(key) : String((r as Record<string, unknown> | undefined)?.[field] ?? '')
+    setChannel(key); setThread(null)
+    setFieldEdit({ rid: r?.rid, name: key, field, value })
+  }
+  const createChannel = ({ name, type, group }: { name: string; type: TeamChannelType; group: string }) => {
     const n = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+/, '').slice(0, 32)
     if (!n) return
     // An archived channel never comes back here (Projects > Archived): the same name starts
@@ -228,7 +334,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     if (channels.names.some(k => shownName(k) === n)) { toast.error(tr(`#${n} existe deja`, `#${n} already exists`)); return }
     let key = n
     for (let i = 2; channels.byName.has(key) || key === GENERAL; i++) key = `${n.slice(0, 32 - String(i).length - 1)}-${i}`
-    const place = { type: type === 'voice' ? 'voice' : null, group: group || null, order: channels.names.length + 1 }
+    const place = { type: type === 'text' ? null : type, group: group || null, order: channels.names.length + 1 }
     void meta([{ op: 'put', fields: { kind: 'channel', name: key, ...(key !== n ? { title: n } : {}), ...place } }])
     setNewChannel(null)
     setChannel(key)
@@ -282,13 +388,31 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     setLinkEdit(null)
   }
   // Who sees the channel (leads): people, roles, like a TOOL page (ADR 0078, 0085).
-  const saveAccess = (value: PageAccess | undefined) => {
-    const clean = value ? cleanAccess(value) : undefined
-    const access = clean ? JSON.stringify(clean) : null
-    void meta(chanRec ? [{ op: 'put', rid: chanRec.rid, fields: { access } }] : [{ op: 'put', fields: { kind: 'channel', name: current, access } }])
+  // A group's access goes to its channels without their own (Discord "synced", P5); a channel
+  // of a restricted group open to everyone stores {} (its own access: everyone).
+  const saveAccess = (edit: NonNullable<typeof accessEdit>) => {
+    const clean = edit.value ? cleanAccess(edit.value) : undefined
+    const access = edit.inherit ? null : clean ? JSON.stringify(clean) : edit.kind === 'channel' && groupAccess(edit.name) ? '{}' : null
+    void meta(edit.rid ? [{ op: 'put', rid: edit.rid, fields: { access } }] : [{ op: 'put', fields: { kind: 'channel', name: edit.name, access } }])
     setAccessEdit(null)
   }
+  const groupAccess = (key: string) => {
+    const g = channels.byName.get(key)?.group
+    const rec = g ? records.find(r => r.rid === g && r.kind === 'group' && !r.archived) : undefined
+    return accessOf(rec)
+  }
+  const editAccess = (key: string) => {
+    const r = channels.byName.get(key)
+    setChannel(key); setThread(null)
+    setAccessEdit({ value: accessOf(r) ?? groupAccess(key), kind: 'channel', rid: r?.rid, name: key, inherit: !!groupAccess(key) && !r?.access })
+  }
   const join = (url: string) => { openLink(url); void setMyPresence('meeting') }
+  // Voice on Discord opens the Discord app when installed, else the browser (P5).
+  const joinDiscord = (url: string) => {
+    void setMyPresence('meeting')
+    if (!window.electronAPI?.openDiscord) { openLink(url); return }
+    window.electronAPI.openDiscord(url).then(how => { if (!how) openLink(url) }).catch(() => openLink(url))
+  }
   const discordKey = current === GENERAL ? GENERAL : chanRec?.rid ?? ''
   const discordLink = discord?.links[discordKey] ?? ''
   const voiceIn = discord?.voice[discordKey] ?? []
@@ -312,6 +436,17 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   if (preview) return <div className="tp-note" style={{ padding: 12 }}>{tr('Apercu : le chat d’equipe du projet s’affiche ici.', 'Preview: the project team chat shows here.')}</div>
 
   const root = thread ? messages.find(m => m.id === thread) : undefined
+  const locked = readOnly(chanRec) && !lead
+  const forum = chanRec?.type === 'forum'
+  const threads = roots.filter(m => (replies.get(m.id)?.length ?? 0) > 0)
+    .map(m => ({ m, n: replies.get(m.id)!.length, last: replies.get(m.id)!.slice(-1)[0] }))
+    .sort((a, b) => `${b.last.date} ${b.last.time}`.localeCompare(`${a.last.date} ${a.last.time}`))
+  const goTo = (id: string) => {
+    const msg = messages.find(m => m.id === id)
+    if (msg?.reply_to) setThread(msg.reply_to)
+    setFlash(id)
+    setPanel(false)
+  }
   const height = fill ? undefined : w.height ?? 560
   return (
     <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', display: 'flex', height, overflow: 'hidden', position: 'relative',
@@ -331,11 +466,13 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                        onDragOver={e => dragOver(e, `g:${gid}`, true)}
                        onDrop={e => onDrop(e, gid, { group: gid })}
                        onClick={() => toggleGroup(gid)}
-                       onContextMenu={e => { if (!lead) return; e.preventDefault(); setMenu({ name: '', group, x: e.clientX, y: e.clientY }) }}
+                       onContextMenu={e => { e.preventDefault(); setMenu({ name: '', group, x: e.clientX, y: e.clientY }) }}
                        className="cap" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '8px 6px 2px', cursor: lead ? 'grab' : 'pointer', userSelect: 'none',
                                                 ...(drag?.kind === 'group' ? dropLine(`g:${gid}`) : drag && over === `g:${gid}` ? { background: 'var(--accent-soft)' } : {}) }}>
                     {shut ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
+                    {accessOf(group) && <Lock size={9} style={{ opacity: 0.5 }} />}
+                    {mutes.groups.includes(gid) && <BellOff size={9} style={{ opacity: 0.5 }} />}
                     {lead && <button type="button" title={tr('Canal dans ce groupe', 'Channel in this group')} style={iconBtn}
                                      onClick={e => { e.stopPropagation(); setNewChannel({ name: '', type: 'text', group: gid }) }}><Plus size={11} /></button>}
                   </div>
@@ -348,22 +485,24 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                 {shown.map(n => {
                   const rec = channels.byName.get(n)
                   const voice = rec?.type === 'voice'
-                  return (
-                    <div key={n} onClick={() => { setChannel(n); setThread(null) }}
+                  const quiet = muted(n)
+                  return (<div key={n}>
+                    <div onClick={() => { setChannel(n); setThread(null) }}
                          draggable={lead && n !== GENERAL} onDragStart={e => startDrag(e, 'channel', n)} onDragEnd={endDrag}
                          onDragOver={e => dragOver(e, n, drag?.kind === 'channel')}
                          onDrop={e => onDrop(e, gid, n === GENERAL ? { channel: names[1] } : { channel: n })}
-                         onContextMenu={e => { if (!lead || n === GENERAL) return; e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
+                         onContextMenu={e => { e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: lead && n !== GENERAL ? 'grab' : 'pointer', fontSize: 12.5,
                                   background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400,
-                                  opacity: drag?.kind === 'channel' && drag.name === n ? 0.4 : 1,
+                                  opacity: drag?.kind === 'channel' && drag.name === n ? 0.4 : quiet && n !== current ? 0.55 : 1,
                                   ...(n === GENERAL ? (drag && over === n ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) : dropLine(n)) }}>
-                      {voice ? <Volume2 size={12} style={{ opacity: 0.6 }} />
-                        : accessOf(rec) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
+                      <ChanIcon rec={rec} />
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownName(n)}</span>
-                      {voice && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
-                      {voice && rec && (discord?.voice[rec.rid]?.length ?? 0) > 0 &&
-                        <span className="tag" style={{ fontSize: 10 }} title={discord!.voice[rec.rid].join(', ')}>{discord!.voice[rec.rid].length}</span>}
+                      {(voice || rec?.type === 'forum' || rec?.type === 'announcement') && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
+                      {quiet && <BellOff size={10} style={{ opacity: 0.5 }} />}
+                      {voice && rec && ((discord?.voice[rec.rid]?.length ?? 0) > 0 || !!rec.user_limit) &&
+                        <span className="tag" style={{ fontSize: 10 }} title={discord?.voice[rec.rid]?.join(', ')}>
+                          {discord?.voice[rec.rid]?.length ?? 0}{rec.user_limit ? `/${rec.user_limit}` : ''}</span>}
                       {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
                       {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
                       {lead && n !== GENERAL && n === current && (
@@ -371,7 +510,9 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                                 style={iconBtn}><Archive size={11} /></button>
                       )}
                     </div>
-                  )
+                    {voice && rec?.voice_status && <div className="tp-note" title={rec.voice_status}
+                      style={{ padding: '0 10px 3px 26px', fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.voice_status}</div>}
+                  </div>)
                 })}
                 {drag?.kind === 'channel' && (
                   // end of the section: a channel dropped here goes last in this group
@@ -380,10 +521,10 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                 )}
                 {newChannel && newChannel.group === gid && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2, margin: '2px 6px' }}>
-                    <button type="button" style={iconBtn} title={newChannel.type === 'voice' ? tr('Canal vocal (clic : texte)', 'Voice channel (click: text)') : tr('Canal texte (clic : vocal)', 'Text channel (click: voice)')}
+                    <button type="button" style={iconBtn} title={tr(`${TYPE_LABEL[newChannel.type][0]} (clic : type suivant)`, `${TYPE_LABEL[newChannel.type][1]} (click: next type)`)}
                             onMouseDown={e => e.preventDefault()}
-                            onClick={() => setNewChannel({ ...newChannel, type: newChannel.type === 'voice' ? 'text' : 'voice' })}>
-                      {newChannel.type === 'voice' ? <Volume2 size={12} /> : <Hash size={12} />}</button>
+                            onClick={() => setNewChannel({ ...newChannel, type: TYPES[(TYPES.indexOf(newChannel.type) + 1) % TYPES.length] })}>
+                      <ChanIcon rec={{ type: newChannel.type } as TeamRecord} /></button>
                     <input autoFocus value={newChannel.name} placeholder={tr('nom-du-canal', 'channel-name')} onChange={e => setNewChannel({ ...newChannel, name: e.target.value })}
                            onKeyDown={e => { if (e.key === 'Enter') createChannel(newChannel); if (e.key === 'Escape') setNewChannel(null) }}
                            onBlur={() => setNewChannel(null)} style={{ ...input, flex: 1 }} />
@@ -412,30 +553,65 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
            onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
           <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            {chanRec?.type === 'voice' ? <Volume2 size={13} /> : '#'} {shownName(current)}</b>
+            <ChanIcon rec={chanRec} size={13} /> {shownName(current)}</b>
+          {readOnly(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={tr('Seuls les leads et superviseurs ecrivent ici', 'Only leads and supervisors post here')}>
+            {tr('lecture seule', 'read only')}</span>}
           {chanRec?.type === 'voice' && voiceIn.length > 0 && <span className="tp-note" style={{ color: 'var(--ink-3)' }}>
             {tr('En vocal : ', 'In voice: ')}{voiceIn.join(', ')}</span>}
           {chanRec?.type === 'voice' && !chanRec.call_link && !discordLink && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
             {lead ? tr('Canal vocal sans lien : clic droit > Lien d’appel', 'Voice channel without a link: right click > Call link')
                   : tr('Canal vocal sans lien pour l’instant', 'Voice channel without a link yet')}</span>}
-          {accessOf(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel(accessOf(chanRec)!)}><Lock size={9} /> {tr('restreint', 'restricted')}</span>}
+          {(accessOf(chanRec) ?? groupAccess(current)) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel((accessOf(chanRec) ?? groupAccess(current))!)}>
+            <Lock size={9} /> {accessOf(chanRec) ? tr('restreint', 'restricted') : tr('restreint (groupe)', 'restricted (group)')}</span>}
           <span style={{ flex: 1 }} />
+          {(pinned.length > 0 || threads.length > 0) && (
+            <button type="button" className="btn ghost sm" onClick={() => setPanel(v => !v)} style={{ background: panel ? 'var(--paper-2)' : undefined }}
+                    title={tr('Messages epingles et fils actifs', 'Pinned messages and active threads')}>
+              <Pin size={12} /> {pinned.length} <MessageSquareReply size={12} /> {threads.length}</button>
+          )}
           {chanRec?.call_link && <button type="button" className="btn sm" onClick={() => join(chanRec.call_link!)}
                                          title={chanRec.call_link}><Phone size={12} /> {tr('Rejoindre l’appel', 'Join the call')}</button>}
           {!chanRec?.call_link && discordLink && (chanRec?.type === 'voice'
-            ? <button type="button" className="btn sm" onClick={() => join(discordLink)} title={discordLink}><Volume2 size={12} /> {tr('Rejoindre sur Discord', 'Join on Discord')}</button>
+            ? <button type="button" className="btn sm" onClick={() => joinDiscord(discordLink)} title={tr('Ouvre l’app Discord (le navigateur si elle n’est pas installee)', 'Opens the Discord app (the browser when it is not installed)')}><Volume2 size={12} /> {tr('Rejoindre sur Discord', 'Join on Discord')}</button>
             : <button type="button" className="btn ghost sm" onClick={() => openLink(discordLink)} title={discordLink}>{tr('Ouvrir dans Discord', 'Open in Discord')}</button>)}
           <button type="button" className="btn ghost sm" onClick={() => setCallMenu(s => !s)} style={{ background: callMenu ? 'var(--paper-2)' : undefined }}>
             <Video size={12} /> {tr('Nouvelle reunion', 'New meeting')}</button>
         </div>
+        {(chanRec?.topic || (lead && !fieldEdit)) && chanRec?.type !== 'voice' && (
+          <div className="tp-note" onClick={() => { if (lead) editField(current, 'topic') }}
+               title={lead ? tr('Clic : modifier le sujet', 'Click: edit the topic') : undefined}
+               style={{ padding: '3px 10px', borderBottom: '1px solid var(--rule)', color: chanRec?.topic ? 'var(--ink-3)' : 'var(--ink-4)',
+                        cursor: lead ? 'text' : undefined, whiteSpace: 'pre-wrap', maxHeight: 54, overflow: 'auto' }}>
+            {chanRec?.topic || tr('Ajouter un sujet', 'Add a topic')}</div>
+        )}
+        {fieldEdit && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+            <span className="cap">{{ title: tr('Nom', 'Name'), topic: tr('Sujet', 'Topic'), voice_status: tr('Statut du vocal', 'Voice status'), user_limit: tr('Limite de personnes (0 = aucune)', 'People limit (0 = none)') }[fieldEdit.field]}</span>
+            <input autoFocus value={fieldEdit.value} onChange={e => setFieldEdit({ ...fieldEdit, value: e.target.value })}
+                   type={fieldEdit.field === 'user_limit' ? 'number' : 'text'} min={0} max={99}
+                   maxLength={fieldEdit.field === 'topic' ? 1000 : fieldEdit.field === 'voice_status' ? 120 : 32}
+                   onKeyDown={e => { if (e.key === 'Enter') saveField(); if (e.key === 'Escape') setFieldEdit(null) }} style={{ ...input, flex: 1 }} />
+            <button type="button" className="btn sm" onClick={saveField}>{tr('Enregistrer', 'Save')}</button>
+            <button type="button" className="btn ghost sm" onClick={() => setFieldEdit(null)}><X size={12} /></button>
+          </div>
+        )}
         {accessEdit && (
           <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
-            <AccessPicker value={accessEdit.value} onChange={value => setAccessEdit({ value })} project={project} />
+            <div className="cap" style={{ marginBottom: 4 }}>{accessEdit.kind === 'group'
+              ? tr(`Qui voit le groupe ${accessEdit.name} (ses canaux sans acces propre suivent)`, `Who sees the group ${accessEdit.name} (its channels without their own follow)`)
+              : tr(`Qui voit #${shownName(accessEdit.name)}`, `Who sees #${shownName(accessEdit.name)}`)}</div>
+            {accessEdit.kind === 'channel' && groupAccess(accessEdit.name) && (
+              <label className="cap" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                <input type="checkbox" checked={!!accessEdit.inherit}
+                       onChange={e => setAccessEdit({ ...accessEdit, inherit: e.target.checked, value: e.target.checked ? groupAccess(accessEdit.name) : accessEdit.value })} />
+                {tr('Comme son groupe (synchronise)', 'Same as its group (synced)')}</label>
+            )}
+            {!accessEdit.inherit && <AccessPicker value={accessEdit.value} onChange={value => setAccessEdit({ ...accessEdit, value })} project={project} />}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
               <span className="tp-note" style={{ flex: 1, color: 'var(--ink-4)' }}>
                 {tr('Les leads et superviseurs voient tous les canaux. Visible dans FLUX seulement : le fichier du chat reste lisible sur le partage.',
                     'Leads and supervisors see every channel. FLUX visibility only: the chat file stays readable on the share.')}</span>
-              <button type="button" className="btn sm" onClick={() => saveAccess(accessEdit.value)}>{tr('Enregistrer', 'Save')}</button>
+              <button type="button" className="btn sm" onClick={() => saveAccess(accessEdit)}>{tr('Enregistrer', 'Save')}</button>
               <button type="button" className="btn ghost sm" onClick={() => setAccessEdit(null)}><X size={12} /></button>
             </div>
           </div>
@@ -465,12 +641,21 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
             </>}
           </div>
         )}
-        {pinned.length > 0 && (
-          <div style={{ padding: '4px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', maxHeight: 74, overflow: 'auto' }}>
+        {panel && (
+          <div style={{ padding: '4px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', maxHeight: 180, overflow: 'auto' }}>
+            {pinned.length > 0 && <div className="cap" style={{ margin: '2px 0' }}>{tr('Epingles', 'Pinned')}</div>}
             {pinned.map(m => (
-              <div key={m.id} style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div key={m.id} onClick={() => goTo(m.id)} style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', padding: '1px 0' }}>
                 <Pin size={11} style={{ flex: 'none', color: 'var(--accent)' }} /><b>{m.user}</b>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.message}</span>
+              </div>
+            ))}
+            {threads.length > 0 && <div className="cap" style={{ margin: '4px 0 2px' }}>{tr('Fils actifs', 'Active threads')}</div>}
+            {threads.map(({ m, n, last }) => (
+              <div key={m.id} onClick={() => { setThread(m.id); setPanel(false) }} style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', padding: '1px 0' }}>
+                <MessageSquareReply size={11} style={{ flex: 'none', color: 'var(--accent)' }} />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{postTitle(m)}</span>
+                <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{n} · {last.date} {last.time}</span>
               </div>
             ))}
           </div>
@@ -478,16 +663,33 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
         <div ref={listRef} onScroll={e => { const el = e.currentTarget; atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40 }}
              style={{ flex: 1, overflow: 'auto', padding: '6px 4px' }}>
           {error && <div className="tp-note" style={{ color: 'var(--err)', padding: 8 }}>{error}</div>}
-          {!roots.length && !error && <div className="tp-note" style={{ color: 'var(--ink-4)', padding: 12 }}>{tr('Aucun message dans ce canal.', 'No message in this channel.')}</div>}
-          {roots.map(m => (
+          {!roots.length && !error && <div className="tp-note" style={{ color: 'var(--ink-4)', padding: 12 }}>
+            {forum ? tr('Aucun post. La premiere ligne d’un message est le titre du post.', 'No post yet. The first line of a message is the post title.')
+                   : tr('Aucun message dans ce canal.', 'No message in this channel.')}</div>}
+          {forum ? [...roots].reverse().map(m => (
+            <div key={m.id} id={`team-msg-${m.id}`} onClick={() => setThread(m.id)}
+                 style={{ margin: '4px 6px', padding: '6px 10px', border: '1px solid var(--rule)', borderRadius: 6, cursor: 'pointer',
+                          background: thread === m.id || flash === m.id ? 'var(--paper-2)' : 'var(--paper)' }}>
+              <b style={{ fontSize: 13 }}>{postTitle(m)}</b>
+              <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>
+                <span>{m.user}</span><span>{m.date} {m.time}</span><span style={{ flex: 1 }} />
+                <span>{replies.get(m.id)?.length ?? 0} {tr('reponse(s)', 'reply(ies)')}</span>
+              </div>
+            </div>
+          )) : roots.map(m => (
             <Message key={m.id} m={m} users={userSet} reacts={reactions.get(m.id)} replies={replies.get(m.id)?.length ?? 0} pinned={pins.has(m.id)}
                      lead={lead} project={project} filesDir={filesDir} onReact={react} onReply={() => setThread(m.id)} onPin={() => togglePin(m.id)}
-                     me={me} onChanged={load} />
+                     me={me} onChanged={load} flash={flash === m.id} onCopyLink={() => copyLink(current, m.id)} />
           ))}
         </div>
-        <Composer users={users} project={project} placeholder={tr(`Message dans #${shownName(current)} (@nom previent l’artiste)`, `Message in #${shownName(current)} (@name notifies)`)}
-                  commands={commands} onCommand={text => runCommand(text)}
-                  onSend={(message, attachments) => send({ message, attachments })} />
+        {locked
+          ? <div className="tp-note" style={{ borderTop: '1px solid var(--rule)', padding: 10, color: 'var(--ink-4)' }}>
+              {tr('Lecture seule : seuls les leads et superviseurs ecrivent ici. Tu peux reagir aux messages.', 'Read only: only leads and supervisors post here. You can react to messages.')}</div>
+          : <Composer users={users} project={project}
+                      placeholder={forum ? tr(`Nouveau post dans #${shownName(current)} : titre sur la premiere ligne (Maj+Entree)`, `New post in #${shownName(current)}: title on the first line (Shift+Enter)`)
+                                         : tr(`Message dans #${shownName(current)} (@nom previent l’artiste)`, `Message in #${shownName(current)} (@name notifies)`)}
+                      commands={commands} onCommand={text => runCommand(text)}
+                      onSend={(message, attachments) => send({ message, attachments })} />}
       </div>
 
       {menu && (
@@ -496,30 +698,63 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                       border: '1px solid var(--rule-2)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.2)', display: 'flex', flexDirection: 'column' }}>
           {menu.group ? <>
             <div className="cap" style={{ padding: '3px 8px' }}>{menu.group.name}</div>
-            <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                    onClick={() => { setGroupEdit({ rid: menu.group!.rid, name: menu.group!.name ?? '' }); setMenu(null) }}>
-              <Hash size={12} /> {tr('Renommer...', 'Rename...')}</button>
-            <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                    title={tr('Ses canaux restent, sans groupe', 'Its channels stay, without a group')}
-                    onClick={() => { const g = menu.group!; setAskArchive({ label: tr(`le groupe ${g.name}`, `the group ${g.name}`), note: tr('Ses canaux restent, sans groupe.', 'Its channels stay, without a group.'), run: () => void meta([{ op: 'put', rid: g.rid, fields: { archived: true } }]) }); setMenu(null) }}>
-              <Archive size={12} /> {tr('Archiver le groupe', 'Archive the group')}</button>
-          </> : <>
-          <div className="cap" style={{ padding: '3px 8px' }}># {shownName(menu.name)}</div>
-          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { const r = channels.byName.get(menu.name)!; void meta([{ op: 'put', rid: r.rid, fields: { type: r.type === 'voice' ? null : 'voice' } }]); setMenu(null) }}>
-            {channels.byName.get(menu.name)?.type === 'voice'
-              ? <><Hash size={12} /> {tr('Passer en canal texte', 'Make it a text channel')}</>
-              : <><Volume2 size={12} /> {tr('Passer en canal vocal', 'Make it a voice channel')}</>}</button>
-          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { setChannel(menu.name); setThread(null); setAccessEdit({ value: accessOf(channels.byName.get(menu.name)) }); setMenu(null) }}>
-            <Eye size={12} /> {tr('Qui voit ce canal...', 'Who sees this channel...')}</button>
-          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { setChannel(menu.name); setThread(null); setLinkEdit(channels.byName.get(menu.name)?.call_link ?? ''); setMenu(null) }}>
-            <Phone size={12} /> {tr('Lien d’appel du canal...', 'Channel call link...')}</button>
-          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { const name = menu.name, rid = channels.byName.get(name)!.rid; setAskArchive({ label: `#${shownName(name)}`, note: tr('Les messages restent. Il revient depuis Projets > Archives du projet ; un nouveau canal du meme nom part vierge.', 'Messages stay. It comes back from Projects > Archived; a new channel with the same name starts empty.'), run: () => { void meta([{ op: 'put', rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } }); setMenu(null) }}>
-            <Archive size={12} /> {tr('Archiver', 'Archive')}</button>
-          </>}
+            <MenuItem close={() => setMenu(null)} icon={<CheckCheck size={12} />} label={tr('Marquer comme lu', 'Mark as read')}
+                      run={() => markRead(channels.sections.find(x => x.group?.rid === menu.group!.rid)?.names ?? [])} />
+            <MenuItem close={() => setMenu(null)} icon={mutes.groups.includes(menu.group.rid) ? <Bell size={12} /> : <BellOff size={12} />}
+                      label={mutes.groups.includes(menu.group.rid) ? tr('Reactiver les notifications', 'Unmute') : tr('Mettre en sourdine', 'Mute')}
+                      run={() => toggleMute({ group: menu.group!.rid })} />
+            {lead && <>
+              <MenuItem close={() => setMenu(null)} icon={<Hash size={12} />} label={tr('Nouveau canal', 'New channel')} run={() => setNewChannel({ name: '', type: 'text', group: menu.group!.rid })} />
+              <MenuItem close={() => setMenu(null)} icon={<Volume2 size={12} />} label={tr('Nouveau vocal', 'New voice channel')} run={() => setNewChannel({ name: '', type: 'voice', group: menu.group!.rid })} />
+              <MenuItem close={() => setMenu(null)} icon={<Pencil size={12} />} label={tr('Renommer...', 'Rename...')} run={() => setGroupEdit({ rid: menu.group!.rid, name: menu.group!.name ?? '' })} />
+              <MenuItem close={() => setMenu(null)} icon={<Eye size={12} />} label={tr('Qui voit ce groupe...', 'Who sees this group...')}
+                        run={() => setAccessEdit({ value: accessOf(menu.group), kind: 'group', rid: menu.group!.rid, name: menu.group!.name ?? '' })} />
+              <MenuItem close={() => setMenu(null)} icon={<Archive size={12} />} label={tr('Archiver le groupe', 'Archive the group')} title={tr('Ses canaux restent, sans groupe', 'Its channels stay, without a group')}
+                        run={() => { const g = menu.group!; setAskArchive({ label: tr(`le groupe ${g.name}`, `the group ${g.name}`), note: tr('Ses canaux restent, sans groupe.', 'Its channels stay, without a group.'), run: () => void meta([{ op: 'put', rid: g.rid, fields: { archived: true } }]) }) }} />
+            </>}
+          </> : (() => {
+            const name = menu.name
+            const r = channels.byName.get(name)
+            const general = name === GENERAL
+            return <>
+              <div className="cap" style={{ padding: '3px 8px' }}># {shownName(name)}</div>
+              <MenuItem close={() => setMenu(null)} icon={<CheckCheck size={12} />} label={tr('Marquer comme lu', 'Mark as read')} run={() => markRead([name])} />
+              <MenuItem close={() => setMenu(null)} icon={mutes.channels.includes(name) ? <Bell size={12} /> : <BellOff size={12} />}
+                        label={mutes.channels.includes(name) ? tr('Reactiver les notifications', 'Unmute') : tr('Mettre en sourdine', 'Mute')}
+                        title={tr('Plus de telephone ni de non-lus, sauf une @mention de toi', 'No phone nor unread count, except an @mention of you')}
+                        run={() => toggleMute({ channel: name })} />
+              <MenuItem close={() => setMenu(null)} icon={<Link2 size={12} />} label={tr('Copier le lien', 'Copy the link')} run={() => copyLink(name)} />
+              {lead && <>
+                <div style={{ borderTop: '1px solid var(--rule)', margin: '3px 0' }} />
+                {!general && <MenuItem close={() => setMenu(null)} icon={<Pencil size={12} />} label={tr('Renommer...', 'Rename...')} run={() => editField(name, 'title')} />}
+                {r?.type !== 'voice' && <MenuItem close={() => setMenu(null)} icon={<Pencil size={12} />} label={tr('Sujet...', 'Topic...')} run={() => editField(name, 'topic')} />}
+                {!general && r?.type !== 'voice' && r?.type !== 'announcement' && (
+                  <MenuItem close={() => setMenu(null)} icon={<Megaphone size={12} />} label={r?.read_only ? tr('Tout le monde peut ecrire', 'Everyone can post') : tr('Lecture seule (leads ecrivent)', 'Read only (leads post)')}
+                            run={() => void meta([{ op: 'put', rid: r!.rid, fields: { read_only: r?.read_only ? null : true } }])} />
+                )}
+                {r?.type === 'voice' && <>
+                  <MenuItem close={() => setMenu(null)} icon={<Users size={12} />} label={tr('Limite de personnes...', 'People limit...')} run={() => editField(name, 'user_limit')} />
+                  <MenuItem close={() => setMenu(null)} icon={<Pencil size={12} />} label={tr('Statut du vocal...', 'Voice status...')} run={() => editField(name, 'voice_status')} />
+                </>}
+                {!general && (
+                  <div style={{ display: 'flex', gap: 2, padding: '2px 4px' }}>
+                    {TYPES.map(t => (
+                      <button key={t} type="button" className="btn ghost sm" title={tr(TYPE_LABEL[t][0], TYPE_LABEL[t][1])}
+                              style={{ background: (r?.type ?? 'text') === t ? 'var(--paper-2)' : undefined }}
+                              onClick={() => { if ((r?.type ?? 'text') !== t) void meta([{ op: 'put', rid: r!.rid, fields: { type: t === 'text' ? null : t } }]); setMenu(null) }}>
+                        <ChanIcon rec={{ type: t } as TeamRecord} /></button>
+                    ))}
+                  </div>
+                )}
+                {!general && <MenuItem close={() => setMenu(null)} icon={<Copy size={12} />} label={tr('Dupliquer', 'Duplicate')} title={tr('Meme type, groupe, acces, sujet ; sans les messages', 'Same type, group, access, topic; no messages')} run={() => duplicate(name)} />}
+                {!general && <MenuItem close={() => setMenu(null)} icon={<Eye size={12} />} label={tr('Qui voit ce canal...', 'Who sees this channel...')} run={() => editAccess(name)} />}
+                <MenuItem close={() => setMenu(null)} icon={<Phone size={12} />} label={tr('Lien d’appel du canal...', 'Channel call link...')}
+                          run={() => { setChannel(name); setThread(null); setLinkEdit(r?.call_link ?? '') }} />
+                {!general && <MenuItem close={() => setMenu(null)} icon={<Archive size={12} />} label={tr('Archiver', 'Archive')}
+                          run={() => setAskArchive({ label: `#${shownName(name)}`, note: tr('Les messages restent. Il revient depuis Projets > Archives du projet ; un nouveau canal du meme nom part vierge.', 'Messages stay. It comes back from Projects > Archived; a new channel with the same name starts empty.'), run: () => { void meta([{ op: 'put', rid: r!.rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } })} />}
+              </>}
+            </>
+          })()}
         </div>
       )}
 
@@ -543,7 +778,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
       {root && (
         <div style={{ width: 300, flex: 'none', borderLeft: '1px solid var(--rule)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
-            <b style={{ fontSize: 12.5 }}>{tr('Fil', 'Thread')}</b><span style={{ flex: 1 }} />
+            <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{forum ? postTitle(root) : tr('Fil', 'Thread')}</b><span style={{ flex: 1 }} />
             <button type="button" className="btn ghost sm" onClick={() => setThread(null)}><X size={12} /></button>
           </div>
           <div style={{ flex: 1, overflow: 'auto', padding: '6px 4px' }}>
@@ -552,12 +787,15 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
             <div style={{ borderTop: '1px solid var(--rule)', margin: '4px 8px' }} />
             {(replies.get(root.id) ?? []).map(r => (
               <Message key={r.id} m={r} users={userSet} reacts={reactions.get(r.id)} replies={0} pinned={false} lead={false}
-                       project={project} filesDir={filesDir} onReact={react} me={me} moderator={lead} onChanged={load} />
+                       project={project} filesDir={filesDir} onReact={react} me={me} moderator={lead} onChanged={load}
+                       flash={flash === r.id} onCopyLink={() => copyLink(current, r.id)} />
             ))}
           </div>
-          <Composer users={users} project={project} placeholder={tr('Repondre dans le fil', 'Reply in the thread')}
-                    commands={commands} onCommand={text => runCommand(text, root.id)}
-                    onSend={(message, attachments) => send({ message, attachments, reply_to: root.id })} />
+          {locked
+            ? <div className="tp-note" style={{ borderTop: '1px solid var(--rule)', padding: 10, color: 'var(--ink-4)' }}>{tr('Lecture seule', 'Read only')}</div>
+            : <Composer users={users} project={project} placeholder={tr('Repondre dans le fil', 'Reply in the thread')}
+                        commands={commands} onCommand={text => runCommand(text, root.id)}
+                        onSend={(message, attachments) => send({ message, attachments, reply_to: root.id })} />}
         </div>
       )}
 
@@ -569,11 +807,12 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
 
 // Edit / delete (ADR 0084): the author edits and deletes, a lead deletes any message; the
 // Discord bridge forwards both. "(modifie)" marks an edited message.
-function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, onReact, onReply, onPin, me, moderator, onChanged }: {
+function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, onReact, onReply, onPin, me, moderator, onChanged, flash, onCopyLink }: {
   m: TeamMessage; users: Set<string>; reacts?: Map<TeamEmoji, { n: number; mine?: TeamRecord; who: string[] }>
   replies: number; pinned: boolean; lead: boolean; project: string; filesDir: string
   onReact: (msg: string, e: TeamEmoji) => void; onReply?: () => void; onPin?: () => void
   me?: string; moderator?: boolean; onChanged?: () => void
+  flash?: boolean; onCopyLink?: () => void   // opened from a /team link: scrolled to and highlighted
 }) {
   const { tr } = useTr()
   const [hover, setHover] = useState(false)
@@ -589,9 +828,12 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
   }
   const remove = () => { setAskDelete(false); teamApi.deleteMessage(project, m.id).then(() => onChanged?.()).catch(fail) }
   const open = (a: TeamAttachment) => { if (filesDir && window.electronAPI?.openPath) void window.electronAPI.openPath(`${filesDir}/${a.file}`); else window.open(teamApi.fileUrl(project, a.file), '_blank') }
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (flash) ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [flash])
   return (
-    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-         style={{ position: 'relative', padding: '5px 8px', borderRadius: 6, background: hover ? 'var(--paper-2)' : undefined }}>
+    <div ref={ref} id={`team-msg-${m.id}`} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+         style={{ position: 'relative', padding: '5px 8px', borderRadius: 6, background: hover || flash ? 'var(--paper-2)' : undefined,
+                  boxShadow: flash ? 'inset 3px 0 0 var(--accent)' : undefined }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 12 }}>
         <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b>
         {m.via && <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{tr(`pour ${m.via}`, `for ${m.via}`)}</span>}<span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
@@ -638,12 +880,18 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
           {onReply && <button type="button" title={tr('Repondre dans un fil', 'Reply in a thread')} onClick={onReply} style={iconBtn}><MessageSquareReply size={13} /></button>}
           {lead && onPin && <button type="button" title={pinned ? tr('Desepingler', 'Unpin') : tr('Epingler', 'Pin')} onClick={onPin} style={iconBtn}>
             {pinned ? <PinOff size={13} /> : <Pin size={13} />}</button>}
+          {onCopyLink && <button type="button" title={tr('Copier le lien du message', 'Copy the message link')} onClick={onCopyLink} style={iconBtn}><Link2 size={12} /></button>}
           {mine && edit === null && <button type="button" title={tr('Modifier', 'Edit')} onClick={() => setEdit(m.message)} style={iconBtn}><Pencil size={12} /></button>}
           {canDelete && <button type="button" title={tr('Supprimer', 'Delete')} onClick={() => setAskDelete(true)} style={iconBtn}><Trash2 size={12} /></button>}
         </div>
       )}
     </div>
   )
+}
+
+function MenuItem({ icon, label, title, run, close }: { icon: React.ReactNode; label: string; title?: string; run: () => void; close: () => void }) {
+  return <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }} title={title}
+                 onClick={() => { run(); close() }}>{icon} {label}</button>
 }
 
 function Composer({ users, project, placeholder, commands, onCommand, onSend }: {
