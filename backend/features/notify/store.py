@@ -30,7 +30,7 @@ PROJECT_DEFAULTS = {"discord_webhook": "", "ntfy_server": DEFAULT_SERVER, "diges
                     "discord_bot": {},      # {"app_id", "name", "host"}: public, no token (ADR 0073)
                     "discord_sync": False,  # live bridge Team <-> Discord server (ADR 0084), opt-in
                     "discord_guild": ""}    # the project's Discord server id (one server per project)
-USER_DEFAULTS = {"channel": "none", "discord_id": "", "ntfy_topic": "", "discord_linked_at": ""}
+USER_DEFAULTS = {"channel": "none", "discord_id": "", "ntfy_topic": "", "discord_linked_at": "", "discord_name": ""}
 
 BOT_ALIVE_S = 120.0         # the host rewrites its heartbeat every 30 s
 CANDIDATE_S = 600.0         # a waiting PC rewrites its line every 5 min (ADR 0082)
@@ -146,6 +146,7 @@ def write_user(name: str, patch: dict) -> dict:
             raise ValueError("L'identifiant Discord est un nombre (Parametres Discord > Mode developpeur)")
         if value != prefs["discord_id"]:
             prefs["discord_linked_at"] = ""     # typed by hand: never trusted by the bot
+            prefs["discord_name"] = ""
         prefs["discord_id"] = value
     if patch.get("regenerate_topic") or (prefs["channel"] == "ntfy" and not prefs["ntfy_topic"]):
         prefs["ntfy_topic"] = new_topic()
@@ -244,12 +245,13 @@ def bot_candidates(project: str, now: float) -> list[str]:
     return sorted(h for h, at in data.items() if isinstance(at, (int, float)) and now - at < CANDIDATE_S)
 
 
-def add_link_code(project: str, code: str, discord_id: str, now: float) -> bool:
+def add_link_code(project: str, code: str, discord_id: str, now: float, discord_name: str = "") -> bool:
     path = _setup_file(project, "discord_links.json")
     data = read_json(path) or {}
     codes = {h: c for h, c in (data.get("codes") or {}).items()
              if isinstance(c, dict) and float(c.get("expires", 0)) > now} if isinstance(data, dict) else {}
-    codes[_code_hash(code)] = {"discord_id": str(discord_id), "expires": now + LINK_TTL_S}
+    codes[_code_hash(code)] = {"discord_id": str(discord_id), "discord_name": str(discord_name)[:64],
+                               "expires": now + LINK_TTL_S}
     return write_json(path, {"codes": codes})
 
 
@@ -276,7 +278,7 @@ def link_discord(project: str, name: str, code: str, now: float) -> dict:
             raise ValueError(f"Ce compte Discord est deja lie a {other[0]}")
     user = read_user_data(name)
     prefs = read_user(name)
-    prefs.update({"discord_id": discord_id, "channel": "discord",
+    prefs.update({"discord_id": discord_id, "channel": "discord", "discord_name": str(entry.get("discord_name") or ""),
                   "discord_linked_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     user["notify"] = prefs
     if not write_user_data(name, user):

@@ -11,6 +11,7 @@ export interface NotifyPrefs {
   ntfy_topic: string
   ntfy_url: string           // server + topic, for the QR code (owner only)
   discord_linked_at: string  // set by a /link code (ADR 0073), '' when typed by hand
+  discord_name: string       // Discord display name given with the /link code, '' when unknown
 }
 
 export interface NotifyMe {

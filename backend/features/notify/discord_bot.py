@@ -130,9 +130,9 @@ def new_code() -> str:
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
 
 
-def cmd_link(project: str, discord_id: str, now: float) -> str:
+def cmd_link(project: str, discord_id: str, now: float, discord_name: str = "") -> str:
     code = new_code()
-    if not store.add_link_code(project, code, discord_id, now):
+    if not store.add_link_code(project, code, discord_id, now, discord_name):
         return "FLUX n'a pas pu enregistrer le code, reessaie."
     return (f"Ton code : **{code}** (valable 10 minutes, une seule fois).\n"
             f"Colle-le dans FLUX : Parametres > User > Notifications telephone > Lier Discord.")
@@ -236,10 +236,11 @@ def cmd_calendar(project: str, discord_id: str, today: str, limit: int = LIST_MA
     return _fit(lines)
 
 
-def answer(project: str, name: str, discord_id: str, now: float, options: dict | None = None) -> str:
+def answer(project: str, name: str, discord_id: str, now: float, options: dict | None = None,
+           discord_name: str = "") -> str:
     options = options or {}
     if name == "link":
-        return cmd_link(project, discord_id, now)
+        return cmd_link(project, discord_id, now, discord_name)
     if name == "mentions":
         return cmd_mentions(project, discord_id)
     if name == "chat":
@@ -535,8 +536,9 @@ class BotRunner:
         await asyncio.to_thread(request_json, "POST", f"{API}/interactions/{iid}/{itoken}/callback",
                                 {"type": 5, "data": {"flags": EPHEMERAL}})
         try:
+            # Display name kept with the code, so FLUX shows which Discord account is linked.
             text = await asyncio.to_thread(answer, self.project, name, str(user.get("id") or ""), time.time(),
-                                           options)
+                                           options, str(user.get("global_name") or user.get("username") or ""))
         except Exception as exc:  # noqa: BLE001
             log.warning("discord bot /%s failed: %s", name, exc)
             text = "FLUX n'a pas pu repondre, reessaie."

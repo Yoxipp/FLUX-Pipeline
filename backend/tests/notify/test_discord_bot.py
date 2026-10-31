@@ -50,6 +50,20 @@ class LinkTests(_SharedFolder):
         with self.assertRaises(ValueError):
             store.link_discord("P", "TOM", "ABCD2345", NOW + 3)
 
+    def test_link_keeps_discord_name_and_unlink_clears_it(self):
+        store.add_link_code("P", "ABCD2345", "111", NOW, "lea_d")
+        prefs = store.link_discord("P", "LEA", "ABCD2345", NOW)
+        self.assertEqual(prefs["discord_name"], "lea_d")
+        self.assertEqual(store.read_user("LEA")["discord_name"], "lea_d")
+        prefs = store.write_user("LEA", {"discord_id": ""})      # Delier
+        self.assertFalse(store.is_linked(prefs))
+        self.assertEqual(prefs["discord_name"], "")
+
+    def test_link_command_passes_the_discord_name(self):
+        discord_bot.answer("P", "link", "111", NOW, {}, "lea_d")
+        raw = json.loads((self.tmp / "discord_links.json").read_text(encoding="utf-8"))
+        self.assertEqual([c["discord_name"] for c in raw["codes"].values()], ["lea_d"])
+
     def test_expired_code_refused(self):
         store.add_link_code("P", "ABCD2345", "111", NOW)
         with self.assertRaises(ValueError):
