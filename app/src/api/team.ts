@@ -10,6 +10,8 @@ export interface TeamMessage {
   id: string; user: string; message: string; date: string; time: string
   channel?: string; reply_to?: string; attachments?: TeamAttachment[]
   via?: string   // a FLUX answer to a chat command: the artist who typed it (ADR 0081)
+  edited?: string   // date time of the last edit (ADR 0084)
+  discord?: string  // id of the Discord message this one copies (bridge)
 }
 export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {
@@ -44,6 +46,10 @@ export const teamApi = {
   // The backend copies the local file (bytes never go through the API, ADR 0005).
   attach: (project: string, path: string) => apiCall<TeamAttachment>('POST', `/team/${p(project)}/files`, { path }),
   fileUrl: (project: string, file: string) => `${BASE_URL}/team/${p(project)}/files/${encodeURIComponent(file)}`,
+  editMessage: (project: string, id: string, message: string) =>
+    apiCall<{ success: boolean }>('PATCH', `/activity/chat/${encodeURIComponent(id)}`, { project, message }),
+  deleteMessage: (project: string, id: string) =>
+    apiCall<{ success: boolean }>('DELETE', `/activity/chat/${encodeURIComponent(id)}?project=${p(project)}`),
   discord: (project: string) => apiCall<TeamDiscord>('GET', `/team/${p(project)}/discord`),
   presence: () => apiCall<{ people: Presence[] }>('GET', '/team/presence'),
   setPresence: (status: PresenceStatus, text = '') => apiCall<{ status: string }>('POST', '/team/presence', { status, text }),

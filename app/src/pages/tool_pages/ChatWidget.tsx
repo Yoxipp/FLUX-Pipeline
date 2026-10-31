@@ -8,7 +8,7 @@
 // that name, on this workstation; `/` completes the commands allowed in the channel.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { Archive, ChevronDown, ChevronRight, Eye, FolderPlus, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, Volume2, X } from 'lucide-react'
+import { Archive, ChevronDown, ChevronRight, Eye, FolderPlus, Hash, Lock, MessageSquareReply, Paperclip, Pencil, Phone, Pin, PinOff, Plus, Send, Trash2, Video, Volume2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { setMyPresence, teamApi, type TeamAttachment, type TeamDiscord, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
 import { flowsApi } from '../../api/flows'
@@ -481,7 +481,8 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
           {!roots.length && !error && <div className="tp-note" style={{ color: 'var(--ink-4)', padding: 12 }}>{tr('Aucun message dans ce canal.', 'No message in this channel.')}</div>}
           {roots.map(m => (
             <Message key={m.id} m={m} users={userSet} reacts={reactions.get(m.id)} replies={replies.get(m.id)?.length ?? 0} pinned={pins.has(m.id)}
-                     lead={lead} project={project} filesDir={filesDir} onReact={react} onReply={() => setThread(m.id)} onPin={() => togglePin(m.id)} />
+                     lead={lead} project={project} filesDir={filesDir} onReact={react} onReply={() => setThread(m.id)} onPin={() => togglePin(m.id)}
+                     me={me} onChanged={load} />
           ))}
         </div>
         <Composer users={users} project={project} placeholder={tr(`Message dans #${shownName(current)} (@nom previent l’artiste)`, `Message in #${shownName(current)} (@name notifies)`)}
@@ -547,11 +548,11 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
           </div>
           <div style={{ flex: 1, overflow: 'auto', padding: '6px 4px' }}>
             <Message m={root} users={userSet} reacts={reactions.get(root.id)} replies={0} pinned={pins.has(root.id)} lead={lead}
-                     project={project} filesDir={filesDir} onReact={react} onPin={() => togglePin(root.id)} />
+                     project={project} filesDir={filesDir} onReact={react} onPin={() => togglePin(root.id)} me={me} onChanged={load} />
             <div style={{ borderTop: '1px solid var(--rule)', margin: '4px 8px' }} />
             {(replies.get(root.id) ?? []).map(r => (
               <Message key={r.id} m={r} users={userSet} reacts={reactions.get(r.id)} replies={0} pinned={false} lead={false}
-                       project={project} filesDir={filesDir} onReact={react} />
+                       project={project} filesDir={filesDir} onReact={react} me={me} moderator={lead} onChanged={load} />
             ))}
           </div>
           <Composer users={users} project={project} placeholder={tr('Repondre dans le fil', 'Reply in the thread')}
@@ -566,13 +567,27 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   )
 }
 
-function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, onReact, onReply, onPin }: {
+// Edit / delete (ADR 0084): the author edits and deletes, a lead deletes any message; the
+// Discord bridge forwards both. "(modifie)" marks an edited message.
+function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, onReact, onReply, onPin, me, moderator, onChanged }: {
   m: TeamMessage; users: Set<string>; reacts?: Map<TeamEmoji, { n: number; mine?: TeamRecord; who: string[] }>
   replies: number; pinned: boolean; lead: boolean; project: string; filesDir: string
   onReact: (msg: string, e: TeamEmoji) => void; onReply?: () => void; onPin?: () => void
+  me?: string; moderator?: boolean; onChanged?: () => void
 }) {
   const { tr } = useTr()
   const [hover, setHover] = useState(false)
+  const [edit, setEdit] = useState<string | null>(null)
+  const [askDelete, setAskDelete] = useState(false)
+  const mine = !!me && m.user.toUpperCase() === me.toUpperCase()
+  const canDelete = mine || lead || !!moderator
+  const saveEdit = () => {
+    if (edit === null) return
+    const text = edit.trim()
+    if (!text || text === m.message) { setEdit(null); return }
+    teamApi.editMessage(project, m.id, text).then(() => { setEdit(null); onChanged?.() }).catch(fail)
+  }
+  const remove = () => { setAskDelete(false); teamApi.deleteMessage(project, m.id).then(() => onChanged?.()).catch(fail) }
   const open = (a: TeamAttachment) => { if (filesDir && window.electronAPI?.openPath) void window.electronAPI.openPath(`${filesDir}/${a.file}`); else window.open(teamApi.fileUrl(project, a.file), '_blank') }
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -580,9 +595,24 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 12 }}>
         <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b>
         {m.via && <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{tr(`pour ${m.via}`, `for ${m.via}`)}</span>}<span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
+        {m.edited && <span style={{ color: 'var(--ink-4)', fontSize: 11 }} title={m.edited}>{tr('(modifie)', '(edited)')}</span>}
         {pinned && <Pin size={10} style={{ color: 'var(--accent)' }} />}
       </div>
-      <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><Text text={m.message} users={users} /></div>
+      {edit !== null
+        ? <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <textarea value={edit} autoFocus rows={Math.min(6, edit.split('\n').length + 1)} onChange={e => setEdit(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit() } if (e.key === 'Escape') setEdit(null) }}
+                      style={{ fontSize: 13, padding: 6, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink)', resize: 'vertical' }} />
+            <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Entree : enregistrer, Echap : annuler', 'Enter: save, Esc: cancel')}</span>
+          </div>
+        : <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><Text text={m.message} users={users} /></div>}
+      {askDelete && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 3 }}>
+          {tr('Supprimer ce message ?', 'Delete this message?')}
+          <button type="button" className="btn sm" onClick={remove}>{tr('Supprimer', 'Delete')}</button>
+          <button type="button" className="btn ghost sm" onClick={() => setAskDelete(false)}>{tr('Annuler', 'Cancel')}</button>
+        </div>
+      )}
       {!!m.attachments?.length && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
           {m.attachments.map(a => a.image
@@ -608,6 +638,8 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
           {onReply && <button type="button" title={tr('Repondre dans un fil', 'Reply in a thread')} onClick={onReply} style={iconBtn}><MessageSquareReply size={13} /></button>}
           {lead && onPin && <button type="button" title={pinned ? tr('Desepingler', 'Unpin') : tr('Epingler', 'Pin')} onClick={onPin} style={iconBtn}>
             {pinned ? <PinOff size={13} /> : <Pin size={13} />}</button>}
+          {mine && edit === null && <button type="button" title={tr('Modifier', 'Edit')} onClick={() => setEdit(m.message)} style={iconBtn}><Pencil size={12} /></button>}
+          {canDelete && <button type="button" title={tr('Supprimer', 'Delete')} onClick={() => setAskDelete(true)} style={iconBtn}><Trash2 size={12} /></button>}
         </div>
       )}
     </div>
