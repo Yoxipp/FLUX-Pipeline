@@ -13,9 +13,12 @@ export interface TeamMessage {
 }
 export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {
-  kind?: 'channel' | 'reaction' | 'pin'
+  kind?: 'channel' | 'group' | 'reaction' | 'pin'
   name?: string; topic?: string; call_link?: string; archived?: boolean
   access?: string | null   // who sees the channel: JSON {users, roles, departments}, empty = everyone
+  type?: 'text' | 'voice' | null   // channel: a voice channel's call link is its Join button (ADR 0084)
+  group?: string | null            // channel: rid of its group (a Discord category)
+  order?: number | null            // channel / group: position, lower first
   target?: string; emoji?: TeamEmoji
 }
 export type TeamMetaRead =

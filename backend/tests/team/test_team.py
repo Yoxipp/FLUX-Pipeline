@@ -53,6 +53,33 @@ class TeamMeta(unittest.TestCase):
         rec = team_meta.read("ALPHA")["records"][0]
         self.assertEqual((rec["name"], rec["archived"]), ("lighting", True))
 
+    def test_groups_voice_channels_and_order(self) -> None:
+        # P4 lot 1 (ADR 0084): groups like Discord categories, voice channels, order.
+        with self.assertRaises(FlowStoreError) as no:
+            self._w([{"op": "put", "fields": {"kind": "group", "name": "Prod"}}])
+        self.assertEqual(no.exception.status, 403)
+        grp = self._w([{"op": "put", "fields": {"kind": "group", "name": "Prod", "order": 1}}], lead=True)["rids"][0]
+        for bad in ({"kind": "group", "name": "  "}, {"kind": "group", "name": "x" * 41}, {"kind": "group", "name": "prod"}):
+            with self.assertRaises(FlowStoreError):
+                self._w([{"op": "put", "fields": bad}], lead=True)
+        chan = self._w([{"op": "put", "fields": {"kind": "channel", "name": "daily", "type": "voice", "group": grp, "order": 2.5}}],
+                       lead=True)["rids"][0]
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "rid": chan, "fields": {"group": "nope"}}], lead=True)
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "rid": chan, "fields": {"group": chan}}], lead=True)
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "rid": chan, "fields": {"type": "video"}}], lead=True)
+        self._w([{"op": "put", "rid": grp, "fields": {"name": "Production"}}], lead=True)
+        self._w([{"op": "put", "rid": grp, "fields": {"order": 3}}], lead=True)
+        self._w([{"op": "put", "rid": chan, "fields": {"group": None}}], lead=True)
+        recs = {r["rid"]: r for r in team_meta.read("ALPHA")["records"]}
+        self.assertEqual((recs[grp]["name"], recs[grp]["order"]), ("Production", 3.0))
+        self.assertEqual((recs[chan]["type"], recs[chan]["order"], recs[chan].get("group")), ("voice", 2.5, None))
+        # An archived group frees its name.
+        self._w([{"op": "put", "rid": grp, "fields": {"archived": True}}], lead=True)
+        self._w([{"op": "put", "fields": {"kind": "group", "name": "production"}}], lead=True)
+
     def test_reactions_by_author_pins_by_leads(self) -> None:
         bob = self._w([{"op": "put", "fields": {"kind": "reaction", "target": "m1", "emoji": "like"}}], user="BOB")["rids"][0]
         self._w([{"op": "put", "fields": {"kind": "reaction", "target": "m1", "emoji": "like"}}], user="ADAM")

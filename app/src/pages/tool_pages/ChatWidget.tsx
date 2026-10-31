@@ -8,7 +8,7 @@
 // that name, on this workstation; `/` completes the commands allowed in the channel.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { Archive, Eye, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, X } from 'lucide-react'
+import { Archive, ChevronDown, ChevronRight, Eye, FolderPlus, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, Volume2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { setMyPresence, teamApi, type TeamAttachment, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
 import { flowsApi } from '../../api/flows'
@@ -33,6 +33,7 @@ export function openLink(url: string) {
 }
 const chanOf = (m: TeamMessage) => m.channel || GENERAL
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'flux'
+const byOrder = (a: TeamRecord, b: TeamRecord) => (a.order ?? Infinity) - (b.order ?? Infinity) || String(a.name).localeCompare(String(b.name))
 const sizeTxt = (n: number) => n > 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`
 
 function Text({ text, users }: { text: string; users: Set<string> }) {
@@ -63,13 +64,14 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [error, setError] = useState<string | null>(null)
   const [channel, setChannel] = useState(() => { try { return localStorage.getItem(`flux.team.channel.${project}`) || GENERAL } catch { return GENERAL } })
   const [thread, setThread] = useState<string | null>(null)
-  const [newChannel, setNewChannel] = useState<string | null>(null)
+  const [newChannel, setNewChannel] = useState<{ name: string; type: 'text' | 'voice'; group: string } | null>(null)
+  const [groupEdit, setGroupEdit] = useState<{ rid?: string; name: string } | null>(null)   // new group (no rid) or rename
   const [callMenu, setCallMenu] = useState(false)
   const [paste, setPaste] = useState<{ label: string } | null>(null)
   const [notifyAll, setNotifyAll] = useState(true)
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
   const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined } | null>(null)
-  const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null)   // right click on a channel (leads)
+  const [menu, setMenu] = useState<{ name: string; group?: TeamRecord; x: number; y: number } | null>(null)   // right click on a channel / group (leads)
   const [commands, setCommands] = useState<TeamCommand[]>([])
   useEffect(() => {
     if (!menu) return
@@ -108,12 +110,29 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
 
   // -- derived ---------------------------------------------------------------
   const userSet = useMemo(() => new Set(users.map(u => u.toUpperCase())), [users])
+  // Channels by group (ADR 0084): #general first, then the channels without a group, then each
+  // group in its order. A channel whose group is archived falls back to no group.
   const channels = useMemo(() => {
     const recs = records.filter(r => r.kind === 'channel' && r.name)
     const byName = new Map(recs.map(r => [r.name!, r]))
-    const names = [GENERAL, ...[...byName.keys()].filter(n => n !== GENERAL && !byName.get(n)!.archived).sort()]
-    return { names, byName, archived: recs.filter(r => r.archived && r.name !== GENERAL) }
+    const groups = records.filter(r => r.kind === 'group' && !r.archived).sort(byOrder)
+    const live = new Set(groups.map(g => g.rid))
+    const active = recs.filter(r => r.name !== GENERAL && !r.archived).sort(byOrder)
+    const inGroup = (gid: string) => active.filter(r => (r.group && live.has(r.group) ? r.group : '') === gid).map(r => r.name!)
+    const sections = [{ group: undefined as TeamRecord | undefined, names: [GENERAL, ...inGroup('')] },
+                      ...groups.map(g => ({ group: g as TeamRecord | undefined, names: inGroup(g.rid) }))]
+    return { names: sections.flatMap(s => s.names), sections, byName, archived: recs.filter(r => r.archived && r.name !== GENERAL) }
   }, [records])
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(`flux.team.collapsed.${project}`) || '[]')) } catch { return new Set() }
+  })
+  const toggleGroup = (rid: string) => setCollapsed(prev => {
+    const next = new Set(prev)
+    if (!next.delete(rid)) next.add(rid)
+    try { localStorage.setItem(`flux.team.collapsed.${project}`, JSON.stringify([...next])) } catch { /* private mode */ }
+    return next
+  })
+  const [drag, setDrag] = useState<{ kind: 'channel' | 'group'; name: string } | null>(null)
   const current = channels.names.includes(channel) ? channel : GENERAL
   useEffect(() => {
     if (!project || preview) { setCommands([]); return }
@@ -180,13 +199,56 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     const pin = pins.get(msg)
     void meta(pin ? [{ op: 'del', rid: pin.rid }] : [{ op: 'put', fields: { kind: 'pin', target: msg } }])
   }
-  const createChannel = (name: string) => {
+  const createChannel = ({ name, type, group }: { name: string; type: 'text' | 'voice'; group: string }) => {
     const n = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+/, '').slice(0, 32)
     if (!n) return
     const old = channels.archived.find(r => r.name === n)
-    void meta(old ? [{ op: 'put', rid: old.rid, fields: { archived: null } }] : [{ op: 'put', fields: { kind: 'channel', name: n } }])
+    const place = { type: type === 'voice' ? 'voice' : null, group: group || null, order: channels.names.length + 1 }
+    void meta(old ? [{ op: 'put', rid: old.rid, fields: { archived: null, ...place } }] : [{ op: 'put', fields: { kind: 'channel', name: n, ...place } }])
     setNewChannel(null)
     setChannel(n)
+  }
+  const saveGroup = ({ rid, name }: { rid?: string; name: string }) => {
+    const label = name.trim()
+    setGroupEdit(null)
+    if (!label) return
+    void meta(rid ? [{ op: 'put', rid, fields: { name: label } }]
+                  : [{ op: 'put', fields: { kind: 'group', name: label, order: channels.sections.length } }])
+  }
+  // Drag to arrange (leads): a channel dropped on a channel goes before it, in its group; on a
+  // group header, at the end of that group. The section is renumbered 1..n (few writes).
+  const moveChannel = (name: string, group: string, before?: string) => {
+    const section = channels.sections.find(s => (s.group?.rid ?? '') === group)
+    if (!section || name === before) return
+    const list = section.names.filter(n => n !== GENERAL && n !== name)
+    const at = before ? list.indexOf(before) : -1
+    list.splice(at < 0 ? list.length : at, 0, name)
+    const ops: PageDataOp[] = []
+    list.forEach((n, i) => {
+      const r = channels.byName.get(n)
+      if (!r) return
+      const fields: Record<string, unknown> = {}
+      if (r.order !== i + 1) fields.order = i + 1
+      if (n === name && (r.group || '') !== group) fields.group = group || null
+      if (Object.keys(fields).length) ops.push({ op: 'put', rid: r.rid, fields })
+    })
+    if (ops.length) void meta(ops)
+  }
+  const moveGroup = (rid: string, before: string) => {
+    const list = channels.sections.flatMap(s => s.group && s.group.rid !== rid ? [s.group] : [])
+    const moved = channels.sections.find(s => s.group?.rid === rid)?.group
+    if (!moved || rid === before) return
+    const at = list.findIndex(g => g.rid === before)
+    list.splice(at < 0 ? list.length : at, 0, moved)
+    const ops: PageDataOp[] = list.flatMap((g, i) => g.order === i + 1 ? [] : [{ op: 'put' as const, rid: g.rid, fields: { order: i + 1 } }])
+    if (ops.length) void meta(ops)
+  }
+  const onDrop = (e: DragEvent, group: string, before?: { channel?: string; group?: string }) => {
+    if (!drag) return
+    e.preventDefault(); e.stopPropagation()
+    if (drag.kind === 'channel') moveChannel(drag.name, group, before?.channel)
+    else if (before?.group) moveGroup(drag.name, before.group)
+    setDrag(null)
   }
   const saveLink = (url: string) => {
     const link = url.trim() || null
@@ -229,34 +291,92 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
       <div style={{ width: 170, flex: 'none', borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', background: 'var(--paper-2)' }}>
         <div className="cap" style={{ padding: '8px 10px 4px' }}>{w.label || tr('Canaux', 'Channels')}</div>
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {channels.names.map(n => (
-            <div key={n} onClick={() => { setChannel(n); setThread(null) }}
-                 onContextMenu={e => { if (!lead || n === GENERAL) return; e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
-                 style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12.5,
-                          background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400 }}>
-              {accessOf(channels.byName.get(n)) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</span>
-              {channels.byName.get(n)?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
-              {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
-              {lead && n !== GENERAL && n === current && (
-                <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); void meta([{ op: 'put', rid: channels.byName.get(n)!.rid, fields: { archived: true } }]); setChannel(GENERAL) }}
-                        style={iconBtn}><Archive size={11} /></button>
-              )}
-            </div>
-          ))}
+          {channels.sections.map(({ group, names }) => {
+            const gid = group?.rid ?? ''
+            const shut = !!group && collapsed.has(gid)
+            const shown = shut ? names.filter(n => n === current || unread[n] > 0) : names
+            return (
+              <div key={gid || '_'}>
+                {group && (
+                  <div draggable={lead} onDragStart={() => setDrag({ kind: 'group', name: gid })} onDragEnd={() => setDrag(null)}
+                       onDragOver={e => { if (drag) e.preventDefault() }}
+                       onDrop={e => onDrop(e, gid, { group: gid })}
+                       onClick={() => toggleGroup(gid)}
+                       onContextMenu={e => { if (!lead) return; e.preventDefault(); setMenu({ name: '', group, x: e.clientX, y: e.clientY }) }}
+                       className="cap" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '8px 6px 2px', cursor: 'pointer', userSelect: 'none' }}>
+                    {shut ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
+                    {lead && <button type="button" title={tr('Canal dans ce groupe', 'Channel in this group')} style={iconBtn}
+                                     onClick={e => { e.stopPropagation(); setNewChannel({ name: '', type: 'text', group: gid }) }}><Plus size={11} /></button>}
+                  </div>
+                )}
+                {groupEdit?.rid === gid && gid && (
+                  <input autoFocus defaultValue={groupEdit.name} style={{ ...input, margin: '2px 6px', width: 'calc(100% - 12px)' }}
+                         onKeyDown={e => { if (e.key === 'Enter') saveGroup({ rid: gid, name: e.currentTarget.value }); if (e.key === 'Escape') setGroupEdit(null) }}
+                         onBlur={() => setGroupEdit(null)} />
+                )}
+                {shown.map(n => {
+                  const rec = channels.byName.get(n)
+                  const voice = rec?.type === 'voice'
+                  return (
+                    <div key={n} onClick={() => { setChannel(n); setThread(null) }}
+                         draggable={lead && n !== GENERAL} onDragStart={() => setDrag({ kind: 'channel', name: n })} onDragEnd={() => setDrag(null)}
+                         onDragOver={e => { if (drag && n !== GENERAL) e.preventDefault() }}
+                         onDrop={e => onDrop(e, gid, { channel: n })}
+                         onContextMenu={e => { if (!lead || n === GENERAL) return; e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
+                         style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12.5,
+                                  background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400 }}>
+                      {voice ? <Volume2 size={12} style={{ opacity: 0.6 }} />
+                        : accessOf(rec) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</span>
+                      {voice && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
+                      {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
+                      {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
+                      {lead && n !== GENERAL && n === current && (
+                        <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) }}
+                                style={iconBtn}><Archive size={11} /></button>
+                      )}
+                    </div>
+                  )
+                })}
+                {newChannel && newChannel.group === gid && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, margin: '2px 6px' }}>
+                    <button type="button" style={iconBtn} title={newChannel.type === 'voice' ? tr('Canal vocal (clic : texte)', 'Voice channel (click: text)') : tr('Canal texte (clic : vocal)', 'Text channel (click: voice)')}
+                            onMouseDown={e => e.preventDefault()}
+                            onClick={() => setNewChannel({ ...newChannel, type: newChannel.type === 'voice' ? 'text' : 'voice' })}>
+                      {newChannel.type === 'voice' ? <Volume2 size={12} /> : <Hash size={12} />}</button>
+                    <input autoFocus value={newChannel.name} placeholder={tr('nom-du-canal', 'channel-name')} onChange={e => setNewChannel({ ...newChannel, name: e.target.value })}
+                           onKeyDown={e => { if (e.key === 'Enter') createChannel(newChannel); if (e.key === 'Escape') setNewChannel(null) }}
+                           onBlur={() => setNewChannel(null)} style={{ ...input, flex: 1 }} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {groupEdit && !groupEdit.rid && (
+            <input autoFocus placeholder={tr('Nom du groupe', 'Group name')} style={{ ...input, margin: '6px 6px 0', width: 'calc(100% - 12px)' }}
+                   onKeyDown={e => { if (e.key === 'Enter') saveGroup({ name: e.currentTarget.value }); if (e.key === 'Escape') setGroupEdit(null) }}
+                   onBlur={() => setGroupEdit(null)} />
+          )}
         </div>
-        {lead && (newChannel === null
-          ? <button type="button" className="btn ghost sm" style={{ margin: 6 }} onClick={() => setNewChannel('')}><Plus size={12} /> {tr('Canal', 'Channel')}</button>
-          : <input autoFocus value={newChannel} placeholder={tr('nom-du-canal', 'channel-name')} onChange={e => setNewChannel(e.target.value)}
-                   onKeyDown={e => { if (e.key === 'Enter') createChannel(newChannel); if (e.key === 'Escape') setNewChannel(null) }}
-                   onBlur={() => setNewChannel(null)} style={{ ...input, margin: 6 }} />)}
+        {lead && (
+          <div style={{ display: 'flex', gap: 4, margin: 6 }}>
+            <button type="button" className="btn ghost sm" onClick={() => setNewChannel({ name: '', type: 'text', group: '' })}><Plus size={12} /> {tr('Canal', 'Channel')}</button>
+            <button type="button" className="btn ghost sm" title={tr('Groupe de canaux (categorie)', 'Channel group (category)')}
+                    onClick={() => setGroupEdit({ name: '' })}><FolderPlus size={12} /> {tr('Groupe', 'Group')}</button>
+          </div>
+        )}
       </div>
 
       {/* channel */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
            onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
-          <b style={{ fontSize: 13 }}># {current}</b>
+          <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {chanRec?.type === 'voice' ? <Volume2 size={13} /> : '#'} {current}</b>
+          {chanRec?.type === 'voice' && !chanRec.call_link && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
+            {lead ? tr('Canal vocal sans lien : clic droit > Lien d’appel', 'Voice channel without a link: right click > Call link')
+                  : tr('Canal vocal sans lien pour l’instant', 'Voice channel without a link yet')}</span>}
           {accessOf(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel(accessOf(chanRec)!)}><Lock size={9} /> {tr('restreint', 'restricted')}</span>}
           <span style={{ flex: 1 }} />
           {chanRec?.call_link && <button type="button" className="btn sm" onClick={() => join(chanRec.call_link!)}
@@ -329,7 +449,22 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
         <div onMouseDown={e => e.stopPropagation()}
              style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 80, minWidth: 180, padding: 4, background: 'var(--paper)',
                       border: '1px solid var(--rule-2)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.2)', display: 'flex', flexDirection: 'column' }}>
+          {menu.group ? <>
+            <div className="cap" style={{ padding: '3px 8px' }}>{menu.group.name}</div>
+            <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                    onClick={() => { setGroupEdit({ rid: menu.group!.rid, name: menu.group!.name ?? '' }); setMenu(null) }}>
+              <Hash size={12} /> {tr('Renommer...', 'Rename...')}</button>
+            <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                    title={tr('Ses canaux restent, sans groupe', 'Its channels stay, without a group')}
+                    onClick={() => { void meta([{ op: 'put', rid: menu.group!.rid, fields: { archived: true } }]); setMenu(null) }}>
+              <Archive size={12} /> {tr('Archiver le groupe', 'Archive the group')}</button>
+          </> : <>
           <div className="cap" style={{ padding: '3px 8px' }}># {menu.name}</div>
+          <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
+                  onClick={() => { const r = channels.byName.get(menu.name)!; void meta([{ op: 'put', rid: r.rid, fields: { type: r.type === 'voice' ? null : 'voice' } }]); setMenu(null) }}>
+            {channels.byName.get(menu.name)?.type === 'voice'
+              ? <><Hash size={12} /> {tr('Passer en canal texte', 'Make it a text channel')}</>
+              : <><Volume2 size={12} /> {tr('Passer en canal vocal', 'Make it a voice channel')}</>}</button>
           <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
                   onClick={() => { setChannel(menu.name); setThread(null); setAccessEdit({ value: accessOf(channels.byName.get(menu.name)) }); setMenu(null) }}>
             <Eye size={12} /> {tr('Qui voit ce canal...', 'Who sees this channel...')}</button>
@@ -339,6 +474,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
           <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
                   onClick={() => { void meta([{ op: 'put', rid: channels.byName.get(menu.name)!.rid, fields: { archived: true } }]); if (current === menu.name) setChannel(GENERAL); setMenu(null) }}>
             <Archive size={12} /> {tr('Archiver', 'Archive')}</button>
+          </>}
         </div>
       )}
 

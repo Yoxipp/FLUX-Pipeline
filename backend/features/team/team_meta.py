@@ -9,6 +9,11 @@
 # a TOOL page's access, ADR 0078: people, roles, departments). Empty = everyone; #general is
 # always everyone; leads and supervisors see every channel (they manage them). This is what
 # FLUX shows and notifies, not secrecy: the chat file stays readable on the share.
+#
+# Groups and voice channels (P4 lot 1, ADR 0084): a lead makes groups (`kind: group`, a free
+# label, like a Discord category); a channel carries `group` (the group's rid, so a rename
+# keeps it), `type` text | voice (a voice channel's call link is its Join button) and
+# `order` (a float, a drop between two channels takes the middle). Works without Discord.
 
 from __future__ import annotations
 
@@ -25,22 +30,27 @@ GENERAL = "general"
 EMOJIS = ("like", "love", "laugh", "question", "check")
 CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 MAX_LINK = 500
+MAX_GROUP = 40
+CHANNEL_TYPES = ("text", "voice")
 
 SPEC = DataSpec.model_validate({
     "id": "team",
     "fields": [
         {"id": "kind", "type": "select", "required": True,
-         "options": [{"value": "channel"}, {"value": "reaction"}, {"value": "pin"}]},
-        {"id": "name", "type": "str"},           # channel slug
+         "options": [{"value": "channel"}, {"value": "group"}, {"value": "reaction"}, {"value": "pin"}]},
+        {"id": "name", "type": "str"},           # channel slug, group label
         {"id": "topic", "type": "text"},         # channel description
         {"id": "call_link", "type": "str"},      # https link of the channel's call (Discord, Teams, Meet, Jitsi)
         {"id": "archived", "type": "bool"},
         {"id": "access", "type": "text"},        # who sees the channel: JSON {users, roles, departments}
+        {"id": "type", "type": "select", "options": [{"value": t} for t in CHANNEL_TYPES]},  # channel: text | voice
+        {"id": "group", "type": "str"},          # channel: rid of its group record
+        {"id": "order", "type": "float"},        # channel / group: position, lower first
         {"id": "target", "type": "str"},         # message id (reaction, pin)
         {"id": "emoji", "type": "select", "options": [{"value": e} for e in EMOJIS]},
     ],
 })
-LEAD_KINDS = ("channel", "pin")
+LEAD_KINDS = ("channel", "group", "pin")
 
 
 def folder(project: str) -> Path:
@@ -76,6 +86,18 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
                 raise FlowStoreError("canal : minuscules, chiffres, - ou _ (32 max)", 422)
             if any(r.get("kind") == "channel" and r.get("name") == name for r in records.values()):
                 raise FlowStoreError(f"le canal #{name} existe deja", 409)
+        if fields.get("group") not in (None, ""):
+            target = records.get(str(fields["group"]))
+            if kind != "channel" or not target or target.get("kind") != "group":
+                raise FlowStoreError("groupe inconnu", 422)
+        if kind == "group" and (op.get("rid") is None or "name" in fields):
+            label = name.strip() if isinstance(name, str) else ""
+            if not label or len(label) > MAX_GROUP:
+                raise FlowStoreError(f"groupe : un nom de 1 a {MAX_GROUP} caracteres", 422)
+            rid = str(op.get("rid") or "")
+            if any(r.get("kind") == "group" and not r.get("archived") and r["rid"] != rid
+                   and str(r.get("name") or "").strip().lower() == label.lower() for r in records.values()):
+                raise FlowStoreError(f"le groupe {label} existe deja", 409)
         if kind in ("reaction", "pin") and op.get("rid") is None and not fields.get("target"):
             raise FlowStoreError(f"{kind} : message cible manquant", 422)
     return str(kind or "")
