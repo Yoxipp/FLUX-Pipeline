@@ -14,5 +14,10 @@ lit `_flux_setup/discord_map.json` : lien Discord et personnes en vocal par cana
 caches retires comme dans `/meta`. `ChatWidget` : bouton "Rejoindre sur Discord" d'un canal vocal sans lien d'appel,
 "En vocal : ...", compteur dans la liste.
 
+Edition / suppression (ADR 0084) : `chat_manager.edit_message` (auteur) et `delete_message` (auteur ou lead) ajoutent
+un enregistrement `{"op": "edit" | "delete", "target"}` au journal ; `get_messages` les fusionne (`edited`, supprime =
+absent) ; `read_chat` donne le brut au pont Discord. Routes `PATCH` / `DELETE /activity/chat/{id}`. `ChatWidget` :
+crayon (auteur), corbeille avec confirmation (auteur, lead), "(modifie)".
+
 Routes : `routers/team.py` (`/team/presence`, `/team/{project}/meta`, `/team/{project}/files`, `/team/{project}/discord`). Les messages passent par
 `POST /activity/chat` (champs optionnels `channel`, `reply_to`, `attachments`, `notify_all`). Tests : `tests/team/`.
