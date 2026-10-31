@@ -293,6 +293,10 @@ async def post_chat(req: ChatMessage) -> dict:
         records = await loop.run_in_executor(None, lambda: team_meta.read(req.project)["records"])
         if req.channel in await loop.run_in_executor(None, lambda: team_meta.hidden_channels(req.project, user, records)):
             raise HTTPException(status_code=403, detail=f"Tu ne vois pas le canal #{req.channel}")
+        # Read only / announcement channel: leads and supervisors post, the others read and react.
+        from features.roles import project_roles
+        if team_meta.is_read_only(team_meta.channel_record(records, req.channel)) and                 not await loop.run_in_executor(None, lambda: project_roles.can(req.project, "team_channels", user=user)):
+            raise HTTPException(status_code=403, detail=f"#{req.channel} est en lecture seule : seuls les leads y ecrivent")
         channel = req.channel
         audience = lambda who: channel not in team_meta.hidden_channels(req.project, who, records)  # noqa: E731
     ok = await loop.run_in_executor(

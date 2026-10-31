@@ -135,6 +135,41 @@ class TeamMeta(unittest.TestCase):
         self.assertEqual((hidden["LEA"], hidden["SUP"]), (set(), set()))
 
 
+    def test_rename_options_and_group_access(self) -> None:
+        # P5 (2026-10-31): rename via title, read only, voice limit / status, new types,
+        # group access inherited by channels without their own.
+        a, b = self._w([{"op": "put", "fields": {"kind": "channel", "name": "lighting"}},
+                        {"op": "put", "fields": {"kind": "channel", "name": "comp"}}], lead=True)["rids"]
+        self._w([{"op": "put", "rid": a, "fields": {"title": "lumiere", "topic": "rendus", "read_only": True}}], lead=True)
+        for bad in ({"title": "lumiere"}, {"title": "general"}, {"title": "Pas Bon"}):
+            with self.assertRaises(FlowStoreError) as no:
+                self._w([{"op": "put", "rid": b, "fields": bad}], lead=True)
+            self.assertIn(no.exception.status, (409, 422))
+        gen = self._w([{"op": "put", "fields": {"kind": "channel", "name": "general"}}], lead=True)["rids"][0]
+        for bad in ({"title": "accueil"}, {"read_only": True}, {"type": "voice"}):
+            with self.assertRaises(FlowStoreError):
+                self._w([{"op": "put", "rid": gen, "fields": bad}], lead=True)
+        for bad in ({"user_limit": 100}, {"user_limit": -1}, {"voice_status": "x" * 121}, {"type": "stage"}):
+            with self.assertRaises(FlowStoreError):
+                self._w([{"op": "put", "rid": b, "fields": bad}], lead=True)
+        self._w([{"op": "put", "rid": b, "fields": {"type": "voice", "user_limit": 5, "voice_status": "review"}}], lead=True)
+        recs = {r["rid"]: r for r in team_meta.read("ALPHA")["records"]}
+        self.assertEqual(team_meta.shown_name(recs[a]), "lumiere")
+        self.assertTrue(team_meta.is_read_only(recs[a]))
+        self.assertTrue(team_meta.is_read_only({"type": "announcement"}))
+        self.assertEqual(recs[b]["user_limit"], 5)
+        grp = self._w([{"op": "put", "fields": {"kind": "group", "name": "Prod",
+                                                 "access": json.dumps({"roles": ["lead"]})}}], lead=True)["rids"][0]
+        self._w([{"op": "put", "fields": {"kind": "channel", "name": "synced", "group": grp}},
+                 {"op": "put", "fields": {"kind": "channel", "name": "own", "group": grp, "access": json.dumps({"users": ["EVA"]})}},
+                 {"op": "put", "fields": {"kind": "channel", "name": "open", "group": grp, "access": "{}"}}], lead=True)
+        with mock.patch("features.roles.project_roles.read_roles", return_value={"created_by": None, "members": {}, "legacy": False}):
+            self.assertEqual(team_meta.hidden_channels("ALPHA", "EVA"), {"synced"})
+            self.assertEqual(team_meta.hidden_channels("ALPHA", "BOB"), {"synced", "own"})
+            self._w([{"op": "put", "rid": grp, "fields": {"archived": True}}], lead=True)
+            self.assertEqual(team_meta.hidden_channels("ALPHA", "BOB"), {"own"})       # archived group: no longer inherited
+
+
 class Presence(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="flux_presence_"))
@@ -285,6 +320,13 @@ class Routes(unittest.TestCase):
         self.assertEqual([m["message"] for m in got], ["tout le monde"])
         self.assertEqual(self.client.get("/team/ALPHA/meta").json()["records"], [])
         r = client.post("/activity/chat", json={"project": "ALPHA", "message": "hop", "channel": "secret"})
+        self.assertEqual(r.status_code, 403)
+        # Read only channel (P5): the artist reads, only leads post.
+        self.lead = True
+        self.client.post("/team/ALPHA/meta", json={"ops": [{"op": "put", "fields": {"kind": "channel", "name": "news", "read_only": True}}]})
+        self.assertEqual(client.post("/activity/chat", json={"project": "ALPHA", "message": "info", "channel": "news"}).status_code, 200)
+        self.lead = False
+        r = client.post("/activity/chat", json={"project": "ALPHA", "message": "moi aussi", "channel": "news"})
         self.assertEqual(r.status_code, 403)
 
 

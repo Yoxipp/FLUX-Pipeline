@@ -19,6 +19,12 @@
 # (Projects > Archived). A new channel with the name of an archived one starts empty: its
 # key (`name`, what the messages carry) gets a suffix (lighting-2) and `title` keeps the
 # name shown. Two live channels never show the same name.
+#
+# Discord-like options (P5, 2026-10-31): a lead renames a channel (`title`, the key
+# stays), writes its `topic`, makes it `read_only` (only leads / supervisors post, the others
+# read and react). A group may carry `access`: its channels without their own inherit it (like
+# "synced" on Discord). Types: text, voice (`user_limit`, `voice_status`), forum (each root
+# message is a post with a title), announcement (read only, its own icon).
 
 from __future__ import annotations
 
@@ -36,7 +42,9 @@ EMOJIS = ("like", "love", "laugh", "question", "check")
 CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 MAX_LINK = 500
 MAX_GROUP = 40
-CHANNEL_TYPES = ("text", "voice")
+CHANNEL_TYPES = ("text", "voice", "forum", "announcement")
+MAX_STATUS = 120
+MAX_USER_LIMIT = 99
 
 SPEC = DataSpec.model_validate({
     "id": "team",
@@ -48,8 +56,11 @@ SPEC = DataSpec.model_validate({
         {"id": "topic", "type": "text"},         # channel description
         {"id": "call_link", "type": "str"},      # https link of the channel's call (Discord, Teams, Meet, Jitsi)
         {"id": "archived", "type": "bool"},
-        {"id": "access", "type": "text"},        # who sees the channel: JSON {users, roles}
-        {"id": "type", "type": "select", "options": [{"value": t} for t in CHANNEL_TYPES]},  # channel: text | voice
+        {"id": "access", "type": "text"},        # who sees the channel / group: JSON {users, roles}
+        {"id": "type", "type": "select", "options": [{"value": t} for t in CHANNEL_TYPES]},  # channel type
+        {"id": "read_only", "type": "bool"},     # channel: only leads / supervisors post
+        {"id": "user_limit", "type": "int"},     # voice channel: people at most (0 / empty = no limit)
+        {"id": "voice_status", "type": "str"},   # voice channel: what is going on, one line
         {"id": "group", "type": "str"},          # channel: rid of its group record
         {"id": "order", "type": "float"},        # channel / group: position, lower first
         {"id": "target", "type": "str"},         # message id (reaction, pin)
@@ -83,10 +94,20 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
         if "call_link" in fields:
             check_link(fields["call_link"])
         if fields.get("access") not in (None, ""):
-            if (fields.get("name") or current.get("name")) == GENERAL:
+            if kind == "channel" and (fields.get("name") or current.get("name")) == GENERAL:
                 raise FlowStoreError("#general est vu par toute l'equipe", 422)
             parse_access(fields["access"], strict=True)
         name = fields.get("name")
+        if kind == "channel" and (fields.get("name") or current.get("name")) == GENERAL:
+            if fields.get("title") not in (None, "", GENERAL) or fields.get("read_only") or                     fields.get("type") not in (None, "", "text"):
+                raise FlowStoreError("#general garde son nom et reste un canal texte ouvert", 422)
+        if "user_limit" in fields and fields["user_limit"] is not None:
+            limit = fields["user_limit"]
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 0 <= limit <= MAX_USER_LIMIT:
+                raise FlowStoreError(f"limite de personnes : 0 a {MAX_USER_LIMIT}", 422)
+        if "voice_status" in fields and fields["voice_status"] is not None:
+            if not isinstance(fields["voice_status"], str) or len(fields["voice_status"]) > MAX_STATUS:
+                raise FlowStoreError(f"statut du vocal : {MAX_STATUS} caracteres au plus", 422)
         if kind == "channel" and op.get("rid") is None:
             if not isinstance(name, str) or not CHANNEL_RE.match(name):
                 raise FlowStoreError("canal : minuscules, chiffres, - ou _ (32 max)", 422)
@@ -101,8 +122,8 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
             if not merged.get("archived"):
                 shown = shown_name(merged)
                 rid = str(op.get("rid") or "")
-                if any(r.get("kind") == "channel" and not r.get("archived") and r["rid"] != rid
-                       and shown_name(r) == shown for r in records.values()):
+                if shown == GENERAL and merged.get("name") != GENERAL or                         any(r.get("kind") == "channel" and not r.get("archived") and r["rid"] != rid
+                            and shown_name(r) == shown for r in records.values()):
                     raise FlowStoreError(f"un canal #{shown} est deja actif : archive-le avant", 409)
         if fields.get("group") not in (None, ""):
             target = records.get(str(fields["group"]))
@@ -119,6 +140,29 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
         if kind in ("reaction", "pin") and op.get("rid") is None and not fields.get("target"):
             raise FlowStoreError(f"{kind} : message cible manquant", 422)
     return str(kind or "")
+
+
+def is_read_only(record: Optional[Dict[str, Any]]) -> bool:
+    """Only leads / supervisors post in it (read only flag or an announcement channel)."""
+    return bool(record) and (bool(record.get("read_only")) or record.get("type") == "announcement")
+
+
+def channel_record(records: List[Dict[str, Any]], channel: Optional[str]) -> Optional[Dict[str, Any]]:
+    name = channel or GENERAL
+    return next((r for r in records if r.get("kind") == "channel" and r.get("name") == name), None)
+
+
+def effective_access(record: Dict[str, Any], groups: Dict[str, Dict[str, Any]]) -> Optional[Access]:
+    """A channel's own access, else its (live) group's, None = everyone. #general: everyone."""
+    if record.get("name") == GENERAL:
+        return None
+    own = parse_access(record.get("access"))
+    if own is not None or record.get("access") not in (None, ""):
+        return own
+    group = groups.get(str(record.get("group") or ""))
+    if group and not group.get("archived"):
+        return parse_access(group.get("access"))
+    return None
 
 
 def shown_name(record: Dict[str, Any]) -> str:
@@ -170,7 +214,8 @@ def hidden_channels(project: str, user: str, records: Optional[List[Dict[str, An
             records = read(project)["records"]
         except (OSError, RuntimeError):
             return set()
-    restricted = {r.get("name"): parse_access(r.get("access")) for r in records
+    groups = {r["rid"]: r for r in records if r.get("kind") == "group"}
+    restricted = {r.get("name"): effective_access(r, groups) for r in records
                   if r.get("kind") == "channel" and r.get("name") and r.get("name") != GENERAL}
     restricted = {n: a for n, a in restricted.items() if a is not None}
     if not restricted:
