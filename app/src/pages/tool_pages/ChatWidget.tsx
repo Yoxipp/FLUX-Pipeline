@@ -33,7 +33,10 @@ export function openLink(url: string) {
 }
 const chanOf = (m: TeamMessage) => m.channel || GENERAL
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'flux'
-const byOrder = (a: TeamRecord, b: TeamRecord) => (a.order ?? Infinity) - (b.order ?? Infinity) || String(a.name).localeCompare(String(b.name))
+// Same order as the Discord bridge (discord_sync._by_order): order, then the name without case.
+const byOrder = (a: TeamRecord, b: TeamRecord) => ((a.order ?? Infinity) - (b.order ?? Infinity)) || (String(a.name).toLowerCase() < String(b.name).toLowerCase() ? -1 : String(a.name).toLowerCase() > String(b.name).toLowerCase() ? 1 : 0)
+// Discord always lists the text channels of a category before its voice ones: Team does the same.
+const textFirst = (a: TeamRecord, b: TeamRecord) => Number(a.type === 'voice') - Number(b.type === 'voice')
 const sizeTxt = (n: number) => n > 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`
 
 function Text({ text, users }: { text: string; users: Set<string> }) {
@@ -121,7 +124,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     const groups = records.filter(r => r.kind === 'group' && !r.archived).sort(byOrder)
     const live = new Set(groups.map(g => g.rid))
     const active = recs.filter(r => r.name !== GENERAL && !r.archived).sort(byOrder)
-    const inGroup = (gid: string) => active.filter(r => (r.group && live.has(r.group) ? r.group : '') === gid).map(r => r.name!)
+    const inGroup = (gid: string) => active.filter(r => (r.group && live.has(r.group) ? r.group : '') === gid).sort(textFirst).map(r => r.name!)
     const sections = [{ group: undefined as TeamRecord | undefined, names: [GENERAL, ...inGroup('')] },
                       ...groups.map(g => ({ group: g as TeamRecord | undefined, names: inGroup(g.rid) }))]
     return { names: sections.flatMap(s => s.names), sections, byName }
@@ -245,6 +248,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     const list = section.names.filter(n => n !== GENERAL && n !== name)
     const at = before ? list.indexOf(before) : -1
     list.splice(at < 0 ? list.length : at, 0, name)
+    list.sort((a, b) => textFirst(channels.byName.get(a) ?? {} as TeamRecord, channels.byName.get(b) ?? {} as TeamRecord))
     const ops: PageDataOp[] = []
     list.forEach((n, i) => {
       const r = channels.byName.get(n)
