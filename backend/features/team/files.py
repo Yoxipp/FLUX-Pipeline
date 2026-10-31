@@ -33,12 +33,32 @@ def files_dir(project: str) -> Path:
     return setup_path(get_project_path(project), "team_files")
 
 
+def _check_ext(ext: str) -> None:
+    if not ext or ext in BLOCKED or not re.match(r"^\.[a-z0-9]{1,8}$", ext):
+        raise AttachError(f"type de fichier refuse : {ext or 'sans extension'}")
+
+
+def store_bytes(folder: Path, name: str, data: bytes) -> Dict[str, object]:
+    """Same as attach() for bytes received from elsewhere (a Discord attachment, ADR 0084)."""
+    ext = Path(name).suffix.lower()
+    _check_ext(ext)
+    if len(data) > MAX_BYTES:
+        raise AttachError(f"fichier trop gros (max {MAX_BYTES // (1024 * 1024)} Mo)")
+    stored = f"{hashlib.sha1(data).hexdigest()[:20]}{ext}"
+    target = folder / stored
+    if not target.is_file():
+        folder.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f".flux_tmp_{secrets.token_hex(4)}{ext}")
+        tmp.write_bytes(data)
+        tmp.replace(target)
+    return {"name": Path(name).name[:200], "file": stored, "size": len(data), "image": ext in IMAGES}
+
+
 def attach(folder: Path, source: str) -> Dict[str, object]:
     """Copy *source* into *folder*: {name, file, size, image}."""
     src = Path(source)
     ext = src.suffix.lower()
-    if not ext or ext in BLOCKED or not re.match(r"^\.[a-z0-9]{1,8}$", ext):
-        raise AttachError(f"type de fichier refuse : {ext or 'sans extension'}")
+    _check_ext(ext)
     try:
         size = src.stat().st_size
     except OSError:

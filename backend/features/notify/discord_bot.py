@@ -7,7 +7,9 @@
 #     (only the caller sees); all but /link need an account linked by /link;
 #   - private messages (DM) for the phone notifications of linked accounts;
 #   - DMs left by the other PCs in _flux_setup/notify_bot/ are sent from here.
-# No intent is requested (0): the bot never reads messages, only the commands typed to it.
+# No intent is requested (0) unless the project turned on the live Team bridge (ADR 0084,
+# features/notify/discord_sync.py): then GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT and
+# GUILD_VOICE_STATES, for the project's server only. Never DIRECT_MESSAGES: no DM is read.
 # REST in urllib (channels.request_json), Gateway with websockets (BSD-3, already a dep).
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ CHAT_DEFAULT = 10
 CHAT_MAX = 20
 LIST_MAX = 10
 NOT_LINKED = "Ce compte Discord n'est pas lie a FLUX : tape /link."
+BRIDGE_EVENTS = {"READY", "GUILD_CREATE", "MESSAGE_CREATE", "VOICE_STATE_UPDATE", "CHANNEL_CREATE",
+                 "CHANNEL_UPDATE", "CHANNEL_DELETE", "GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE"}
 
 COMMANDS = [
     {"name": "link", "type": 1, "description": "Lier ton compte Discord a ton compte FLUX (code a coller dans FLUX)",
@@ -83,8 +87,11 @@ def check_token(token: str) -> dict:
 
 
 def invite_url(app_id: str) -> str:
-    # permissions=0: a bot sends DMs to members of a server it shares, nothing else needed.
-    return f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot%20applications.commands&permissions=0"
+    # DMs alone need no permission; the Team bridge (ADR 0084) manages channels, roles and
+    # webhooks of the project's server: one link asks for both, a re-invite updates them.
+    from features.notify.discord_sync import invite_permissions
+    return (f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot%20applications.commands"
+            f"&permissions={invite_permissions()}")
 
 
 def register_commands(token: str, app_id: str) -> bool:
@@ -300,6 +307,9 @@ class BotRunner:
         self.online = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ws = None
+        self.bridge = None              # discord_sync.Bridge, made at the first Gateway session
+        self._sync = False              # this session asked for the bridge's intents
+        self._intents_refused = False   # MESSAGE_CONTENT not ticked in the portal: back to 0
 
     def start(self) -> None:
         self._thread.start()
@@ -404,11 +414,16 @@ class BotRunner:
 
     async def _session(self) -> None:
         from websockets.asyncio.client import connect
+        from features.notify import discord_sync
+        if self.bridge is None:
+            self.bridge = discord_sync.Bridge(self.project, self.token)
+        self._sync = not self._intents_refused and await asyncio.to_thread(self.bridge.wanted)
+        intents = discord_sync.INTENTS if self._sync else 0
         async with connect(GATEWAY, max_size=2 ** 22) as ws:
             self._ws = ws
             hello = json.loads(await ws.recv())
             interval = float((hello.get("d") or {}).get("heartbeat_interval", 41250)) / 1000.0
-            await ws.send(json.dumps({"op": 2, "d": {"token": self.token, "intents": 0,
+            await ws.send(json.dumps({"op": 2, "d": {"token": self.token, "intents": intents,
                                       "properties": {"os": "windows", "browser": "flux", "device": "flux"}}}))
             state = {"seq": None}
             tasks = [asyncio.create_task(self._heartbeat(ws, interval, state)),
@@ -430,6 +445,11 @@ class BotRunner:
             finally:
                 for t in tasks:
                     t.cancel()
+                if ws.close_code == discord_sync.DISALLOWED_INTENTS and self._sync:
+                    # MESSAGE_CONTENT not ticked: the bot comes back without the bridge (DMs keep working)
+                    self._intents_refused = True
+                    log.warning("discord bot %s: intents refused, Team bridge off", self.project)
+                    await asyncio.to_thread(self.bridge.refused)
 
     async def _heartbeat(self, ws, interval: float, state: dict) -> None:
         await asyncio.sleep(interval * 0.5)
@@ -455,9 +475,28 @@ class BotRunner:
                 last_alive = now
             if self.online:
                 await asyncio.to_thread(pump, self.project, self.token, sent, now)
+            if self.online and self.bridge is not None:
+                await self._bridge_tick(now)
             await asyncio.sleep(PUMP_S)
 
+    async def _bridge_tick(self, now: float) -> None:
+        """Team bridge (ADR 0084). Turned on / off in the settings: reconnect with the
+        intents it needs (or without them)."""
+        try:
+            wanted = await asyncio.to_thread(self.bridge.wanted)
+            if wanted != self._sync and not (wanted and self._intents_refused):
+                log.info("discord bot %s: Team bridge %s, reconnecting", self.project, "on" if wanted else "off")
+                if self._ws is not None:
+                    await self._ws.close()
+                return
+            if self._sync:
+                await asyncio.to_thread(self.bridge.tick, now)
+        except Exception as exc:  # noqa: BLE001 - the bridge never stops the bot
+            log.warning("discord bridge %s: %s", self.project, exc)
+
     async def _dispatch(self, kind: str | None, data: dict) -> None:
+        if self._sync and self.bridge is not None and kind in BRIDGE_EVENTS:
+            asyncio.create_task(self._bridge_event(kind, data))
         if kind == "READY":
             self.app_id = str((data.get("application") or {}).get("id") or "")
             ok = await asyncio.to_thread(register_commands, self.token, self.app_id)
@@ -465,6 +504,22 @@ class BotRunner:
             log.info("discord bot %s online (commands %s)", self.project, "ok" if ok else "not registered")
         elif kind == "INTERACTION_CREATE" and data.get("type") == 2:
             asyncio.create_task(self._interaction(data))
+
+    async def _bridge_event(self, kind: str, data: dict) -> None:
+        bridge = self.bridge
+        try:
+            if kind == "READY":
+                await asyncio.to_thread(bridge.on_ready, data)
+            elif kind == "GUILD_CREATE":
+                await asyncio.to_thread(bridge.on_guild, data)
+            elif kind == "MESSAGE_CREATE":
+                await asyncio.to_thread(bridge.on_message, data)
+            elif kind == "VOICE_STATE_UPDATE":
+                await asyncio.to_thread(bridge.on_voice, data)
+            else:
+                bridge.on_structure(data)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("discord bridge %s %s: %s", self.project, kind, exc)
 
     async def _interaction(self, data: dict) -> None:
         iid, itoken = data.get("id"), data.get("token")

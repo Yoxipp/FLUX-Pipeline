@@ -4,6 +4,7 @@
 #   POST /team/{project}/files           copy a local file to attach it to a message (ADR 0005)
 #   GET  /team/{project}/files/{name}    show / download an attachment
 #   GET  /team/presence                  everyone's presence; POST: this artist's own file
+#   GET  /team/{project}/discord         live Discord bridge (ADR 0084): link + voice members per channel
 
 from __future__ import annotations
 
@@ -62,6 +63,30 @@ async def post_presence(body: PresenceBody) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=str(exc))
     except RuntimeError:
         raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
+
+
+@router.get("/{project}/discord")
+async def get_discord(project: str) -> dict[str, Any]:
+    """Discord side of the Team channels, from _flux_setup/discord_map.json (written by the bot
+    host). Keys are channel rids (or "general"); hidden channels are left out like in /meta."""
+    _project_ok(project)
+    from features.notify import discord_map, store
+    from features.roles import project_roles
+
+    def work() -> dict[str, Any]:
+        on = bool(store.read_project(project).get("discord_sync"))
+        if not on:
+            return {"on": False, "guild": "", "links": {}, "voice": {}, "status": {}}
+        data = discord_map.public(project)
+        if not project_roles.can(project, "team_channels"):
+            records = team_meta.read(project)["records"]
+            hidden = team_meta.hidden_channels(project, config.get_current_user() or "", records)
+            gone = {r["rid"] for r in records if r.get("kind") == "channel" and r.get("name") in hidden}
+            data = {**data, "links": {k: v for k, v in data["links"].items() if k not in gone},
+                    "voice": {k: v for k, v in data["voice"].items() if k not in gone}}
+        return {"on": True, **data}
+
+    return await asyncio.to_thread(work)
 
 
 @router.get("/{project}/meta")

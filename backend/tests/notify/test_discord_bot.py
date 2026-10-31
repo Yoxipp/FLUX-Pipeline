@@ -254,8 +254,12 @@ class RestTests(unittest.TestCase):
         self.assertTrue(discord_bot.send_dm("TOK", "not-an-id", "x").permanent)
         self.assertEqual(self.relay.requests, [])
 
-    def test_invite_url_asks_no_permission(self):
-        self.assertIn("permissions=0", discord_bot.invite_url("9"))
+    def test_invite_url_asks_the_bridge_permissions_only(self):
+        # ADR 0084: channels, roles, webhooks, messages of the project's server; never admin.
+        url = discord_bot.invite_url("9")
+        self.assertIn("permissions=", url)
+        self.assertNotIn("permissions=0&", url + "&")
+        self.assertFalse(int(url.rsplit("permissions=", 1)[1]) & 8)
 
 
 @unittest.skipUnless(sys.platform == "win32", "DPAPI is Windows only")

@@ -67,7 +67,7 @@ def send_message(
 def post_message(
     user: str, message: str, project: str | None = None, path: Path | None = None, *,
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
-    notify_all: bool = False, audience=None, via: str | None = None,
+    notify_all: bool = False, audience=None, via: str | None = None, discord: str | None = None,
 ) -> str | None:
     """Append a chat message to the team chat of *project*. Returns its id, None on failure.
 
@@ -80,6 +80,7 @@ def post_message(
     sends a phone notification to every artist. *audience* (user -> bool): who may be
     mentioned or notified (a channel restricted to some artists); None = everyone.
     *via* (ADR 0081): the artist whose team command made FLUX write this message.
+    *discord* (ADR 0084): id of the Discord message this one copies (the bridge never sends it back).
     """
     date, time = _now()
     msg_id = _make_id(user)
@@ -99,6 +100,8 @@ def post_message(
         entry["attachments"] = attachments
     if via:
         entry["via"] = via
+    if discord:
+        entry["discord"] = discord
     chat_path = path or resolve_chat_path(project)
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
