@@ -34,6 +34,7 @@ ENV = "FLUX_DISCORD_BOT"
 EPHEMERAL = 64
 PUMP_S = 5.0
 ALIVE_S = 30.0
+INTENTS_RETRY_S = 900.0     # refused intents (close 4014) are asked again after this
 BEAT_S = 20.0               # core.host_lock beat of the project lock (ADR 0082)
 CANDIDATE_EVERY_S = 300.0   # a waiting PC says it is ready (store.CANDIDATE_S keeps it 10 min)
 MAX_CHARS = 2000
@@ -310,6 +311,7 @@ class BotRunner:
         self.bridge = None              # discord_sync.Bridge, made at the first Gateway session
         self._sync = False              # this session asked for the bridge's intents
         self._intents_refused = False   # MESSAGE_CONTENT not ticked in the portal: back to 0
+        self._refused_at = 0.0
 
     def start(self) -> None:
         self._thread.start()
@@ -447,7 +449,7 @@ class BotRunner:
                     t.cancel()
                 if ws.close_code == discord_sync.DISALLOWED_INTENTS and self._sync:
                     # MESSAGE_CONTENT not ticked: the bot comes back without the bridge (DMs keep working)
-                    self._intents_refused = True
+                    self._intents_refused, self._refused_at = True, time.time()
                     log.warning("discord bot %s: intents refused, Team bridge off", self.project)
                     await asyncio.to_thread(self.bridge.refused)
 
@@ -484,6 +486,8 @@ class BotRunner:
         intents it needs (or without them)."""
         try:
             wanted = await asyncio.to_thread(self.bridge.wanted)
+            if self._intents_refused and wanted and now - self._refused_at >= INTENTS_RETRY_S:
+                self._intents_refused = False       # the intent may be ticked since: try again
             if wanted != self._sync and not (wanted and self._intents_refused):
                 log.info("discord bot %s: Team bridge %s, reconnecting", self.project, "on" if wanted else "off")
                 if self._ws is not None:
