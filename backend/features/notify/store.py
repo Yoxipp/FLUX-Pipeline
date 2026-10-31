@@ -27,7 +27,9 @@ DIGEST_MIN, DIGEST_MAX = 1, 120
 
 PROJECT_DEFAULTS = {"discord_webhook": "", "ntfy_server": DEFAULT_SERVER, "digest_minutes": 5,
                     "include_project": False, "include_text": True,     # include_text: ADR 0072
-                    "discord_bot": {}}      # {"app_id", "name", "host"}: public, no token (ADR 0073)
+                    "discord_bot": {},      # {"app_id", "name", "host"}: public, no token (ADR 0073)
+                    "discord_sync": False,  # live bridge Team <-> Discord server (ADR 0084), opt-in
+                    "discord_guild": ""}    # the project's Discord server id (one server per project)
 USER_DEFAULTS = {"channel": "none", "discord_id": "", "ntfy_topic": "", "discord_linked_at": ""}
 
 BOT_ALIVE_S = 120.0         # the host rewrites its heartbeat every 30 s
@@ -51,6 +53,9 @@ def read_project(project: str) -> dict:
     cfg["digest_minutes"] = _clamp_minutes(cfg.get("digest_minutes"))
     cfg["include_project"] = bool(cfg.get("include_project"))
     cfg["include_text"] = bool(cfg.get("include_text"))
+    cfg["discord_sync"] = bool(cfg.get("discord_sync"))
+    guild = str(cfg.get("discord_guild") or "").strip()
+    cfg["discord_guild"] = guild if guild.isdigit() else ""
     bot = cfg.get("discord_bot")
     cfg["discord_bot"] = ({k: str(bot.get(k) or "") for k in ("app_id", "name", "host")}
                           if isinstance(bot, dict) and bot.get("app_id") else {})
@@ -77,8 +82,12 @@ def write_project(project: str, patch: dict, by: str) -> dict:
                 raise ValueError("Le serveur ntfy doit etre une URL http(s)")
         elif key == "digest_minutes":
             value = _clamp_minutes(value)
-        elif key in ("include_project", "include_text"):
+        elif key in ("include_project", "include_text", "discord_sync"):
             value = bool(value)
+        elif key == "discord_guild":
+            value = str(value).strip()
+            if value and not value.isdigit():
+                raise ValueError("Serveur Discord : un identifiant en chiffres (clic droit sur le serveur > Copier l'identifiant)")
         elif key == "discord_bot":
             continue        # set_bot only
         cfg[key] = value
