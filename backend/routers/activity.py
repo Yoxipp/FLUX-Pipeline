@@ -22,7 +22,7 @@ from features.activity.activity_reader import (
 )
 from features.activity.history import read_archive_events
 from features.activity.chat_manager import (
-    get_mentions_and_unread, get_messages, get_user_list,
+    delete_message, edit_message, get_mentions_and_unread, get_messages, get_user_list,
     mark_mentions_read, resolve_chat_path, send_message,
 )
 
@@ -302,6 +302,57 @@ async def post_chat(req: ChatMessage) -> dict:
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")
+    return {"success": True}
+
+
+class ChatEdit(BaseModel):
+    project: str
+    message: str = Field(max_length=4000)
+
+
+def _chat_project(project: str) -> None:
+    try:
+        resolve_chat_path(project)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nom de projet invalide")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    except RuntimeError:
+        raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
+
+
+@router.patch("/chat/{msg_id}")
+async def patch_chat(msg_id: str, req: ChatEdit) -> dict:
+    """Edit one's own message (ADR 0084: an appended record; the Discord bridge forwards it)."""
+    _chat_project(req.project)
+    user = config.get_current_user() or "unknown"
+    try:
+        await asyncio.to_thread(edit_message, user, msg_id, req.message, req.project)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Message introuvable (supprime ?)")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"success": True}
+
+
+@router.delete("/chat/{msg_id}")
+async def delete_chat(msg_id: str, project: str) -> dict:
+    """Delete one's own message, or any message for a lead / supervisor of the project."""
+    _chat_project(project)
+    user = config.get_current_user() or "unknown"
+    from features.roles import project_roles
+
+    def work() -> None:
+        delete_message(user, msg_id, project, is_lead=project_roles.can(project, "team_channels", user=user))
+
+    try:
+        await asyncio.to_thread(work)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Message introuvable (deja supprime ?)")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     return {"success": True}
 
 

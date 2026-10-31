@@ -140,12 +140,92 @@ def _notify_everyone(user: str, text: str, project: str | None, audience=None) -
         notify_hooks.on_mentions(user, targets, project, "mention", "appel", "chat", text)
 
 
+# Edit and delete (ADR 0084, 2026-10-31): the log stays append-only. A change is one more
+# record {"id", "op": "edit" | "delete", "target", "user", "date", "time"} (+ "message" for an
+# edit, + "from_discord" when the bridge copied it from Discord); get_messages merges them: an
+# edited message carries "edited" (date time of the last edit), a deleted one is left out.
+OPS = ("edit", "delete")
+
+
+def _merge(rows: list[dict]) -> list[dict]:
+    messages: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        op = row.get("op")
+        if op in OPS:
+            target = messages.get(str(row.get("target") or ""))
+            if target is None:
+                continue
+            if op == "edit":
+                target["message"] = str(row.get("message") or "")
+                target["edited"] = f"{row.get('date', '')} {row.get('time', '')}".strip()
+            else:
+                target["deleted"] = True
+        elif op is None and row.get("id"):
+            if row["id"] not in messages:
+                order.append(row["id"])
+            messages[row["id"]] = dict(row)
+    return [messages[i] for i in order if not messages[i].get("deleted")]
+
+
+def read_chat(project: str | None = None, path: Path | None = None) -> tuple[list[dict], list[dict]]:
+    """Raw messages (edits / deletes not applied) and the edit / delete records, in file
+    order (the Discord bridge forwards each change once)."""
+    rows = get_repository().read_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)))
+    return [r for r in rows if r.get("op") is None], [r for r in rows if r.get("op") in OPS]
+
+
+def _current(project: str | None, path: Path | None, msg_id: str) -> dict | None:
+    rows = get_repository().read_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)))
+    return next((m for m in _merge(rows) if m.get("id") == msg_id), None)
+
+
+def edit_message(user: str, msg_id: str, message: str, project: str | None = None, path: Path | None = None, *,
+                 from_discord: bool = False) -> str | None:
+    """Change the text of a message: its author only (the bridge: a Discord edit). Returns the
+    id of the edit record, None when nothing changed. KeyError: unknown or deleted message;
+    PermissionError: not the author."""
+    current = _current(project, path, msg_id)
+    if current is None:
+        raise KeyError(msg_id)
+    if not from_discord and not same_user(current.get("user"), user, load_aliases()):
+        raise PermissionError("on ne modifie que ses propres messages")
+    text = message.strip()
+    if not text and not current.get("attachments"):
+        raise ValueError("message vide")
+    if text == str(current.get("message") or ""):
+        return None
+    return _append_op("edit", user, msg_id, project, path, from_discord, message=text)
+
+
+def delete_message(user: str, msg_id: str, project: str | None = None, path: Path | None = None, *,
+                   is_lead: bool = False, from_discord: bool = False) -> str | None:
+    """Delete a message: its author, a lead (or the bridge: a Discord delete). Returns the id of
+    the delete record. KeyError: unknown or already deleted; PermissionError: not allowed."""
+    current = _current(project, path, msg_id)
+    if current is None:
+        raise KeyError(msg_id)
+    if not (from_discord or is_lead or same_user(current.get("user"), user, load_aliases())):
+        raise PermissionError("on ne supprime que ses propres messages (ou lead)")
+    return _append_op("delete", user, msg_id, project, path, from_discord)
+
+
+def _append_op(op: str, user: str, target: str, project, path, from_discord: bool, **extra) -> str | None:
+    date, time = _now()
+    entry = {"id": _make_id(user), "op": op, "target": target, "user": user, "date": date, "time": time, **extra}
+    if from_discord:
+        entry["from_discord"] = True
+    ok = get_repository().append_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)), [entry])
+    return entry["id"] if ok else None
+
+
 def get_messages(
     limit: int = 100, project: str | None = None, path: Path | None = None,
 ) -> list[dict]:
-    """Return up to *limit* messages of *project*'s chat, oldest first."""
+    """Return up to *limit* messages of *project*'s chat, oldest first (edits applied,
+    deleted messages left out)."""
     chat_path = path or resolve_chat_path(project)
-    messages = get_repository().read_log(_CHAT_COLLECTION, str(chat_path))
+    messages = _merge(get_repository().read_log(_CHAT_COLLECTION, str(chat_path)))
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
     table = load_aliases()
     return [{**m, "user": resolve_user(m.get("user"), table)} if "user" in m else m
