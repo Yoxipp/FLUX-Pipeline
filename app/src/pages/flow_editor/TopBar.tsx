@@ -87,6 +87,13 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
     { key: 'examples', label: tr('Exemples (lecture seule : clic droit > Dupliquer)', 'Examples (read only: right click > Duplicate)') },
   ]
   const [fileOpen, setFileOpen] = useState(false)
+  // File stays open while the right-click menu of a flow (FlowOpMenu, outside this menu) is
+  // shown: only an enabled item of it closes File; its label, a greyed item or Esc do not.
+  const keepForOpMenu = (e: { target: EventTarget | null; preventDefault: () => void }) => {
+    const t = e.target as HTMLElement | null
+    if (t?.closest?.('.flow-opmenu') && !t.closest('[role="menuitem"]:not([aria-disabled="true"])')) e.preventDefault()
+  }
+  const keepOnEscape = (e: KeyboardEvent) => { if (document.querySelector('.flow-opmenu')) e.preventDefault() }
   const scopeTag: Record<FlowScope, string> = {
     shipped: tr('livre', 'shipped'), team: tr('equipe', 'team'), project: tr('projet', 'project'), perso: tr('perso', 'personal'),
   }
@@ -97,12 +104,13 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
           <button type="button" className="flow-tool">{tr('Fichier', 'File')} <ChevronDown size={12} /></button>
         </Menu.Trigger>
         <Menu.Portal>
-          <Menu.Content className="flow-menu" align="start" sideOffset={4} collisionPadding={10}>
+          <Menu.Content className="flow-menu" align="start" sideOffset={4} collisionPadding={10} onInteractOutside={keepForOpMenu} onEscapeKeyDown={keepOnEscape}>
             <Menu.Item className="flow-menu-item" onSelect={actions.onNew}><FilePlus size={13} /> {tr('Nouveau', 'New')}<span className="shortcut">Ctrl+N</span></Menu.Item>
             <Menu.Sub>
               <Menu.SubTrigger className="flow-menu-item"><FolderOpen size={13} /> {tr('Ouvrir', 'Open')}<ChevronRight size={12} style={{ marginLeft: 'auto' }} /></Menu.SubTrigger>
               <Menu.Portal>
-                <Menu.SubContent className="flow-menu" sideOffset={4} collisionPadding={10} style={{ maxHeight: 420, overflowY: 'auto' }}>
+                <Menu.SubContent className="flow-menu" sideOffset={4} collisionPadding={10} style={{ maxHeight: 420, overflowY: 'auto' }}
+                                 onInteractOutside={keepForOpMenu} onEscapeKeyDown={keepOnEscape}>
                   {groups.map(g => {
                     // A name shadowed by a narrower scope (perso > project > team > shipped) is not listed.
                     const list = flows.filter(f => f.category === g.key && !f.shadowed)
@@ -112,7 +120,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
                         {list.length === 0 && <Menu.Item className="flow-menu-item" disabled>{tr('Aucun flow', 'No flow')}</Menu.Item>}
                         {list.map(f => (
                           <Menu.Item key={`${f.scope}:${f.name}`} className="flow-menu-item" onSelect={() => actions.onOpen(f)}
-                                     onContextMenu={e => { e.preventDefault(); setFileOpen(false); actions.onFlowMenu(f, e.clientX, e.clientY) }}>
+                                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); actions.onFlowMenu(f, e.clientX, e.clientY) }}>
                             {f.name}
                             {g.key === 'pipe' && f.scope === 'team' && <span className="tag">{tr('equipe', 'team')}</span>}
                             {f.name === current && <span className="shortcut">{tr('ouvert', 'open')}</span>}
