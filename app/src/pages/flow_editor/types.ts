@@ -427,7 +427,7 @@ export interface PageDataSpec {
 }
 
 // Who a page is meant for (ADR 0078): empty = everyone; else a match on any list.
-export interface PageAccess { users?: string[]; roles?: string[]; departments?: string[] }
+export interface PageAccess { users?: string[]; roles?: string[] }
 
 export interface PageDoc {
   page:         1
@@ -454,7 +454,7 @@ export interface PageIssue {
 export interface PageListItem {
   id: string; scope: PageScope; rev: string; error: string | null
   label: string; icon: string; description: string; shadowed?: boolean
-  access?: PageAccess | null; for_me?: boolean   // for_me false: under "Other tools" (ADR 0078)
+  access?: PageAccess | null; for_me?: boolean   // for_me false: listed only to page editors, under "Other tools" (ADR 0085)
 }
 export interface PageList { pages: PageListItem[]; templates: PageListItem[]; can_edit: Record<'team' | 'project', boolean> }
 export interface PageRead { id: string; scope: PageScope; rev: string; page: PageDoc; issues: PageIssue[]; can_edit: boolean }

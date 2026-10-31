@@ -50,7 +50,7 @@ function accessOf(r: TeamRecord | undefined): PageAccess | undefined {
   if (!r?.access) return undefined
   try { const a = JSON.parse(r.access) as PageAccess; return isEveryone(a) ? undefined : a } catch { return undefined }
 }
-const accessLabel = (a: PageAccess) => [...(a.users ?? []), ...(a.roles ?? []), ...(a.departments ?? [])].join(', ')
+const accessLabel = (a: PageAccess) => [...(a.users ?? []), ...(a.roles ?? [])].join(', ')
 
 // fill: the built-in Team page (/team) shows it at the full height of the window.
 export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProps & { fill?: boolean }) {
@@ -255,7 +255,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     void meta(chanRec ? [{ op: 'put', rid: chanRec.rid, fields: { call_link: link } }] : [{ op: 'put', fields: { kind: 'channel', name: current, call_link: link } }])
     setLinkEdit(null)
   }
-  // Who sees the channel (leads): people, roles, departments, like a TOOL page (ADR 0078).
+  // Who sees the channel (leads): people, roles, like a TOOL page (ADR 0078, 0085).
   const saveAccess = (value: PageAccess | undefined) => {
     const clean = value ? cleanAccess(value) : undefined
     const access = clean ? JSON.stringify(clean) : null

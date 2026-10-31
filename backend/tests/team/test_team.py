@@ -96,7 +96,8 @@ class TeamMeta(unittest.TestCase):
         self.assertEqual(kinds, ["pin", "reaction"])
 
     def test_channel_access_who_sees_what(self) -> None:
-        # 2026-10-30: a channel for some people / roles / departments; leads see all.
+        # 2026-10-30: a channel for some people / roles; leads see all. An old
+        # `departments` list is dropped (ADR 0085): EVA no longer sees #rig through it.
         rig = json.dumps({"users": ["bob"], "departments": ["RIG"]})
         self._w([{"op": "put", "fields": {"kind": "channel", "name": "rig", "access": rig}},
                  {"op": "put", "fields": {"kind": "channel", "name": "leads", "access": json.dumps({"roles": ["lead"]})}},
@@ -106,12 +107,11 @@ class TeamMeta(unittest.TestCase):
                 self._w([{"op": "put", "fields": {"kind": "channel", "name": "x", "access": bad}}], lead=True)
         with self.assertRaises(FlowStoreError):
             self._w([{"op": "put", "fields": {"kind": "channel", "name": "general", "access": rig}}], lead=True)
-        roles = {"created_by": None, "members": {"LEA": "lead", "SUP": "supervisor"},
-                 "departments": {"EVA": ["RIG"]}, "legacy": False}
+        roles = {"created_by": None, "members": {"LEA": "lead", "SUP": "supervisor"}, "legacy": False}
         with mock.patch("features.roles.project_roles.read_roles", return_value=roles):
             hidden = {u: team_meta.hidden_channels("ALPHA", u) for u in ("BOB", "EVA", "CLEO", "LEA", "SUP")}
         self.assertEqual(hidden["BOB"], {"leads"})            # named in #rig
-        self.assertEqual(hidden["EVA"], {"leads"})            # RIG department
+        self.assertEqual(hidden["EVA"], {"rig", "leads"})
         self.assertEqual(hidden["CLEO"], {"rig", "leads"})
         self.assertEqual((hidden["LEA"], hidden["SUP"]), (set(), set()))
 
@@ -245,7 +245,7 @@ class Routes(unittest.TestCase):
         (self.tmp / "ALPHA").mkdir()
         (self.tmp / "USER").mkdir()
         jm.invalidate_cache()
-        roles = {"created_by": None, "members": {}, "departments": {}, "legacy": False}
+        roles = {"created_by": None, "members": {}, "legacy": False}
         for p in (mock.patch.object(cm, "get_project_chat_path", lambda name: self.tmp / name / "teamChat.json"),
                   mock.patch.object(cm, "get_mentions_path", lambda: self.tmp / "chatMentions.json"),
                   mock.patch.object(cm, "get_user_list", lambda: ["ADAM", "BOB"]),

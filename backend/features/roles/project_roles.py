@@ -2,7 +2,7 @@
 #
 # junior < artist < lead < supervisor, in <project>/_flux_setup/roles.json:
 #   {"schema_version": 1, "created_by": "ADAM", "members": {"ADAM": "supervisor"},
-#    "departments": {"EVA": ["ANIM"]}, "updated_by": "MILO", "updated_at": "<iso>"}
+#    "updated_by": "MILO", "updated_at": "<iso>"}
 # The creator of a project is its supervisor; anyone not listed is an artist. A project
 # created before roles (no roles.json) takes the studio's legacy_supervisors (studio.json).
 #
@@ -10,9 +10,9 @@
 # a supervisor sets anything, demoting another supervisor (or himself) included. The last
 # supervisor can never be demoted. A project without any supervisor can be claimed once.
 #
-# Departments (2026-10-30, ADR 0078): what an artist works on, used to target TOOL
-# pages (flux_flows.pages.Access). A lead or a supervisor sets anyone's; an artist sets
-# their own. No department is fine: the pages for everyone still show.
+# No departments (2026-10-31, ADR 0085): who sees a TOOL page or a Team channel is the
+# people / roles ticked on it. An old file's "departments" key is ignored, then dropped by
+# the next role change.
 #
 # A guard against mistakes, not security: the user is the one of the local config, an
 # account without password can be picked by anyone, and roles.json sits in the shared
@@ -53,7 +53,6 @@ ACTIONS = {
     "delete_project": SUPERVISOR,
 }
 _LEAD_ASSIGNABLE = (JUNIOR, ARTIST, LEAD)
-DEPARTMENTS = ("MODELING", "SURFACING", "GROOM", "RIG", "CFX", "LAYOUT", "ANIM", "FX", "LIGHT", "COMP")
 
 
 class RoleError(PermissionError):
@@ -74,20 +73,9 @@ def _clean_members(raw) -> dict[str, str]:
     return {_norm(n): r for n, r in raw.items() if _norm(n) and r in RANK}
 
 
-def _clean_departments(raw) -> dict[str, list[str]]:
-    if not isinstance(raw, dict):
-        return {}
-    out = {}
-    for name, depts in raw.items():
-        kept = [d for d in DEPARTMENTS if isinstance(depts, list) and d in depts]
-        if _norm(name) and kept:
-            out[_norm(name)] = kept
-    return out
-
-
 def _current_names(table: dict) -> dict:
     """*table* keyed by current artist names (renames, ADR 0079). The file is not rewritten
-    here; the next role / department change saves the current names. A live name's own
+    here; the next role change saves the current names. A live name's own
     entry wins over the entry of an old name renamed into it."""
     from features.accounts import aliases
 
@@ -104,21 +92,20 @@ def _current_names(table: dict) -> dict:
 
 
 def read_roles(project_name: str) -> dict:
-    """{created_by, members {NAME: role}, departments {NAME: [DEPT]}, legacy}. Never raises.
+    """{created_by, members {NAME: role}, legacy}. Never raises.
 
-    Names are the current ones: an artist renamed since keeps role and departments."""
+    Names are the current ones: an artist renamed since keeps the role."""
     try:
         path = roles_path(project_name)
     except RuntimeError:
-        return {"created_by": None, "members": {}, "departments": {}, "legacy": True}
+        return {"created_by": None, "members": {}, "legacy": True}
     raw = read_json(path) if path.is_file() else None
     if not isinstance(raw, dict):
         # Created before roles: the studio names its supervisors (empty by default).
         members = {_norm(name): SUPERVISOR for name in studio_config.legacy_supervisors() if _norm(name)}
-        return {"created_by": None, "members": _current_names(members), "departments": {}, "legacy": True}
+        return {"created_by": None, "members": _current_names(members), "legacy": True}
     return {"created_by": _norm(raw.get("created_by")) or None,
-            "members": _current_names(_clean_members(raw.get("members"))),
-            "departments": _current_names(_clean_departments(raw.get("departments"))), "legacy": False}
+            "members": _current_names(_clean_members(raw.get("members"))), "legacy": False}
 
 
 def _write(project_name: str, doc: dict, actor: str | None) -> None:
@@ -126,7 +113,6 @@ def _write(project_name: str, doc: dict, actor: str | None) -> None:
         "schema_version": SCHEMA_VERSION,
         "created_by": doc.get("created_by"),
         "members": dict(sorted(doc["members"].items())),
-        "departments": dict(sorted((doc.get("departments") or {}).items())),
         "updated_by": actor,
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -209,8 +195,7 @@ def set_role(project_name: str, target: str, new_role: str, actor: str | None = 
         check_set_role(roles, actor, target, new_role)
         members = dict(roles["members"])
         members[target] = new_role
-        _write(project_name, {"created_by": roles["created_by"], "members": members,
-                              "departments": roles["departments"]}, actor)
+        _write(project_name, {"created_by": roles["created_by"], "members": members}, actor)
     log.info("Role of %s on %s set to %s by %s", target, project_name, new_role, actor)
     return read_roles(project_name)
 
@@ -227,54 +212,8 @@ def claim_supervisor(project_name: str, user: str | None = None) -> dict:
             raise RoleError(f"{project_name} a deja un Supervisor ({', '.join(supervisors(roles))})")
         members = dict(roles["members"])
         members[user] = SUPERVISOR
-        _write(project_name, {"created_by": roles["created_by"], "members": members,
-                              "departments": roles["departments"]}, user)
+        _write(project_name, {"created_by": roles["created_by"], "members": members}, user)
     log.warning("%s claimed supervisor of %s (project had none)", user, project_name)
-    return read_roles(project_name)
-
-
-def departments_of(project_name: str, user: str | None, roles: dict | None = None) -> list[str]:
-    """Departments of *user* on the project ([] without a user or without any)."""
-    user = _norm(user)
-    if not user:
-        return []
-    return list((roles or read_roles(project_name))["departments"].get(user, []))
-
-
-def can_set_departments(roles: dict, actor: str, target: str) -> bool:
-    if not actor:
-        return False
-    actor_role = roles["members"].get(actor, DEFAULT_ROLE)
-    return actor == target or RANK[actor_role] >= RANK[ACTIONS["manage_roles"]]
-
-
-def set_departments(project_name: str, target: str, departments: list[str], actor: str | None = None) -> dict:
-    """Set the departments of *target* (as *actor*, default the active user). Returns read_roles()."""
-    from utils.user_utils import is_valid_user_name
-
-    actor, target = _active(actor), _norm(target)
-    if not is_valid_user_name(target):
-        raise ValueError(f"Nom d'artiste invalide : {target!r}")
-    wanted = {str(d).strip().upper() for d in departments}
-    unknown = sorted(wanted - set(DEPARTMENTS))
-    if unknown:
-        raise ValueError(f"Departement inconnu : {unknown[0]} ({', '.join(DEPARTMENTS)})")
-    path = roles_path(project_name)
-    with append_lock(path):
-        roles = read_roles(project_name)
-        if not actor:
-            raise RoleError("Connecte-toi a ton compte pour changer un departement")
-        if not can_set_departments(roles, actor, target):
-            raise RoleError("Role Lead requis pour changer les departements d'un autre artiste")
-        depts = dict(roles["departments"])
-        kept = [d for d in DEPARTMENTS if d in wanted]
-        if kept:
-            depts[target] = kept
-        else:
-            depts.pop(target, None)
-        _write(project_name, {"created_by": roles["created_by"], "members": roles["members"],
-                              "departments": depts}, actor)
-    log.info("Departments of %s on %s set to %s by %s", target, project_name, kept, actor)
     return read_roles(project_name)
 
 
@@ -297,20 +236,17 @@ def summary(project_name: str, users: list[str], user: str | None = None) -> dic
         options = [r for r in assignable_roles(my_role, role)
                    if not (role == SUPERVISOR and r != SUPERVISOR and supervisors(roles) == [name])]
         members.append({"name": name, "role": role, "listed": name in roles["members"],
-                        "assignable": options if me else [],
-                        "departments": roles["departments"].get(name, []),
-                        "can_set_departments": can_set_departments(roles, me, name)})
+                        "assignable": options if me else []})
     return {
         "project": project_name,
         "roles": list(ROLES),
         "labels": LABELS,
         "default_role": DEFAULT_ROLE,
-        "departments": list(DEPARTMENTS),
         "created_by": roles["created_by"],
         "legacy": roles["legacy"],
         "supervisors": supervisors(roles),
         "can_claim": bool(me) and not supervisors(roles),
-        "me": {"user": me or None, "role": my_role, "departments": roles["departments"].get(me, []),
+        "me": {"user": me or None, "role": my_role,
                "can": {a: can(project_name, a, me, roles) for a in ACTIONS}},
         "members": members,
         "note_fr": "Garde-fou contre l'erreur, pas une securite : un compte sans mot de passe peut etre "

@@ -1,6 +1,5 @@
 // ProjectRoles.tsx - Parametres > Projet > Roles (ADR 0064): junior < artist < lead < supervisor.
 // The backend says which roles the active user may give each artist; the UI only offers those.
-// Departments (ADR 0078) target the TOOL pages: an artist sets their own, a lead anyone's.
 
 import { useEffect, useState } from 'react'
 import { Shield } from 'lucide-react'
@@ -54,21 +53,7 @@ export function ProjectRoles({ project }: { project: string }) {
         {data.members.map(m => (
           <div key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid var(--rule)' }}>
             <span style={{ width: 110, flexShrink: 0, fontSize: 11, color: 'var(--ink-2)' }}>{m.name}</span>
-            <span style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-              {data.departments.map(d => {
-                const on = m.departments.includes(d)
-                if (!m.can_set_departments && !on) return null
-                const next = on ? m.departments.filter(x => x !== d) : [...m.departments, d]
-                return (
-                  <button key={d} type="button" disabled={busy || !m.can_set_departments}
-                    title={m.can_set_departments ? 'Departement : cible les pages TOOL' : 'Role Lead requis pour changer les departements des autres'}
-                    onClick={() => void run(() => rolesApi.setDepartments(project, m.name, next), `${m.name} : ${next.length ? next.join(', ') : 'aucun departement'}`)}
-                    style={{ height: 18, padding: '0 6px', fontSize: 9.5, borderRadius: 4, cursor: m.can_set_departments ? 'pointer' : 'default',
-                             border: `1px solid ${on ? 'var(--accent)' : 'var(--rule)'}`, background: on ? 'var(--accent-soft)' : 'transparent',
-                             color: on ? 'var(--ink)' : 'var(--ink-4)' }}>{d}</button>
-                )
-              })}
-            </span>
+            <span style={{ flex: 1 }} />
             {m.assignable.length > 1 ? (
               <select value={m.role} disabled={busy} title={HINTS[m.role]}
                 onChange={e => void run(() => rolesApi.set(project, m.name, e.target.value as ProjectRole), `${m.name} : ${data.labels[e.target.value as ProjectRole]}`)}

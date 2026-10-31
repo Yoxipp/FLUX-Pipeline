@@ -9,8 +9,6 @@ export interface RoleMember {
   role: ProjectRole
   listed: boolean            // false = default role (not written in roles.json)
   assignable: ProjectRole[]  // roles the active user may give this member
-  departments: string[]      // ADR 0078, targets TOOL pages
-  can_set_departments: boolean
 }
 
 export interface RolesSummary {
@@ -18,12 +16,11 @@ export interface RolesSummary {
   roles: ProjectRole[]
   labels: Record<ProjectRole, string>
   default_role: ProjectRole
-  departments: string[]      // the departments offered
   created_by: string | null
   legacy: boolean
   supervisors: string[]
   can_claim: boolean
-  me: { user: string | null; role: ProjectRole | null; departments: string[]; can: Record<string, boolean> }
+  me: { user: string | null; role: ProjectRole | null; can: Record<string, boolean> }
   members: RoleMember[]
   note_fr: string
 }
@@ -34,7 +31,5 @@ export const rolesApi = {
   get: (project: string) => apiCall<RolesSummary>('GET', `/roles/${enc(project)}`),
   set: (project: string, user: string, role: ProjectRole) =>
     apiCall<RolesSummary>('PUT', `/roles/${enc(project)}`, { user, role }),
-  setDepartments: (project: string, user: string, departments: string[]) =>
-    apiCall<RolesSummary>('PUT', `/roles/${enc(project)}/departments`, { user, departments }),
   claim: (project: string) => apiCall<RolesSummary>('POST', `/roles/${enc(project)}/claim`),
 }

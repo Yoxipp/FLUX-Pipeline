@@ -252,8 +252,9 @@ class DataSpec(_Strict):
 
 
 # Who a page is meant for (2026-10-30, ADR 0078). Empty = everyone. Otherwise a person
-# matches when one list names them (OR): by name, by project role, by department. The
-# others still see the page under "Other tools": a filter of the TOOL rail, not a lock.
+# matches when one list names them (OR): by name or by project role. The others do not see
+# the page (ADR 0085), except who may edit pages, under "Other tools". Departments are gone
+# (ADR 0085): an old file's `departments` is dropped on read.
 # Roles mirror features.roles.project_roles.ROLES (flux_flows imports no feature).
 ACCESS_ROLES = ("junior", "artist", "lead", "supervisor")
 _TOKEN_RE = re.compile(r"^[A-Z0-9_\-]{1,40}$")
@@ -262,27 +263,31 @@ _TOKEN_RE = re.compile(r"^[A-Z0-9_\-]{1,40}$")
 class Access(_Strict):
     users: List[str] = []
     roles: List[str] = []
-    departments: List[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_departments(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "departments" in data:
+            data = {k: v for k, v in data.items() if k != "departments"}
+        return data
 
     @model_validator(mode="after")
     def _check(self) -> "Access":
         self.users = sorted({u.strip().upper() for u in self.users if u.strip()})
-        self.departments = sorted({d.strip().upper() for d in self.departments if d.strip()})
         bad = [r for r in self.roles if r not in ACCESS_ROLES]
         if bad:
             raise ValueError(f"access.roles : '{bad[0]}' inconnu (attendu : {', '.join(ACCESS_ROLES)})")
         self.roles = [r for r in ACCESS_ROLES if r in self.roles]
-        for token in self.users + self.departments:
+        for token in self.users:
             if not _TOKEN_RE.match(token):
                 raise ValueError(f"access : '{token}' invalide (lettres, chiffres, _ et -)")
         return self
 
     def is_everyone(self) -> bool:
-        return not (self.users or self.roles or self.departments)
+        return not (self.users or self.roles)
 
 
-def page_for(access: Optional[Access], user: Optional[str], role: Optional[str] = None,
-             departments: Optional[List[str]] = None) -> bool:
+def page_for(access: Optional[Access], user: Optional[str], role: Optional[str] = None) -> bool:
     """True when the page is meant for this person (everyone when *access* is empty)."""
     if access is None or access.is_everyone():
         return True
@@ -298,9 +303,7 @@ def page_for(access: Optional[Access], user: Optional[str], role: Optional[str] 
             table = {}
         if any(aliases.resolve_user(u, table) == user for u in access.users if u in table):
             return True
-    if role and role in access.roles:
-        return True
-    return bool(set(access.departments) & {d.upper() for d in departments or []})
+    return bool(role and role in access.roles)
 
 
 class Page(_Strict):

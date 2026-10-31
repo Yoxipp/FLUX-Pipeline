@@ -1,20 +1,17 @@
 // PageAccess.tsx — who a TOOL page is meant for (ADR 0078), at creation and in the page
-// properties. Everyone, or any mix of people, project roles and departments (a person
-// matches one list). The others still find the page under "Other tools": a filter, no lock.
+// properties. Everyone, or any mix of people and project roles (a person matches one list).
+// The others do not see the page; who may edit pages finds it under "Other tools" (ADR 0085).
 
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { rolesApi } from '../../api/roles'
 import type { PageAccess } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 
 const ROLES = ['junior', 'artist', 'lead', 'supervisor']
 const ROLE_LABELS: Record<string, string> = { junior: 'Junior', artist: 'Artist', lead: 'Lead', supervisor: 'Supervisor' }
-// Mirror of project_roles.DEPARTMENTS, used only without a project (team page, no roles.json).
-const FALLBACK_DEPARTMENTS = ['MODELING', 'SURFACING', 'GROOM', 'RIG', 'CFX', 'LAYOUT', 'ANIM', 'FX', 'LIGHT', 'COMP']
 
 export function isEveryone(a: PageAccess | undefined | null): boolean {
-  return !a || !(a.users?.length || a.roles?.length || a.departments?.length)
+  return !a || !(a.users?.length || a.roles?.length)
 }
 
 /** Access without its empty lists, undefined for everyone (the YAML then has no access key). */
@@ -22,7 +19,6 @@ export function cleanAccess(a: PageAccess): PageAccess | undefined {
   const out: PageAccess = {}
   if (a.users?.length) out.users = a.users
   if (a.roles?.length) out.roles = a.roles
-  if (a.departments?.length) out.departments = a.departments
   return isEveryone(out) ? undefined : out
 }
 
@@ -46,18 +42,16 @@ function Chips({ title, options, labels, value, onChange }: { title: string; opt
   )
 }
 
-export function AccessPicker({ value, onChange, project }: { value: PageAccess | undefined; onChange: (v: PageAccess | undefined) => void; project?: string }) {
+export function AccessPicker({ value, onChange }: { value: PageAccess | undefined; onChange: (v: PageAccess | undefined) => void; project?: string }) {
   const { tr } = useTr()
   const [custom, setCustom] = useState(!isEveryone(value))
   const [users, setUsers] = useState<string[]>([])
-  const [departments, setDepartments] = useState<string[]>(FALLBACK_DEPARTMENTS)
 
   useEffect(() => {
     let alive = true
     api.listUsers().then(r => { if (alive) setUsers(r.users.map(u => u.toUpperCase()).sort()) }).catch(() => { /* names stay empty */ })
-    if (project) rolesApi.get(project).then(r => { if (alive) setDepartments(r.departments) }).catch(() => { /* fallback list */ })
     return () => { alive = false }
-  }, [project])
+  }, [])
 
   const cur: PageAccess = value ?? {}
   const patch = (p: PageAccess) => onChange(cleanAccess({ ...cur, ...p }))
@@ -72,12 +66,11 @@ export function AccessPicker({ value, onChange, project }: { value: PageAccess |
       </div>
       {custom && <>
         <Chips title={tr('Roles', 'Roles')} options={ROLES} labels={ROLE_LABELS} value={cur.roles ?? []} onChange={v => patch({ roles: v })} />
-        <Chips title={tr('Departements', 'Departments')} options={departments} value={cur.departments ?? []} onChange={v => patch({ departments: v })} />
         <Chips title={tr('Personnes', 'People')} options={names} value={cur.users ?? []} onChange={v => patch({ users: v })} />
         <div className="tp-note" style={{ color: 'var(--ink-4)' }}>
           {isEveryone(value)
             ? tr('Rien de coche : la page reste pour tout le monde.', 'Nothing ticked: the page stays for everyone.')
-            : tr('Les autres la trouvent sous "Other tools".', 'The others find it under "Other tools".')}
+            : tr('Les autres ne la voient pas (sauf qui edite les pages, sous "Other tools").', 'The others do not see it (except page editors, under "Other tools").')}
         </div>
       </>}
     </div>

@@ -3,8 +3,8 @@
 // page), grouped by scope (team, project), search beyond 8 pages; the last page opened is
 // kept per artist (user data flux.tool.last). "Editer" (Team TD) opens /tool/:id/edit.
 // Everyone sees and uses the pages; the backend checks the rights again on every write.
-// ADR 0078: the pages meant for someone else (for_me false) sit under "Other tools", folded
-// by default (kept per artist, flux.tool.others_open): a filter of the rail, never a lock.
+// ADR 0085: a page meant for someone else is not listed, except to who may edit pages: it
+// sits under "Other tools" for them, folded by default (per artist, flux.tool.others_open).
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -71,7 +71,7 @@ function Rail({ pages, current, onPick }: { pages: PageListItem[]; current: stri
       ))}
       {others.length > 0 && (
         <div style={{ marginTop: 6, borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-          <div className="nav" onClick={toggleOthers} title={tr('Pages faites pour les autres personnes, roles ou departements', 'Pages meant for other people, roles or departments')}>
+          <div className="nav" onClick={toggleOthers} title={tr('Pages faites pour d’autres personnes ou roles (tu les vois car tu edites les pages)', 'Pages meant for other people or roles (shown because you edit pages)')}>
             {othersOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             <span className="cap" style={{ color: 'var(--ink-2)' }}>Other tools</span>
             <span className="tp-note" style={{ marginLeft: 'auto' }}>{others.length}</span>

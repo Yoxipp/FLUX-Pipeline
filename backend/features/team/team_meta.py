@@ -6,7 +6,7 @@
 # The messages themselves stay in the team chat (features/activity/chat_manager.py).
 #
 # Who sees a channel (2026-10-30): a channel may carry `access` (JSON text, the shape of
-# a TOOL page's access, ADR 0078: people, roles, departments). Empty = everyone; #general is
+# a TOOL page's access, ADR 0078: people, roles). Empty = everyone; #general is
 # always everyone; leads and supervisors see every channel (they manage them). This is what
 # FLUX shows and notifies, not secrecy: the chat file stays readable on the share.
 #
@@ -42,7 +42,7 @@ SPEC = DataSpec.model_validate({
         {"id": "topic", "type": "text"},         # channel description
         {"id": "call_link", "type": "str"},      # https link of the channel's call (Discord, Teams, Meet, Jitsi)
         {"id": "archived", "type": "bool"},
-        {"id": "access", "type": "text"},        # who sees the channel: JSON {users, roles, departments}
+        {"id": "access", "type": "text"},        # who sees the channel: JSON {users, roles}
         {"id": "type", "type": "select", "options": [{"value": t} for t in CHANNEL_TYPES]},  # channel: text | voice
         {"id": "group", "type": "str"},          # channel: rid of its group record
         {"id": "order", "type": "float"},        # channel / group: position, lower first
@@ -156,5 +156,4 @@ def hidden_channels(project: str, user: str, records: Optional[List[Dict[str, An
     if project_roles.can(project, "team_channels", user=user, roles=roles):
         return set()
     role = project_roles.role_of(project, user, roles)
-    departments = project_roles.departments_of(project, user, roles)
-    return {n for n, a in restricted.items() if not page_for(a, user, role, departments)}
+    return {n for n, a in restricted.items() if not page_for(a, user, role)}

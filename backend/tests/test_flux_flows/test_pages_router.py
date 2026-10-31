@@ -90,8 +90,8 @@ class PagesRouter(unittest.TestCase):
         self.assertEqual(listed["pages"], [])
         self.assertIsInstance(listed["templates"], list)
 
-    def test_access_sorts_pages_for_me(self) -> None:
-        # ADR 0078: a page for others is still listed (Other tools), with for_me false.
+    def test_access_hides_pages_from_others(self) -> None:
+        # ADR 0085: a page for others is listed only to who may edit pages (Other tools).
         self.boxes = {"flows_team_td": True}
         mine = dict(_page(), access={"users": ["adam"]})
         theirs = dict(_page("Anim"), id="anim_tools", access={"departments": ["ANIM"], "roles": ["lead"]})
@@ -99,30 +99,38 @@ class PagesRouter(unittest.TestCase):
         self.assertEqual(self.client.put("/flows/pages/anim_tools", json={"scope": "team", "page": theirs}).status_code, 200)
         listed = {p["id"]: p for p in self.client.get("/flows/pages").json()["pages"]}
         self.assertEqual((listed["daily_render"]["for_me"], listed["anim_tools"]["for_me"]), (True, False))
-        self.assertEqual(listed["anim_tools"]["access"], {"users": [], "roles": ["lead"], "departments": ["ANIM"]})
+        self.assertEqual(listed["anim_tools"]["access"], {"users": [], "roles": ["lead"]})   # departments dropped
+        self.assertEqual(self.client.get("/flows/pages/anim_tools").status_code, 200)
+        self.boxes = {}
+        listed = [p["id"] for p in self.client.get("/flows/pages").json()["pages"]]
+        self.assertEqual(listed, ["daily_render"])
+        self.assertEqual(self.client.get("/flows/pages/anim_tools").status_code, 404)
         got = self.client.get("/flows/pages/daily_render").json()
         self.assertEqual(got["page"]["access"], {"users": ["ADAM"]})
+        self.boxes = {"flows_team_td": True}
         bad = dict(_page(), access={"roles": ["boss"]})
         self.assertEqual(self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": bad}).status_code, 422)
 
-    def test_viewer_role_and_departments_match(self) -> None:
+    def test_viewer_role_match(self) -> None:
         from flux_flows import pages
-        access = pages.Access(roles=["lead"], departments=["ANIM"])
+        access = pages.Access(roles=["lead"])
         self.assertTrue(pages.page_for(None, None))
         self.assertTrue(pages.page_for(pages.Access(), "X"))
-        self.assertTrue(pages.page_for(access, "X", "lead", []))
-        self.assertTrue(pages.page_for(access, "X", "artist", ["anim"]))
-        self.assertFalse(pages.page_for(access, "X", "artist", ["RIG"]))
+        self.assertTrue(pages.page_for(pages.Access(departments=["ANIM"]), "X"))   # old file: everyone
+        self.assertTrue(pages.page_for(access, "X", "lead"))
+        self.assertFalse(pages.page_for(access, "X", "artist"))
         # A person picked before a rename keeps access under the new name (ADR 0079).
         with mock.patch("features.accounts.aliases.load_aliases", return_value={"ADAM": "ADAM_FR"}):
             self.assertTrue(pages.page_for(pages.Access(users=["ADAM"]), "ADAM_FR"))
             self.assertFalse(pages.page_for(pages.Access(users=["ADAM"]), "EVA"))
-        with mock.patch.object(flows_router, "_viewer", return_value=("artist", ["ANIM"])):
-            self.boxes = {"flows_team_td": True}
-            doc = dict(_page(), access={"departments": ["ANIM"]})
-            self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": doc})
+        self.boxes = {"flows_team_td": True}
+        self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": dict(_page(), access={"roles": ["lead"]})})
+        self.boxes = {}
+        with mock.patch.object(flows_router, "_viewer", return_value="lead"):
             listed = self.client.get("/flows/pages", params={"project": "P"}).json()["pages"]
             self.assertTrue(listed[0]["for_me"])
+        with mock.patch.object(flows_router, "_viewer", return_value="artist"):
+            self.assertEqual(self.client.get("/flows/pages", params={"project": "P"}).json()["pages"], [])
 
     def test_missing_page_is_404(self) -> None:
         self.assertEqual(self.client.get("/flows/pages/nothing_here").status_code, 404)

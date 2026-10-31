@@ -165,37 +165,18 @@ class ClaimTests(_Workspace):
         self.assertFalse(roles["legacy"])
 
 
-class DepartmentsTests(_Workspace):
-    # ADR 0078: departments target TOOL pages; own ones, or anyone's for a lead.
-    def setUp(self):
-        super().setUp()
-        pr.init_project_roles("PROJ", "ADAM")
-        pr.set_role("PROJ", "LEA", "lead", actor="ADAM")
-
-    def test_artist_sets_own_and_lead_sets_anyone(self):
-        pr.set_departments("PROJ", "EVA", ["anim", "RIG", "ANIM"], actor="EVA")
-        self.assertEqual(pr.departments_of("PROJ", "eva"), ["RIG", "ANIM"])
-        with self.assertRaises(pr.RoleError):
-            pr.set_departments("PROJ", "LEA", ["FX"], actor="EVA")
-        pr.set_departments("PROJ", "EVA", ["FX"], actor="LEA")
-        self.assertEqual(self.stored()["departments"], {"EVA": ["FX"]})
-        pr.set_departments("PROJ", "EVA", [], actor="LEA")
-        self.assertNotIn("EVA", self.stored()["departments"])
-
-    def test_unknown_department_and_roles_keep_departments(self):
-        with self.assertRaises(ValueError):
-            pr.set_departments("PROJ", "EVA", ["COOKING"], actor="ADAM")
-        pr.set_departments("PROJ", "EVA", ["MODELING"], actor="ADAM")
-        pr.set_role("PROJ", "EVA", "junior", actor="ADAM")
-        self.assertEqual(pr.departments_of("PROJ", "EVA"), ["MODELING"])
-        row = next(m for m in pr.summary("PROJ", ["EVA"])["members"] if m["name"] == "EVA")
-        self.assertEqual((row["departments"], row["can_set_departments"]), (["MODELING"], True))
-
-    def test_old_file_without_departments(self):
+class NoDepartmentsTests(_Workspace):
+    # ADR 0085 (2026-10-31): departments are gone; an old file's key is ignored, then
+    # dropped by the next role change.
+    def test_old_departments_ignored_then_dropped(self):
         path = self.root / "DOSSIER_PROJETS" / "PROJ" / "_flux_setup" / "roles.json"
-        path.write_text('{"members": {"EVA": "lead"}, "departments": {"eva": ["ANIM", "X"], "BOB": "RIG"}}', encoding="utf-8")
-        self.assertEqual(pr.read_roles("PROJ")["departments"], {"EVA": ["ANIM"]})
-        self.assertEqual(pr.departments_of("PROJ", None), [])
+        path.write_text('{"members": {"ADAM": "supervisor"}, "departments": {"EVA": ["ANIM"]}}', encoding="utf-8")
+        self.assertNotIn("departments", pr.read_roles("PROJ"))
+        summary = pr.summary("PROJ", ["EVA"])
+        self.assertNotIn("departments", summary)
+        self.assertNotIn("departments", summary["members"][0])
+        pr.set_role("PROJ", "EVA", "lead", actor="ADAM")
+        self.assertNotIn("departments", self.stored())
 
 
 class StudioConfigTests(_Workspace):
@@ -222,16 +203,14 @@ if __name__ == "__main__":
 
 class RenamedArtistTests(_Workspace):
     # ADR 0079: roles.json is read with current names, an old entry follows its alias.
-    def test_renamed_member_keeps_role_and_departments(self):
+    def test_renamed_member_keeps_role(self):
         from features.accounts import aliases
         pr.init_project_roles("PROJ", "ADAM")
-        pr.set_departments("PROJ", "ADAM", ["RIG"])
         aliases.record_rename("ADAM", "ADAM_FR")
         self.user = "ADAM_FR"
         roles = pr.read_roles("PROJ")
         self.assertEqual(roles["members"], {"ADAM_FR": "supervisor"})
         self.assertEqual(pr.role_of("PROJ", "ADAM_FR"), "supervisor")
-        self.assertEqual(pr.departments_of("PROJ", "ADAM_FR"), ["RIG"])
         self.assertIn("ADAM", self.stored()["members"])        # file untouched on read
         pr.set_role("PROJ", "EVA", "lead")
         self.assertEqual(set(self.stored()["members"]), {"ADAM_FR", "EVA"})   # next write saves new names

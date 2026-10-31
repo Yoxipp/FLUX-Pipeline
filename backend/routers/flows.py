@@ -382,23 +382,28 @@ def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
     return [i.to_dict() for i in found]
 
 
-def _viewer(user: Optional[str], project: Optional[str]) -> tuple[Optional[str], list[str]]:
-    """Role and departments of *user* on *project* (None, [] without a project)."""
+def _viewer(user: Optional[str], project: Optional[str]) -> Optional[str]:
+    """Role of *user* on *project* (None without a project)."""
     if not user or not project:
-        return None, []
+        return None
     from features.roles import project_roles
     from utils import project_utils
     if not project_utils.project_exists(project):
-        return None, []
-    roles = project_roles.read_roles(project)
-    return project_roles.role_of(project, user, roles), project_roles.departments_of(project, user, roles)
+        return None
+    return project_roles.role_of(project, user)
 
 
-def _mark_for_me(listed: list[dict[str, Any]], user: Optional[str], role: Optional[str], depts: list[str]) -> None:
-    # ADR 0078: "for_me" sorts the TOOL rail (Your tools / Other tools), it locks nothing.
+def _mark_for_me(listed: list[dict[str, Any]], user: Optional[str], role: Optional[str]) -> None:
     for entry in listed:
         access = entry.get("access")
-        entry["for_me"] = pages.page_for(pages.Access(**access) if access else None, user, role, depts)
+        entry["for_me"] = pages.page_for(pages.Access(**access) if access else None, user, role)
+
+
+def _sees(entry: dict[str, Any], current: dict[str, Any]) -> bool:
+    # ADR 0085: a page is shown to the people / roles ticked on it; who may edit pages of its
+    # scope sees it too (under "Other tools"), or nobody could fix its access. FLUX
+    # visibility, not secrecy: the page file stays readable on the share.
+    return entry["for_me"] or (entry["scope"] in pages.SCOPES and rights.allowed(current, rights.ADMIN, entry["scope"]))
 
 
 @router.get("/pages")
@@ -407,8 +412,9 @@ async def list_pages(project: Optional[str] = None) -> dict[str, Any]:
     current = await asyncio.to_thread(rights.current_rights)
     roots = _page_roots(project)
     listed = await _call(page_store.list_pages, roots)
-    role, depts = await asyncio.to_thread(_viewer, current["user"], project)
-    _mark_for_me(listed, current["user"], role, depts)
+    role = await asyncio.to_thread(_viewer, current["user"], project)
+    _mark_for_me(listed, current["user"], role)
+    listed = [e for e in listed if _sees(e, current)]
     templates = await _call(page_store.list_templates, roots)
     return {"pages": listed, "templates": templates,
             "can_edit": {scope: rights.allowed(current, rights.ADMIN, scope) for scope in pages.SCOPES}}
@@ -633,6 +639,11 @@ async def get_page(page_id: str, scope: Optional[str] = None, project: Optional[
         if scope is None:
             raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
     got = await _call(page_store.read_page, roots, scope, page_id)
+    if scope in pages.SCOPES and got["page"].access and not got["page"].access.is_everyone():
+        role = await asyncio.to_thread(_viewer, current["user"], project)
+        entry = {"scope": scope, "for_me": pages.page_for(got["page"].access, current["user"], role)}
+        if not _sees(entry, current):
+            raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
     issues = await asyncio.to_thread(_page_issues, got["page"], scope, current["user"], project)
     return {"id": page_id, "scope": scope, "rev": got["rev"], "page": pages.to_document(got["page"]),
             "issues": issues, "can_edit": scope in pages.SCOPES and rights.allowed(current, rights.ADMIN, scope)}
