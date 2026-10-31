@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // https links only (Team call links, ADR 0077), opened in the system browser.
   openExternal: (url: string): Promise<boolean> =>
     ipcRenderer.invoke('shell:openExternal', url),
+  // A Discord channel link opened in the Discord app when installed (Team voice, P5).
+  openDiscord: (url: string): Promise<'app' | 'web' | false> =>
+    ipcRenderer.invoke('shell:openDiscord', url),
 
   openPath: (filePath: string): Promise<void> =>
     ipcRenderer.invoke('shell:openPath', filePath),
