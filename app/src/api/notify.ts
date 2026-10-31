@@ -32,6 +32,15 @@ export interface NotifyProjectSettings {
   digest_minutes: number
   include_project: boolean
   include_text: boolean      // chat message / calendar title in the text (ADR 0072)
+  discord_sync: boolean      // live Team <-> Discord server bridge (ADR 0084)
+  discord_guild: string      // the project's Discord server id, '' = the only server the bot is on
+}
+
+export interface NotifyBridge {
+  at: string                 // last pass of the bridge on the host
+  error: string
+  guild: string              // server in use
+  guilds: string[]           // servers the bot is on
 }
 
 export interface NotifyBot {
@@ -46,6 +55,7 @@ export interface NotifyBot {
   invite_url?: string
   background?: boolean       // this PC keeps its bots online when FLUX is closed (ADR 0076)
   runs_in?: '' | 'app' | 'headless'
+  bridge?: NotifyBridge
 }
 
 export interface NotifyProject {

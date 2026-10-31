@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Archive, ChevronDown, ChevronRight, Eye, FolderPlus, Hash, Lock, MessageSquareReply, Paperclip, Phone, Pin, PinOff, Plus, Send, Video, Volume2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { setMyPresence, teamApi, type TeamAttachment, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
+import { setMyPresence, teamApi, type TeamAttachment, type TeamDiscord, type TeamEmoji, type TeamMessage, type TeamRecord } from '../../api/team'
 import { flowsApi } from '../../api/flows'
 import { PresenceDot } from '../../hooks/usePresence'
 import { PeoplePanel } from '../../components/shared/PeoplePanel'
@@ -60,6 +60,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const [records, setRecords] = useState<TeamRecord[]>([])
   const [lead, setLead] = useState(false)
   const [filesDir, setFilesDir] = useState('')
+  const [discord, setDiscord] = useState<TeamDiscord | null>(null)   // ADR 0084: Join link + who is in a voice channel
   const [me, setMe] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [channel, setChannel] = useState(() => { try { return localStorage.getItem(`flux.team.channel.${project}`) || GENERAL } catch { return GENERAL } })
@@ -95,6 +96,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
       setFilesDir(r.files_dir)
       if (!r.unchanged) setRecords(r.records)
     }).catch(() => undefined)
+    teamApi.discord(project).then(d => setDiscord(d.on ? d : null)).catch(() => setDiscord(null))
   }, [project, preview])
   useEffect(() => {
     etag.current = undefined
@@ -283,6 +285,9 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     setAccessEdit(null)
   }
   const join = (url: string) => { openLink(url); void setMyPresence('meeting') }
+  const discordKey = current === GENERAL ? GENERAL : chanRec?.rid ?? ''
+  const discordLink = discord?.links[discordKey] ?? ''
+  const voiceIn = discord?.voice[discordKey] ?? []
   const postCall = (label: string, url: string) => {
     if (!/^https:\/\/\S+$/.test(url)) { toast.error(tr('Colle un lien https://', 'Paste an https:// link')); return }
     setPaste(null); setCallMenu(false)
@@ -353,6 +358,8 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                         : accessOf(rec) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownName(n)}</span>
                       {voice && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
+                      {voice && rec && (discord?.voice[rec.rid]?.length ?? 0) > 0 &&
+                        <span className="tag" style={{ fontSize: 10 }} title={discord!.voice[rec.rid].join(', ')}>{discord!.voice[rec.rid].length}</span>}
                       {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
                       {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
                       {lead && n !== GENERAL && n === current && (
@@ -402,13 +409,18 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
           <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {chanRec?.type === 'voice' ? <Volume2 size={13} /> : '#'} {shownName(current)}</b>
-          {chanRec?.type === 'voice' && !chanRec.call_link && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
+          {chanRec?.type === 'voice' && voiceIn.length > 0 && <span className="tp-note" style={{ color: 'var(--ink-3)' }}>
+            {tr('En vocal : ', 'In voice: ')}{voiceIn.join(', ')}</span>}
+          {chanRec?.type === 'voice' && !chanRec.call_link && !discordLink && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
             {lead ? tr('Canal vocal sans lien : clic droit > Lien d’appel', 'Voice channel without a link: right click > Call link')
                   : tr('Canal vocal sans lien pour l’instant', 'Voice channel without a link yet')}</span>}
           {accessOf(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel(accessOf(chanRec)!)}><Lock size={9} /> {tr('restreint', 'restricted')}</span>}
           <span style={{ flex: 1 }} />
           {chanRec?.call_link && <button type="button" className="btn sm" onClick={() => join(chanRec.call_link!)}
                                          title={chanRec.call_link}><Phone size={12} /> {tr('Rejoindre l’appel', 'Join the call')}</button>}
+          {!chanRec?.call_link && discordLink && (chanRec?.type === 'voice'
+            ? <button type="button" className="btn sm" onClick={() => join(discordLink)} title={discordLink}><Volume2 size={12} /> {tr('Rejoindre sur Discord', 'Join on Discord')}</button>
+            : <button type="button" className="btn ghost sm" onClick={() => openLink(discordLink)} title={discordLink}>{tr('Ouvrir dans Discord', 'Open in Discord')}</button>)}
           <button type="button" className="btn ghost sm" onClick={() => setCallMenu(s => !s)} style={{ background: callMenu ? 'var(--paper-2)' : undefined }}>
             <Video size={12} /> {tr('Nouvelle reunion', 'New meeting')}</button>
         </div>

@@ -111,6 +111,8 @@ class ProjectPatch(BaseModel):
     digest_minutes: int | None = None
     include_project: bool | None = None
     include_text: bool | None = None
+    discord_sync: bool | None = None      # live Team <-> Discord bridge (ADR 0084)
+    discord_guild: str | None = None
 
 
 def _without_channel(cfg: dict) -> list[str]:
@@ -146,7 +148,17 @@ def _bot_status(project: str, cfg: dict) -> dict:
             "this_pc": discord_bot.host_name(),
             "candidates": [h for h in store.bot_candidates(project, now) if h != host_now],
             "invite_url": discord_bot.invite_url(info.get("app_id", "")),
+            "bridge": _bridge_status(project),
             **bot_host.status()}
+
+
+def _bridge_status(project: str) -> dict:
+    """Last pass of the Team <-> Discord bridge (ADR 0084), written by the bot host."""
+    from features.notify import discord_map
+    data = discord_map.load(project)
+    status = data.get("status") or {}
+    return {"at": str(status.get("at") or ""), "error": str(status.get("error") or ""),
+            "guild": data.get("guild") or "", "guilds": [str(g) for g in status.get("guilds") or []][:20]}
 
 
 class BotRequest(BaseModel):

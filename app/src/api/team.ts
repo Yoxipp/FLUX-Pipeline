@@ -25,6 +25,8 @@ export interface TeamRecord extends PageRecord {
 export type TeamMetaRead =
   | { etag: string; unchanged: true; lead: boolean; files_dir: string }
   | { etag: string; unchanged: false; records: TeamRecord[]; lead: boolean; files_dir: string }
+// Live Discord bridge (ADR 0084): keys are channel rids, or 'general'.
+export interface TeamDiscord { on: boolean; guild: string; links: Record<string, string>; voice: Record<string, string[]> }
 export type PresenceStatus = 'available' | 'away' | 'meeting' | 'dnd'
 export interface Presence { user: string; status: PresenceStatus | 'offline'; text: string; at: string; online: boolean }
 
@@ -42,6 +44,7 @@ export const teamApi = {
   // The backend copies the local file (bytes never go through the API, ADR 0005).
   attach: (project: string, path: string) => apiCall<TeamAttachment>('POST', `/team/${p(project)}/files`, { path }),
   fileUrl: (project: string, file: string) => `${BASE_URL}/team/${p(project)}/files/${encodeURIComponent(file)}`,
+  discord: (project: string) => apiCall<TeamDiscord>('GET', `/team/${p(project)}/discord`),
   presence: () => apiCall<{ people: Presence[] }>('GET', '/team/presence'),
   setPresence: (status: PresenceStatus, text = '') => apiCall<{ status: string }>('POST', '/team/presence', { status, text }),
 }
