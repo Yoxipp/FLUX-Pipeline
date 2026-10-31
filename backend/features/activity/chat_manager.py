@@ -68,6 +68,7 @@ def post_message(
     user: str, message: str, project: str | None = None, path: Path | None = None, *,
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
     notify_all: bool = False, audience=None, via: str | None = None, discord: str | None = None,
+    at: datetime | None = None,
 ) -> str | None:
     """Append a chat message to the team chat of *project*. Returns its id, None on failure.
 
@@ -81,8 +82,10 @@ def post_message(
     mentioned or notified (a channel restricted to some artists); None = everyone.
     *via* (ADR 0081): the artist whose team command made FLUX write this message.
     *discord* (ADR 0084): id of the Discord message this one copies (the bridge never sends it back).
+    *at*: when it was written (Discord history copied by the bridge): kept as is, and an old
+    message never notifies or records a mention.
     """
-    date, time = _now()
+    date, time = (at.strftime("%Y-%m-%d"), at.strftime("%H:%M")) if at else _now()
     msg_id = _make_id(user)
     text = message.strip()
     entry = {
@@ -110,6 +113,8 @@ def post_message(
         log.error("Failed to write team chat at %s", chat_path)
         return None
 
+    if at:
+        return msg_id
     # Record mentions (best-effort — never fail the send if this part errors).
     try:
         _record_mentions(
