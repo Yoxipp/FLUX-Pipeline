@@ -15,6 +15,7 @@ export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {
   kind?: 'channel' | 'group' | 'reaction' | 'pin'
   name?: string; topic?: string; call_link?: string; archived?: boolean
+  title?: string | null   // channel: name shown when the key has a suffix (lighting-2 shows lighting)
   access?: string | null   // who sees the channel: JSON {users, roles}, empty = everyone
   type?: 'text' | 'voice' | null   // channel: a voice channel's call link is its Join button (ADR 0084)
   group?: string | null            // channel: rid of its group (a Discord category)

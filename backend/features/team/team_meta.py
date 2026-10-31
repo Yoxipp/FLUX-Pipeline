@@ -14,6 +14,11 @@
 # label, like a Discord category); a channel carries `group` (the group's rid, so a rename
 # keeps it), `type` text | voice (a voice channel's call link is its Join button) and
 # `order` (a float, a drop between two channels takes the middle). Works without Discord.
+#
+# Archive (2026-10-31): an archived channel comes back only from the project's archives
+# (Projects > Archived). A new channel with the name of an archived one starts empty: its
+# key (`name`, what the messages carry) gets a suffix (lighting-2) and `title` keeps the
+# name shown. Two live channels never show the same name.
 
 from __future__ import annotations
 
@@ -38,7 +43,8 @@ SPEC = DataSpec.model_validate({
     "fields": [
         {"id": "kind", "type": "select", "required": True,
          "options": [{"value": "channel"}, {"value": "group"}, {"value": "reaction"}, {"value": "pin"}]},
-        {"id": "name", "type": "str"},           # channel slug, group label
+        {"id": "name", "type": "str"},           # channel key (messages carry it), group label
+        {"id": "title", "type": "str"},          # channel: name shown when the key has a suffix
         {"id": "topic", "type": "text"},         # channel description
         {"id": "call_link", "type": "str"},      # https link of the channel's call (Discord, Teams, Meet, Jitsi)
         {"id": "archived", "type": "bool"},
@@ -86,6 +92,18 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
                 raise FlowStoreError("canal : minuscules, chiffres, - ou _ (32 max)", 422)
             if any(r.get("kind") == "channel" and r.get("name") == name for r in records.values()):
                 raise FlowStoreError(f"le canal #{name} existe deja", 409)
+        if kind == "channel" and fields.get("title") not in (None, ""):
+            if not isinstance(fields["title"], str) or not CHANNEL_RE.match(fields["title"]):
+                raise FlowStoreError("canal : minuscules, chiffres, - ou _ (32 max)", 422)
+        if kind == "channel" and (op.get("rid") is None or fields.get("archived") is None and "archived" in fields
+                                  or "title" in fields):
+            merged = {**current, **fields}
+            if not merged.get("archived"):
+                shown = shown_name(merged)
+                rid = str(op.get("rid") or "")
+                if any(r.get("kind") == "channel" and not r.get("archived") and r["rid"] != rid
+                       and shown_name(r) == shown for r in records.values()):
+                    raise FlowStoreError(f"un canal #{shown} est deja actif : archive-le avant", 409)
         if fields.get("group") not in (None, ""):
             target = records.get(str(fields["group"]))
             if kind != "channel" or not target or target.get("kind") != "group":
@@ -101,6 +119,11 @@ def _check_op(op: Dict[str, Any], records: Dict[str, Dict[str, Any]]) -> str:
         if kind in ("reaction", "pin") and op.get("rid") is None and not fields.get("target"):
             raise FlowStoreError(f"{kind} : message cible manquant", 422)
     return str(kind or "")
+
+
+def shown_name(record: Dict[str, Any]) -> str:
+    """Name a channel shows: its title, else its key."""
+    return str(record.get("title") or record.get("name") or "")
 
 
 def write(project: str, ops: List[Dict[str, Any]], *, user: str, is_lead: bool) -> Dict[str, Any]:

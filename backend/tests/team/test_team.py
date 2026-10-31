@@ -53,6 +53,25 @@ class TeamMeta(unittest.TestCase):
         rec = team_meta.read("ALPHA")["records"][0]
         self.assertEqual((rec["name"], rec["archived"]), ("lighting", True))
 
+    def test_recreated_channel_starts_empty(self) -> None:
+        # 2026-10-31: an archived channel comes back only from the archives; a new one
+        # with its name gets a new key and shows the same name.
+        old = self._w([{"op": "put", "fields": {"kind": "channel", "name": "lighting"}}], lead=True)["rids"][0]
+        self._w([{"op": "put", "rid": old, "fields": {"archived": True}}], lead=True)
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "fields": {"kind": "channel", "name": "lighting"}}], lead=True)
+        new = self._w([{"op": "put", "fields": {"kind": "channel", "name": "lighting-2", "title": "lighting"}}], lead=True)["rids"][0]
+        with self.assertRaises(FlowStoreError) as busy:
+            self._w([{"op": "put", "rid": old, "fields": {"archived": None}}], lead=True)
+        self.assertEqual(busy.exception.status, 409)
+        with self.assertRaises(FlowStoreError):
+            self._w([{"op": "put", "fields": {"kind": "channel", "name": "lighting-3", "title": "lighting"}}], lead=True)
+        self._w([{"op": "put", "rid": new, "fields": {"archived": True}}], lead=True)
+        self._w([{"op": "put", "rid": old, "fields": {"archived": None}}], lead=True)
+        recs = {r["rid"]: r for r in team_meta.read("ALPHA")["records"]}
+        self.assertEqual(team_meta.shown_name(recs[new]), "lighting")
+        self.assertFalse(recs[old].get("archived"))
+
     def test_groups_voice_channels_and_order(self) -> None:
         # P4 lot 1 (ADR 0084): groups like Discord categories, voice channels, order.
         with self.assertRaises(FlowStoreError) as no:

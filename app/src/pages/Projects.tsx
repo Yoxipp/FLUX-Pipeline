@@ -19,6 +19,7 @@ import { useSessionState } from '../hooks/useSessionState'
 import { useTr } from '../i18n'
 import { FileSvg, FolderSvg, getExt } from './folder_manager/icons'
 import { ExplorerPane } from './folder_manager/ExplorerPane'
+import { TeamArchive } from './tool_pages/TeamArchive'
 import type { PaneHandle } from './folder_manager/ExplorerPane'
 import {
   FolderManagerContext, PANE_COUNT, itemKey, makeSavedItem, navigateTargetFor, resolveOpenPath, savedKey, trNow, uniqueName,
@@ -500,6 +501,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
+        {cur.sub.length === 1 && <TeamArchive project={cur.project} />}
         {loading ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Chargement…', 'Loading…')}</div>
         ) : err ? (

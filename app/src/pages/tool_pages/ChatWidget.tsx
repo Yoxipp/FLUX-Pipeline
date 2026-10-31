@@ -122,8 +122,9 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     const inGroup = (gid: string) => active.filter(r => (r.group && live.has(r.group) ? r.group : '') === gid).map(r => r.name!)
     const sections = [{ group: undefined as TeamRecord | undefined, names: [GENERAL, ...inGroup('')] },
                       ...groups.map(g => ({ group: g as TeamRecord | undefined, names: inGroup(g.rid) }))]
-    return { names: sections.flatMap(s => s.names), sections, byName, archived: recs.filter(r => r.archived && r.name !== GENERAL) }
+    return { names: sections.flatMap(s => s.names), sections, byName }
   }, [records])
+  const shownName = (key: string) => channels.byName.get(key)?.title || key
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem(`flux.team.collapsed.${project}`) || '[]')) } catch { return new Set() }
   })
@@ -203,11 +204,15 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
   const createChannel = ({ name, type, group }: { name: string; type: 'text' | 'voice'; group: string }) => {
     const n = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+/, '').slice(0, 32)
     if (!n) return
-    const old = channels.archived.find(r => r.name === n)
+    // An archived channel never comes back here (Projects > Archived): the same name starts
+    // empty under a new key (lighting-2) that shows "lighting" (2026-10-31).
+    if (channels.names.some(k => shownName(k) === n)) { toast.error(tr(`#${n} existe deja`, `#${n} already exists`)); return }
+    let key = n
+    for (let i = 2; channels.byName.has(key) || key === GENERAL; i++) key = `${n.slice(0, 32 - String(i).length - 1)}-${i}`
     const place = { type: type === 'voice' ? 'voice' : null, group: group || null, order: channels.names.length + 1 }
-    void meta(old ? [{ op: 'put', rid: old.rid, fields: { archived: null, ...place } }] : [{ op: 'put', fields: { kind: 'channel', name: n, ...place } }])
+    void meta([{ op: 'put', fields: { kind: 'channel', name: key, ...(key !== n ? { title: n } : {}), ...place } }])
     setNewChannel(null)
-    setChannel(n)
+    setChannel(key)
   }
   const saveGroup = ({ rid, name }: { rid?: string; name: string }) => {
     const label = name.trim()
@@ -329,12 +334,12 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                                   background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400 }}>
                       {voice ? <Volume2 size={12} style={{ opacity: 0.6 }} />
                         : accessOf(rec) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{n}</span>
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownName(n)}</span>
                       {voice && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
                       {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
                       {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
                       {lead && n !== GENERAL && n === current && (
-                        <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); setAskArchive({ label: `#${n}`, run: () => { void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) } }) }}
+                        <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); setAskArchive({ label: `#${shownName(n)}`, run: () => { void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) } }) }}
                                 style={iconBtn}><Archive size={11} /></button>
                       )}
                     </div>
@@ -374,7 +379,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
            onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)' }}>
           <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            {chanRec?.type === 'voice' ? <Volume2 size={13} /> : '#'} {current}</b>
+            {chanRec?.type === 'voice' ? <Volume2 size={13} /> : '#'} {shownName(current)}</b>
           {chanRec?.type === 'voice' && !chanRec.call_link && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
             {lead ? tr('Canal vocal sans lien : clic droit > Lien d’appel', 'Voice channel without a link: right click > Call link')
                   : tr('Canal vocal sans lien pour l’instant', 'Voice channel without a link yet')}</span>}
@@ -441,7 +446,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                      lead={lead} project={project} filesDir={filesDir} onReact={react} onReply={() => setThread(m.id)} onPin={() => togglePin(m.id)} />
           ))}
         </div>
-        <Composer users={users} project={project} placeholder={tr(`Message dans #${current} (@nom previent l’artiste)`, `Message in #${current} (@name notifies)`)}
+        <Composer users={users} project={project} placeholder={tr(`Message dans #${shownName(current)} (@nom previent l’artiste)`, `Message in #${shownName(current)} (@name notifies)`)}
                   commands={commands} onCommand={text => runCommand(text)}
                   onSend={(message, attachments) => send({ message, attachments })} />
       </div>
@@ -460,7 +465,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                     onClick={() => { const g = menu.group!; setAskArchive({ label: tr(`le groupe ${g.name}`, `the group ${g.name}`), note: tr('Ses canaux restent, sans groupe.', 'Its channels stay, without a group.'), run: () => void meta([{ op: 'put', rid: g.rid, fields: { archived: true } }]) }); setMenu(null) }}>
               <Archive size={12} /> {tr('Archiver le groupe', 'Archive the group')}</button>
           </> : <>
-          <div className="cap" style={{ padding: '3px 8px' }}># {menu.name}</div>
+          <div className="cap" style={{ padding: '3px 8px' }}># {shownName(menu.name)}</div>
           <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
                   onClick={() => { const r = channels.byName.get(menu.name)!; void meta([{ op: 'put', rid: r.rid, fields: { type: r.type === 'voice' ? null : 'voice' } }]); setMenu(null) }}>
             {channels.byName.get(menu.name)?.type === 'voice'
@@ -473,7 +478,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                   onClick={() => { setChannel(menu.name); setThread(null); setLinkEdit(channels.byName.get(menu.name)?.call_link ?? ''); setMenu(null) }}>
             <Phone size={12} /> {tr('Lien d’appel du canal...', 'Channel call link...')}</button>
           <button type="button" className="btn ghost sm" style={{ justifyContent: 'flex-start' }}
-                  onClick={() => { const name = menu.name, rid = channels.byName.get(name)!.rid; setAskArchive({ label: `#${name}`, run: () => { void meta([{ op: 'put', rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } }); setMenu(null) }}>
+                  onClick={() => { const name = menu.name, rid = channels.byName.get(name)!.rid; setAskArchive({ label: `#${shownName(name)}`, note: tr('Les messages restent. Il revient depuis Projets > Archives du projet ; un nouveau canal du meme nom part vierge.', 'Messages stay. It comes back from Projects > Archived; a new channel with the same name starts empty.'), run: () => { void meta([{ op: 'put', rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } }); setMenu(null) }}>
             <Archive size={12} /> {tr('Archiver', 'Archive')}</button>
           </>}
         </div>
@@ -486,7 +491,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                style={{ width: 320, padding: 14, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8, boxShadow: '0 4px 16px oklch(0% 0 0 / 0.25)' }}>
             <b style={{ fontSize: 13 }}>{tr(`Archiver ${askArchive.label} ?`, `Archive ${askArchive.label}?`)}</b>
             <div className="tp-note" style={{ color: 'var(--ink-3)', margin: '6px 0 12px' }}>
-              {askArchive.note ?? tr('Les messages restent. Recreer un canal du meme nom le fait revenir.', 'Messages stay. Creating a channel with the same name brings it back.')}</div>
+              {askArchive.note ?? tr('Les messages restent. Il revient depuis Projets > Archives du projet ; un nouveau canal du meme nom part vierge.', 'Messages stay. It comes back from Projects > Archived; a new channel with the same name starts empty.')}</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
               <button type="button" className="btn ghost sm" autoFocus onClick={() => setAskArchive(null)}>{tr('Annuler', 'Cancel')}</button>
               <button type="button" className="btn sm" onClick={() => { askArchive.run(); setAskArchive(null) }}><Archive size={12} /> {tr('Archiver', 'Archive')}</button>
