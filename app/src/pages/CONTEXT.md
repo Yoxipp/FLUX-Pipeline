@@ -283,8 +283,8 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
   PIPELINE sous Activite (`Sidebar.tsx`, 2026-10-30) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
   Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.
-  ADR 0078 : les pages `for_me: false` (cle `access` de la page) vont sous "Other tools" repliable (`flux.tool.others_open`),
-  les autres sous "Tes tools" ; filtre seulement. `PageAccess.tsx` : choix tout le monde / roles / departements / personnes,
+  ADR 0078 / 0085 : une page restreinte (cle `access`) n'est listee qu'aux personnes / roles coches ; un Team TD voit les
+  autres sous "Other tools" repliable (`flux.tool.others_open`). `PageAccess.tsx` : choix tout le monde / roles / personnes,
   au dialogue de creation et dans les proprietes de la page.
 * `PageBuilder.tsx` (route `/tool/:id/edit?scope=`, `new` = dialogue de creation : libelle, id propose, portee, depart
   vide / modele `shipped/pages/` / copie d'une page) : 4 colonnes Palette (Formulaire, Decor, Donnees ; un widget de
