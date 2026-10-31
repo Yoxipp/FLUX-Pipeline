@@ -16,6 +16,7 @@ import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { useWorkProfile } from '../../WorkProfileContext'
 import { useProject } from '../../ProjectContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
+import { openWelcome } from '../../components/shared/WelcomeDialog'
 import { BridgesInstall } from './BridgesInstall'
 import { NotifyUser } from './NotifySettings'
 import { FLOW_RIGHTS_EVENT } from '../../api/flows'
@@ -91,6 +92,7 @@ export function UserSettings({ username }: { username: string }) {
 
       <SecTitle>{t('settings.user')}</SecTitle>
       <OwnAccount username={username} />
+      {project && <div><Btn sm ghost onClick={openWelcome}>Revoir l'accueil (nom, profil, Discord)</Btn></div>}
 
       <SecTitle>Profil de travail</SecTitle>
       <div className="card" style={{ ...card, flexDirection: 'row', alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0}

@@ -5,6 +5,7 @@ import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkPr
 import { notificationReason, REASON_LABEL } from './lib/activityNotify'
 import { useProject } from './ProjectContext'
 import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
+import { WelcomeDialog } from './components/shared/WelcomeDialog'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
@@ -191,6 +192,7 @@ function AppShell({ settings }: { settings: Settings }) {
         {!DETACHED && <MentionWatcher />}
         {!DETACHED && <FavoriteWatcher />}
         <WorkProfileDialog />
+        {!DETACHED && <WelcomeDialog />}
       </div>
       <Toaster
         position="top-center"
