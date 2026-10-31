@@ -5,6 +5,7 @@
 #   GET  /team/{project}/files/{name}    show / download an attachment
 #   GET  /team/presence                  everyone's presence; POST: this artist's own file
 #   GET  /team/{project}/discord         live Discord bridge (ADR 0084): link + voice members per channel
+#   GET  /team/{project}/mutes           this artist's muted channels / groups; PUT: replace them (P5)
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core import config
-from features.team import files, presence, team_meta
+from features.team import files, mutes, presence, team_meta
 from flux_flows.store import FlowStoreError
 
 router = APIRouter()
@@ -104,6 +105,26 @@ async def get_meta(project: str, etag: Optional[str] = None) -> dict[str, Any]:
             result = {**result, "records": [r for r in result["records"]
                                             if not (r.get("kind") == "channel" and r.get("name") in hidden)]}
     return {**result, "lead": lead, "files_dir": str(files.files_dir(project))}
+
+
+class MutesBody(BaseModel):
+    channels: list[str] = Field(default_factory=list, max_length=mutes.MAX_ITEMS)
+    groups: list[str] = Field(default_factory=list, max_length=mutes.MAX_ITEMS)
+
+
+@router.get("/{project}/mutes")
+async def get_mutes(project: str) -> dict[str, Any]:
+    _project_ok(project)
+    return await asyncio.to_thread(mutes.read, config.get_current_user() or "", project)
+
+
+@router.put("/{project}/mutes")
+async def put_mutes(project: str, body: MutesBody) -> dict[str, Any]:
+    _project_ok(project)
+    try:
+        return await asyncio.to_thread(mutes.write, config.get_current_user() or "", project, body.channels, body.groups)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 class MetaBody(BaseModel):

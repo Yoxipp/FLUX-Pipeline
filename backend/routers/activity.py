@@ -286,7 +286,12 @@ async def post_chat(req: ChatMessage) -> dict:
     except RuntimeError:
         raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
     loop = asyncio.get_running_loop()
-    audience = None
+    audience = quiet = None
+    if req.notify_all:
+        # Muted channel / group (Team, P5): no phone for that artist, an @mention still rings.
+        from features.team import mutes, team_meta as tm
+        all_records = await loop.run_in_executor(None, lambda: tm.read(req.project)["records"])
+        quiet = lambda who: mutes.is_muted(who, req.project, req.channel, all_records)  # noqa: E731
     if req.channel:
         # A restricted channel: only the artists who see it may post, be @mentioned or notified.
         from features.team import team_meta
@@ -302,7 +307,7 @@ async def post_chat(req: ChatMessage) -> dict:
     ok = await loop.run_in_executor(
         None, lambda: send_message(user, req.message, project=req.project, channel=req.channel, reply_to=req.reply_to,
                                    attachments=[a.model_dump() for a in req.attachments], notify_all=req.notify_all,
-                                   audience=audience),
+                                   audience=audience, quiet=quiet),
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")

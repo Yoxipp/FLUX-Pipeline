@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 import core.json_manager as jm
 from features.activity import chat_manager as cm
-from features.team import files, presence, team_meta
+from features.team import files, mutes, presence, team_meta
 from flux_flows.store import FlowStoreError
 from routers import team as team_router
 
@@ -258,6 +258,31 @@ class ChatFields(unittest.TestCase):
         self.assertEqual(mention[0][1], ["BOB"])
         call = [n for n in self.notified if n[4] == "appel"]
         self.assertEqual(call[0][1], ["BOB"])
+
+    def test_muted_artist_gets_no_call_but_still_mentions(self) -> None:
+        # P5: a muted channel does not ring the phone for "Prevenir l'equipe"; @name still does.
+        quiet = {"BOB"}.__contains__
+        cm.send_message("ADAM", "@BOB appel", project="ALPHA", channel="rig", notify_all=True, quiet=quiet)
+        call = [n for n in self.notified if n[4] == "appel"]
+        self.assertEqual(call[0][1], ["CLEO"])
+        mention = [n for n in self.notified if n[4] != "appel"]
+        self.assertEqual(mention[0][1], ["BOB"])
+
+    def test_mutes_file_per_artist(self) -> None:
+        users = self.tmp / "USER"
+        (users / "BOB").mkdir(parents=True)
+        recs = [{"rid": "c1", "kind": "channel", "name": "lighting", "group": "g1"},
+                {"rid": "c2", "kind": "channel", "name": "comp"}]
+        self.assertFalse(mutes.is_muted("BOB", "ALPHA", "lighting", recs, root=users))
+        mutes.write("BOB", "ALPHA", ["comp"], ["g1"], root=users)
+        self.assertTrue(mutes.is_muted("BOB", "ALPHA", "lighting", recs, root=users))   # its group
+        self.assertTrue(mutes.is_muted("BOB", "ALPHA", "comp", recs, root=users))
+        self.assertFalse(mutes.is_muted("BOB", "ALPHA", None, recs, root=users))
+        self.assertFalse(mutes.is_muted("BOB", "BETA", "comp", recs, root=users))
+        mutes.write("BOB", "ALPHA", [], [], root=users)
+        self.assertEqual(mutes.read("BOB", "ALPHA", root=users), {"channels": [], "groups": []})
+        with self.assertRaises(FileNotFoundError):
+            mutes.write("NOBODY", "ALPHA", ["x"], [], root=users)
 
 
 class Routes(unittest.TestCase):

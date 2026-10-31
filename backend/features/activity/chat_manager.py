@@ -56,19 +56,19 @@ def resolve_chat_path(project: str | None) -> Path:
 def send_message(
     user: str, message: str, project: str | None = None, path: Path | None = None, *,
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
-    notify_all: bool = False, audience=None,
+    notify_all: bool = False, audience=None, quiet=None,
 ) -> bool:
     """Append a chat message to the team chat of *project*. Returns True on success
     (post_message gives the id of the message)."""
     return post_message(user, message, project, path, channel=channel, reply_to=reply_to,
-                        attachments=attachments, notify_all=notify_all, audience=audience) is not None
+                        attachments=attachments, notify_all=notify_all, audience=audience, quiet=quiet) is not None
 
 
 def post_message(
     user: str, message: str, project: str | None = None, path: Path | None = None, *,
     channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
     notify_all: bool = False, audience=None, via: str | None = None, discord: str | None = None,
-    at: datetime | None = None,
+    at: datetime | None = None, quiet=None,
 ) -> str | None:
     """Append a chat message to the team chat of *project*. Returns its id, None on failure.
 
@@ -125,16 +125,18 @@ def post_message(
         log.warning("Failed to record chat mentions: %s", exc)
     if notify_all:
         try:
-            _notify_everyone(user, text, project, audience)
+            _notify_everyone(user, text, project, audience, quiet)
         except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
             log.warning("Notify everyone skipped: %s", exc)
     return msg_id
 
 
-def _notify_everyone(user: str, text: str, project: str | None, audience=None) -> None:
-    """Phone notification to every artist but the author (a call posted in the chat)."""
+def _notify_everyone(user: str, text: str, project: str | None, audience=None, quiet=None) -> None:
+    """Phone notification to every artist but the author (a call posted in the chat).
+    *quiet(user)* True: that artist muted the channel (Team, P5), no phone for them."""
     table = load_aliases()
-    targets = [u for u in get_user_list() if not same_user(u, user, table) and (audience is None or audience(u))]
+    targets = [u for u in get_user_list() if not same_user(u, user, table) and (audience is None or audience(u))
+               and not (quiet is not None and quiet(u))]
     if targets and project:
         from features.notify import hooks as notify_hooks
         notify_hooks.on_mentions(user, targets, project, "mention", "appel", "chat", text)
