@@ -135,6 +135,20 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     return next
   })
   const [drag, setDrag] = useState<{ kind: 'channel' | 'group'; name: string } | null>(null)
+  const [over, setOver] = useState<string | null>(null)   // drop target shown while dragging: channel key, g:<rid>, end:<rid>
+  const startDrag = (e: DragEvent, kind: 'channel' | 'group', name: string) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', name)
+    setDrag({ kind, name })
+  }
+  const endDrag = () => { setDrag(null); setOver(null) }
+  const dragOver = (e: DragEvent, target: string, ok: boolean) => {
+    if (!drag || !ok) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (over !== target) setOver(target)
+  }
+  const dropLine = (target: string) => drag && over === target ? { boxShadow: 'inset 0 2px 0 var(--accent)' } : {}
   const current = channels.names.includes(channel) ? channel : GENERAL
   useEffect(() => {
     if (!project || preview) { setCommands([]); return }
@@ -254,7 +268,7 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
     e.preventDefault(); e.stopPropagation()
     if (drag.kind === 'channel') moveChannel(drag.name, group, before?.channel)
     else if (before?.group) moveGroup(drag.name, before.group)
-    setDrag(null)
+    endDrag()
   }
   const saveLink = (url: string) => {
     const link = url.trim() || null
@@ -304,12 +318,13 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
             return (
               <div key={gid || '_'}>
                 {group && (
-                  <div draggable={lead} onDragStart={() => setDrag({ kind: 'group', name: gid })} onDragEnd={() => setDrag(null)}
-                       onDragOver={e => { if (drag) e.preventDefault() }}
+                  <div draggable={lead} onDragStart={e => startDrag(e, 'group', gid)} onDragEnd={endDrag}
+                       onDragOver={e => dragOver(e, `g:${gid}`, true)}
                        onDrop={e => onDrop(e, gid, { group: gid })}
                        onClick={() => toggleGroup(gid)}
                        onContextMenu={e => { if (!lead) return; e.preventDefault(); setMenu({ name: '', group, x: e.clientX, y: e.clientY }) }}
-                       className="cap" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '8px 6px 2px', cursor: 'pointer', userSelect: 'none' }}>
+                       className="cap" style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '8px 6px 2px', cursor: lead ? 'grab' : 'pointer', userSelect: 'none',
+                                                ...(drag?.kind === 'group' ? dropLine(`g:${gid}`) : drag && over === `g:${gid}` ? { background: 'var(--accent-soft)' } : {}) }}>
                     {shut ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
                     {lead && <button type="button" title={tr('Canal dans ce groupe', 'Channel in this group')} style={iconBtn}
@@ -326,12 +341,14 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                   const voice = rec?.type === 'voice'
                   return (
                     <div key={n} onClick={() => { setChannel(n); setThread(null) }}
-                         draggable={lead && n !== GENERAL} onDragStart={() => setDrag({ kind: 'channel', name: n })} onDragEnd={() => setDrag(null)}
-                         onDragOver={e => { if (drag && n !== GENERAL) e.preventDefault() }}
-                         onDrop={e => onDrop(e, gid, { channel: n })}
+                         draggable={lead && n !== GENERAL} onDragStart={e => startDrag(e, 'channel', n)} onDragEnd={endDrag}
+                         onDragOver={e => dragOver(e, n, drag?.kind === 'channel')}
+                         onDrop={e => onDrop(e, gid, n === GENERAL ? { channel: names[1] } : { channel: n })}
                          onContextMenu={e => { if (!lead || n === GENERAL) return; e.preventDefault(); setMenu({ name: n, x: e.clientX, y: e.clientY }) }}
-                         style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12.5,
-                                  background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400 }}>
+                         style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', cursor: lead && n !== GENERAL ? 'grab' : 'pointer', fontSize: 12.5,
+                                  background: n === current ? 'var(--paper)' : undefined, fontWeight: n === current || unread[n] ? 600 : 400,
+                                  opacity: drag?.kind === 'channel' && drag.name === n ? 0.4 : 1,
+                                  ...(n === GENERAL ? (drag && over === n ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) : dropLine(n)) }}>
                       {voice ? <Volume2 size={12} style={{ opacity: 0.6 }} />
                         : accessOf(rec) ? <Lock size={11} style={{ opacity: 0.6 }} /> : <Hash size={12} style={{ opacity: 0.6 }} />}
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownName(n)}</span>
@@ -345,6 +362,11 @@ export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProp
                     </div>
                   )
                 })}
+                {drag?.kind === 'channel' && (
+                  // end of the section: a channel dropped here goes last in this group
+                  <div onDragOver={e => dragOver(e, `end:${gid}:last`, true)} onDrop={e => onDrop(e, gid)}
+                       style={{ height: 8, margin: '0 6px', ...dropLine(`end:${gid}:last`) }} />
+                )}
                 {newChannel && newChannel.group === gid && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2, margin: '2px 6px' }}>
                     <button type="button" style={iconBtn} title={newChannel.type === 'voice' ? tr('Canal vocal (clic : texte)', 'Voice channel (click: text)') : tr('Canal texte (clic : vocal)', 'Text channel (click: voice)')}
