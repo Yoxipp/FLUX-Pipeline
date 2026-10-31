@@ -29,6 +29,7 @@ const REFRESH_MS = 4000
 const EMOJI: Record<TeamEmoji, string> = { like: '\u{1F44D}', love: '❤️', laugh: '\u{1F602}', question: '❓', check: '✅' }
 const URL_RE = /(https?:\/\/[^\s<>"]+)/g
 const COMMAND_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(\s|$)/
+const VIDEO_RE = /\.(mp4|m4v|webm|mov)$/i     // played inline (Chromium: .mov only when H.264 / AAC)
 const fail = (err: unknown) => toast.error((err as Error).message)
 
 export function openLink(url: string) {
@@ -860,6 +861,13 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
           {m.attachments.map(a => a.image
             ? <img key={a.file} src={teamApi.fileUrl(project, a.file)} alt={a.name} title={a.name} onClick={() => open(a)} loading="lazy"
                    style={{ maxWidth: 220, maxHeight: 160, borderRadius: 6, border: '1px solid var(--rule)', cursor: 'pointer' }} />
+            : VIDEO_RE.test(a.file)
+            ? <span key={a.file} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* Seeking relies on HTTP Range: the backend FileResponse (Starlette) answers it. */}
+                <video src={teamApi.fileUrl(project, a.file)} controls preload="metadata" title={a.name}
+                       style={{ maxWidth: 320, maxHeight: 240, borderRadius: 6, border: '1px solid var(--rule)', background: '#000' }} />
+                <button type="button" className="btn ghost sm" onClick={() => open(a)}><Paperclip size={11} /> {a.name} ({sizeTxt(a.size)})</button>
+              </span>
             : <button key={a.file} type="button" className="btn ghost sm" onClick={() => open(a)}><Paperclip size={11} /> {a.name} ({sizeTxt(a.size)})</button>)}
         </div>
       )}
