@@ -44,7 +44,8 @@ CHAT_MAX = 20
 LIST_MAX = 10
 NOT_LINKED = "Ce compte Discord n'est pas lie a FLUX : tape /link."
 BRIDGE_EVENTS = {"READY", "GUILD_CREATE", "MESSAGE_CREATE", "VOICE_STATE_UPDATE", "CHANNEL_CREATE",
-                 "CHANNEL_UPDATE", "CHANNEL_DELETE", "GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE"}
+                 "CHANNEL_UPDATE", "CHANNEL_DELETE", "GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE",
+                 "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK", "THREAD_CREATE"}
 
 COMMANDS = [
     {"name": "link", "type": 1, "description": "Lier ton compte Discord a ton compte FLUX (code a coller dans FLUX)",
@@ -521,6 +522,12 @@ class BotRunner:
                 await asyncio.to_thread(bridge.on_message, data)
             elif kind == "VOICE_STATE_UPDATE":
                 await asyncio.to_thread(bridge.on_voice, data)
+            elif kind == "MESSAGE_UPDATE":
+                await asyncio.to_thread(bridge.on_update, data)
+            elif kind in ("MESSAGE_DELETE", "MESSAGE_DELETE_BULK"):
+                await asyncio.to_thread(bridge.on_delete, data)
+            elif kind == "THREAD_CREATE":
+                await asyncio.to_thread(bridge.on_thread, data)
             else:
                 bridge.on_structure(data)
         except Exception as exc:  # noqa: BLE001
