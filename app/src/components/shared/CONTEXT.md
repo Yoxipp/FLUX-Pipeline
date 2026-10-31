@@ -7,6 +7,10 @@ Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC co
 
 ## Profils de travail et interface allegee (2026-10-07, ADR 0042 + 0043)
 
+* `WelcomeDialog.tsx` (2026-10-31) : accueil d'un artiste a la premiere ouverture d'un projet (nom, profil,
+  lier Discord via `pages/settings/DiscordLink.tsx` si le projet a un bot). Vu = `User.json` `welcome.projects`.
+  Monte dans `App` (pas dans les fenetres detachees), rouvert par `openWelcome()` (Parametres > User).
+
 * `WorkProfileDialog.tsx` + `workProfile.css` : seul endroit ou se gerent les profils (FLUX
   integres, projet, perso). Un profil pre-regle les colonnes de Show (Production), les
   notifications d'activite, la page de demarrage, le Launcher et le logiciel du Publisher.

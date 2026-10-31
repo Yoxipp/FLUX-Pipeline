@@ -39,7 +39,9 @@ bot hors ligne -> webhook s'il existe, sinon nouvel essai. Un identifiant tape a
 Router : `routers/notify.py` (`/notify/me`, `/notify/me/test`, `/notify/me/discord_link`, `/notify/project/{p}` (PUT = role
 `project_settings`), `/notify/project/{p}/bot` (PUT jeton = heberger ici, DELETE, role `project_settings`), `/notify/project/{p}/bot/background` (PUT, PC qui a le jeton : raccourci Demarrage + lancement / arret du mode sans fenetre), `/notify/status`).
 Demarrage : `main.py` lifespan `discord_bot.start_all()` (projets dont le jeton est sur ce PC), `stop_all()` a l'arret.
-Front : `app/src/api/notify.ts`, `app/src/pages/settings/NotifySettings.tsx` (Parametres > User et > Projet, QR code `qrcode` MIT).
+Front : `app/src/api/notify.ts`, `app/src/pages/settings/NotifySettings.tsx` (Parametres > User et > Projet, QR code `qrcode` MIT ;
+Projet = etapes guidees calculees par `notifySteps.ts`), `DiscordLink.tsx` (etat lie / code `/link`, aussi dans l'accueil
+`components/shared/WelcomeDialog.tsx`). Le code `/link` porte le nom Discord affiche (`discord_name` des prefs, vide si tape a la main).
 
 ## Regles
 
