@@ -57,6 +57,14 @@ class FrozenBundleData(unittest.TestCase):
         ):
             self.assertIn(str((_BACKEND / rel).resolve()), bundled, rel)
 
+    def test_backend_on_sys_path_before_collect_submodules(self) -> None:
+        # pathex only applies to Analysis: without this, collect_submodules("flux_flows.nodes")
+        # returns [] and the exe has no Flows node (empty catalogue, HTTP 500 on /flows/catalog).
+        text = _SPEC.read_text(encoding="utf-8")
+        insert = text.find('sys.path.insert(0, str(ROOT / "backend"))')
+        self.assertGreater(insert, 0)
+        self.assertLess(insert, text.find('collect_submodules("flux_flows.nodes")'))
+
 
 class UnhandledErrorHandler(unittest.TestCase):
     def test_uncaught_error_returns_detail(self) -> None:

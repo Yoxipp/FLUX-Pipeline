@@ -88,6 +88,9 @@ Compile `app/src/` en bundle statique `dist/`. `base: './'` dans `vite.config.ts
 
 `scripts/backend.spec` : entree `backend/main.py`, `datas=[("resources", "resources")]`, `collect_submodules`
 uvicorn/fastapi/pydantic (imports dynamiques), `collect_all("pxr")` (usd-core importe en lazy), exclut PySide6/PyQt5/tkinter.
+`collect_submodules("flux_flows.nodes")` / `features.dispatcher` : le spec met `backend/` dans `sys.path` avant
+(sinon liste vide sans erreur, exe sans aucun node Flows : `ModuleNotFoundError flux_flows.nodes.event`, HTTP 500
+sur `/flows/catalog`). Le build s'arrete si ces listes sont vides.
 `app_datas` liste les fichiers non Python lus a cote du code (`Path(__file__)`) : YAML `flux_actions/config/*.yml`,
 `schema.json` des recettes USD, sources des plugins DCC copies dans les logiciels. Tout nouveau fichier de ce type
 doit y etre ajoute (sinon FileNotFoundError -> HTTP 500 en build seulement ; test `tests/system/test_frozen_bundle.py`).

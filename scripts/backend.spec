@@ -9,6 +9,12 @@ block_cipher = None
 # SPECPATH est le dossier du .spec (scripts/) — ROOT est la racine du projet
 ROOT = Path(SPECPATH).parent
 
+# collect_submodules imports the package in a subprocess that only sees sys.path:
+# pathex is applied later (Analysis), so without this flux_flows / features are not
+# importable here and the lists below come back EMPTY, silently (no Flows nodes in the exe).
+import sys
+sys.path.insert(0, str(ROOT / "backend"))
+
 # usd-core (pxr) is imported lazily by the usd_assembler feature, so PyInstaller's
 # static analysis never sees it — it must be collected explicitly. collect_all
 # grabs the C-extension submodules (.pyd), native libs (usd_ms.dll, tbb*.dll) AND
@@ -22,6 +28,11 @@ pxr_datas, pxr_binaries, pxr_hidden = collect_all("pxr")
 # its OCIO/PNG/JPEG/TIFF/OpenEXR deps) and the OCIO config data OIIO ships with.
 oiio_datas, oiio_binaries, oiio_hidden = collect_all("OpenImageIO")
 
+flow_node_modules = collect_submodules("flux_flows.nodes")
+dispatcher_modules = collect_submodules("features.dispatcher")
+if not flow_node_modules or not dispatcher_modules:
+    raise SystemExit("backend.spec: flux_flows.nodes / features.dispatcher not importable, build aborted")
+
 hidden = (
     collect_submodules("uvicorn")
     + collect_submodules("fastapi")
@@ -32,8 +43,8 @@ hidden = (
     + oiio_hidden
     # The Flows node modules are imported by name (flux_flows/nodes/registry.py BUILTIN_MODULES)
     # and the dispatcher lazily from them (ADR 0067): invisible to the static analysis.
-    + collect_submodules("flux_flows.nodes")
-    + collect_submodules("features.dispatcher")
+    + flow_node_modules
+    + dispatcher_modules
     # Discord bot Gateway (ADR 0073): imported inside a function of features/notify/discord_bot.py.
     + collect_submodules("websockets")
 )
