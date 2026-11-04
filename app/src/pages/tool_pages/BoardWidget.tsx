@@ -524,14 +524,27 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     toast(title, { description: body, position: 'bottom-right', duration: 8000 })
     void window.electronAPI?.showNotification?.(title, body)
   }, [timer, left, tr, page.label, page.id, w.label])
-  const startTimer = (minutes: number) => {
+  const startTimer = (seconds: number) => {
     setShowTimer(false)
-    const ends = new Date(Date.now() + minutes * 60_000).toISOString().replace('Z', '+00:00')
+    const ends = new Date(Date.now() + seconds * 1000).toISOString().replace('Z', '+00:00')
     data.write([...timers.map(t => ({ op: 'del' as const, rid: t.rid })),
-                { op: 'put', fields: { type: 'timer', ends_at: ends, seconds: minutes * 60 } }]).catch(fail)
+                { op: 'put', fields: { type: 'timer', ends_at: ends, seconds } }]).catch(fail)
   }
+  // Free duration: "7" (minutes), "2:30" (min:sec) or "1:15:00" (h:min:sec). Same 1 s .. 6 h
+  // range as the backend (page_data.py), null when the text is not a valid duration.
+  const [timerText, setTimerText] = useState('')
+  const parseDuration = (text: string): number | null => {
+    const parts = text.trim().split(':')
+    if (!parts[0] || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null
+    const n = parts.map(Number)
+    const sec = parts.length === 1 ? n[0] * 60 : parts.length === 2 ? n[0] * 60 + n[1] : n[0] * 3600 + n[1] * 60 + n[2]
+    return sec >= 1 && sec <= 6 * 3600 ? sec : null
+  }
+  const customSeconds = parseDuration(timerText)
   const stopTimer = () => { if (timers.length) data.write(timers.map(t => ({ op: 'del' as const, rid: t.rid }))).catch(fail) }
-  const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+  const clock = (sec: number) => sec >= 3600
+    ? `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
+    : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 
   // -- export PNG / PDF (redrawn from the records, ADR 0075 n°5) ---------------
   const [showExport, setShowExport] = useState(false)
@@ -1165,7 +1178,17 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
                style={{ position: 'absolute', right: 10, top: 10, zIndex: 8, display: 'flex', gap: 4, padding: 8, alignItems: 'center',
                         background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 4px 14px oklch(0% 0 0 / 0.2)' }}>
             <span className="cap" style={{ marginRight: 4 }}>{tr('Minuteur pour tous', 'Timer for everyone')}</span>
-            {[1, 3, 5, 10, 15].map(m => <button key={m} type="button" className="btn ghost sm" onClick={() => startTimer(m)}>{m} min</button>)}
+            {[1, 3, 5, 10, 15].map(m => <button key={m} type="button" className="btn ghost sm" onClick={() => startTimer(m * 60)}>{m} min</button>)}
+            <input value={timerText} onChange={ev => setTimerText(ev.target.value)}
+                   onKeyDown={ev => { if (ev.key === 'Enter' && customSeconds) startTimer(customSeconds) }}
+                   placeholder={tr('ex. 7 ou 2:30', 'e.g. 7 or 2:30')}
+                   title={tr('Minutes, min:sec ou h:min:sec (6 h max)', 'Minutes, min:sec or h:min:sec (6 h max)')}
+                   style={{ width: 90, marginLeft: 4, padding: '3px 6px', borderRadius: 6, fontSize: 12, outline: 'none',
+                            background: 'transparent', color: 'var(--ink)',
+                            border: `1px solid ${timerText && !customSeconds ? 'var(--err)' : 'var(--rule)'}` }} />
+            <button type="button" className="btn sm" disabled={!customSeconds} onClick={() => customSeconds && startTimer(customSeconds)}>
+              {tr('Lancer', 'Start')}
+            </button>
           </div>
         )}
         {showExport && (
