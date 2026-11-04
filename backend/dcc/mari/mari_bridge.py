@@ -34,10 +34,14 @@ import threading
 
 try:
     import mari
-    _MARI_AVAILABLE = True
+    # Any package named "mari" imports (backend/tests/mari during run_tests.py): only
+    # Mari's own API counts, or the bridge binds the real port and FLUX shows Mari open.
+    _MARI_AVAILABLE = hasattr(mari, "app")
 except Exception:  # noqa: BLE001 - importable from the backend for a syntax check
     mari = None
     _MARI_AVAILABLE = False
+if not _MARI_AVAILABLE:
+    mari = None
 
 HOST = "127.0.0.1"
 # Base of Mari's assigned range (DCC_PORT_RANGES["Mari"]); env override for

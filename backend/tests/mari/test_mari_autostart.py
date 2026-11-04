@@ -189,6 +189,22 @@ class MariBusy(unittest.TestCase):
         b._drain()
         self.assertEqual(order, ["export start", "export end", "info"])
 
+    def test_a_package_named_mari_is_not_mari(self):
+        """2026-11-04: run_tests.py made `import mari` find backend/tests/mari, the
+        bridge bound the real port 7070 and FLUX showed Mari open while it was closed."""
+        import importlib
+        import sys
+        import types
+
+        fake = types.ModuleType("mari")   # no Mari API, like the tests package
+        with mock.patch.dict(sys.modules, {"mari": fake}):
+            sys.modules.pop("dcc.mari.mari_bridge", None)
+            with mock.patch("socket.socket.bind", side_effect=AssertionError("bridge bound a port")):
+                b = importlib.import_module("dcc.mari.mari_bridge")
+            self.assertFalse(b._MARI_AVAILABLE)
+            self.assertIsNone(b._server_sock)
+        sys.modules.pop("dcc.mari.mari_bridge", None)
+
     def test_same_named_channels_get_their_own_id(self):
         from types import SimpleNamespace
 
