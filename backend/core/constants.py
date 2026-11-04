@@ -296,7 +296,10 @@ FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UP
 THEME_DEFAULT_BG:      str = "#14141f"
 THEME_DEFAULT_SURFACE: str = "#18182a"
 THEME_DEFAULT_FG:      str = "#d6d6d6"
-THEME_DEFAULT_ACCENT:  str = "#f57c1f"
+# Preset key read by the front (app/src/lib/accentPresets.ts): a "#rrggbb" value is a custom color.
+THEME_DEFAULT_ACCENT:  str = "orange"
+# Old default, stored as a hex by earlier versions: read back as the orange preset.
+THEME_LEGACY_DEFAULT_ACCENT: str = "#f57c1f"
 
 # Kept as aliases for any external code referencing old names
 THEME_DEFAULT_PRIMARY:   str = THEME_DEFAULT_SURFACE

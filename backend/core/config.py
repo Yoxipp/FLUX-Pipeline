@@ -9,7 +9,7 @@ from typing import Any
 
 from core.constants import (
     THEME_DEFAULT_BG, THEME_DEFAULT_SURFACE,
-    THEME_DEFAULT_FG, THEME_DEFAULT_ACCENT,
+    THEME_DEFAULT_FG, THEME_DEFAULT_ACCENT, THEME_LEGACY_DEFAULT_ACCENT,
 )
 from core.logger import get_logger
 from core.repository_factory import get_repository
@@ -165,11 +165,14 @@ def _root_key(root: str) -> str:
 def get_theme() -> dict:
     """Return the 4-color theme dict, migrating old primary/secondary keys if needed."""
     t = get("theme", {}) or {}
+    accent = t.get("accent", t.get("secondary", THEME_DEFAULT_ACCENT))
+    if str(accent).lower() == THEME_LEGACY_DEFAULT_ACCENT:
+        accent = THEME_DEFAULT_ACCENT
     return {
         "bg":      t.get("bg",      t.get("primary",   THEME_DEFAULT_BG)),
         "surface": t.get("surface", THEME_DEFAULT_SURFACE),
         "fg":      t.get("fg",      THEME_DEFAULT_FG),
-        "accent":  t.get("accent",  t.get("secondary", THEME_DEFAULT_ACCENT)),
+        "accent":  accent,
     }
 
 
