@@ -569,7 +569,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
     if (tab.kind === 'assets') {
       const n = selectedRes && (selectedRes.kind === 'shot' || selectedRes.kind === 'seq')
         ? (selectedRes.entity.assets?.length ?? 0) : 0
-      return { label: `ASSETS · ${n}`, color: 'var(--prod-shot)', sub: '' }
+      return { label: `ASSETS LIÉS · ${n}`, color: 'var(--prod-shot)', sub: '' }
     }
     if (tab.kind === 'entityRoot') {
       const res = resolveEntity(state, tab.entityId)
