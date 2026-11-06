@@ -793,25 +793,27 @@ export function Sidebar({ dccStatus }: Props) {
         <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed route="/" onClick={() => navigate('/')} />
       </div>
 
-      {/* 2026-10-01: Production first, then the project folders, the team, the tools.
-          Retake 08 (2026-10-08): the PIPELINE group sits above ASSETS. */}
-      <NavGroup title="PIPELINE">
+      {/* Three profiles of the pipe (2026-11-06): Production, Team, Fichiers. */}
+      <NavGroup title="PRODUCTION">
         <div className="production-nav-row">
           <NavItem icon={ClipboardList} label={t('nav.production')} active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); if (pathname !== '/production') { openingProduction.current = true; navigate('/production') } }} />
           <button className="production-nav-pin" aria-label={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} title={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} aria-pressed={productionPinned} onClick={() => { if (productionPinned && pathname !== '/production') setProductionExpanded(false); toggleProductionPinned() }}><Pin size={13} strokeWidth={1.75} fill={productionPinned ? 'currentColor' : 'none'} style={{ transform: 'rotate(45deg)' }} /></button>
         </div>
         {(productionPinned || productionExpanded) && <div className="production-nav-children" aria-label={t('nav.production.modes')}>{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>)}</div>}
-        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
+      </NavGroup>
+
+      <NavGroup title="TEAM">
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         {/* Team chat of the project, channels on the left (built-in, 2026-10-30, ADR 0077). */}
         <NavItem icon={MessagesSquare} label={t('nav.team')}           active={pathname === '/team'}      indent route="/team" onClick={() => navigate('/team')} />
         {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one.
-            Last of PIPELINE (2026-10-30). */}
+            The board stays a TOOL widget, no entry of its own (2026-11-06). */}
         {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 
-      <NavGroup title="ASSETS">
-        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent route="/publisher" onClick={() => navigate('/publisher')} />
+      <NavGroup title="FICHIERS">
+        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
+        <NavItem icon={Upload}    label={t('nav.publisher')}     active={pathname === '/publisher'} indent route="/publisher" onClick={() => navigate('/publisher')} />
         {/* Action engine test bench (Phase 2): route kept at /action-publish, hidden
             from the menu on purpose. It is NOT a replacement for the Publisher. */}
         <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
