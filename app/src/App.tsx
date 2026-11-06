@@ -14,6 +14,7 @@ import { BackendBanner } from './components/shared/BackendBanner'
 import { useBackendStatus } from './hooks/useBackendStatus'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
+import { SupEntryBanner } from './components/shared/SupEntryBanner'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
 import { usePresenceHeartbeat } from './hooks/usePresenceHeartbeat'
@@ -153,6 +154,7 @@ function AppShell({ settings }: { settings: Settings }) {
         />
 
         <BackendBanner />
+        {!DETACHED && settings?.sup_entry && <SupEntryBanner entry={settings.sup_entry} />}
 
         <div className="flex flex-1 min-h-0">
           {!DETACHED && <Sidebar dccStatus={dccStatus} />}

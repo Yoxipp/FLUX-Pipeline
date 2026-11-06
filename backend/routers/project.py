@@ -31,6 +31,10 @@ def set_current_project(payload: ProjectPayload) -> dict:
     name = payload.project.strip()
     if not name or not project_utils.project_exists(name):
         raise HTTPException(status_code=404, detail=f"Project not found: {name!r}")
+    from features.accounts import sup_access
+    refused = sup_access.refusal(name)
+    if refused:
+        raise HTTPException(status_code=403, detail=refused)
     project_utils.set_current_project(name)
     # First open by this code: move the root setup files into _flux_setup/, then
     # create/heal project.json (ADR 0006). Never blocks.

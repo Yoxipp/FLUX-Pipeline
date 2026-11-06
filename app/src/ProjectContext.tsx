@@ -7,7 +7,7 @@
 // (instant on reload) and to the backend config.json (survives a restart).
 // Mirrors the LanguageProvider pattern in i18n.tsx.
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { api } from './api/client'
@@ -36,6 +36,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<string[]>([])
   const [project, setProjectState] = useState<string>(readCachedProject)
   const [loading, setLoading] = useState(true)
+  const lockedProject = useRef('')
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -63,6 +64,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       } catch {
         /* backend down */
       }
+      try {
+        lockedProject.current = (await api.getSettings()).sup_entry?.project ?? ''
+      } catch {
+        /* backend down: the backend still refuses the change */
+      }
       if (!alive) return
       setProjects(list)
       const cached = readCachedProject()
@@ -85,6 +91,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setProject = useCallback((name: string) => {
+    // A supervisor inside another account stays on that project (ADR 0087).
+    if (lockedProject.current && name !== lockedProject.current) {
+      toast.error(`Compte ouvert pour le projet ${lockedProject.current} seulement : reviens sur ton compte d'abord.`)
+      return
+    }
     setProjectState(name)
     try {
       localStorage.setItem(LS_KEY, name)

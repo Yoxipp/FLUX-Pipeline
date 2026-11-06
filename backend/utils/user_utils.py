@@ -120,6 +120,8 @@ def rename_user(old: str, new: str) -> tuple[bool, str]:
         config.set("username", new)
         # Frozen: config.json (bootstrap) is a separate file from the prefs.
         paths.set_config_username(new)
+    from features.accounts import sup_access
+    sup_access.follow_user_rename(old, new)
     log.info("Renamed artist '%s' -> '%s'", old, new)
     return True, f"{old} renommé en {new}"
 

@@ -137,8 +137,17 @@ def can(project_name: str, action: str, user: str | None = None, roles: dict | N
     """True when *user* (default: the active user) may do *action* on the project."""
     if action not in ACTIONS:
         raise ValueError(f"action inconnue '{action}'")
-    role = role_of(project_name, _active(user), roles)
+    who = _active(user)
+    if _entry_refusal(project_name, who):
+        return False
+    role = role_of(project_name, who, roles)
     return role is not None and RANK[role] >= RANK[ACTIONS[action]]
+
+
+def _entry_refusal(project_name: str, who: str) -> str | None:
+    """A supervisor inside another account acts on the project of that entry only."""
+    from features.accounts import sup_access
+    return sup_access.refusal(project_name, who)
 
 
 def require(project_name: str, action: str, user: str | None = None) -> None:
@@ -147,6 +156,9 @@ def require(project_name: str, action: str, user: str | None = None) -> None:
         return
     needed = LABELS[ACTIONS[action]]
     who = _active(user)
+    refused = _entry_refusal(project_name, who)
+    if refused:
+        raise RoleError(refused)
     if not who:
         raise RoleError(f"Connecte-toi a ton compte : role {needed} requis sur {project_name}")
     role = role_of(project_name, who)
@@ -189,6 +201,9 @@ def set_role(project_name: str, target: str, new_role: str, actor: str | None = 
     actor, target = _active(actor), _norm(target)
     if not is_valid_user_name(target):
         raise ValueError(f"Nom d'artiste invalide : {target!r}")
+    refused = _entry_refusal(project_name, actor)
+    if refused:
+        raise RoleError(refused)
     path = roles_path(project_name)
     with append_lock(path):
         roles = read_roles(project_name)
@@ -205,6 +220,9 @@ def claim_supervisor(project_name: str, user: str | None = None) -> dict:
     user = _active(user)
     if not user:
         raise RoleError("Connecte-toi a ton compte pour devenir Supervisor")
+    refused = _entry_refusal(project_name, user)
+    if refused:
+        raise RoleError(refused)
     path = roles_path(project_name)
     with append_lock(path):
         roles = read_roles(project_name)

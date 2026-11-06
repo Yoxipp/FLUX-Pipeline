@@ -29,6 +29,7 @@ export const BASE_URL = 'http://127.0.0.1:8765'
 
 export interface UserProfile {
   id: string; first_name: string; last_name: string; has_password: boolean
+  free_entry?: boolean  // opens without its password here (own account, supervisor of the active project)
 }
 
 export interface WorkspacesInfo {

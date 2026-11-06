@@ -100,6 +100,8 @@ export interface Settings {
   first_launch: boolean
   workspace: string | null
   username: string | null
+  // A supervisor inside another artist's account, on that project only (ADR 0087).
+  sup_entry?: { project: string; user: string; by: string } | null
   theme: {
     bg: string
     surface: string

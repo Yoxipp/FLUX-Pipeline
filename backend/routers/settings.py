@@ -55,14 +55,30 @@ def _taken_names() -> set[str]:
 
 
 def _check_can_enter(name: str, password: str | None, remember: bool) -> None:
-    """403 when *name* has a password that was not given (and is not remembered here)."""
-    from features.accounts import passwords
+    """403 when *name* has a password that was not given (and is not remembered here).
+
+    A supervisor of the active project, or someone coming back to his own account, needs
+    none: the local identity then stays his. Any other entry makes *name* that identity.
+    """
+    from features.accounts import passwords, sup_access
     if not user_utils.user_exists(name):
+        sup_access.set_local_identity(name)
+        return
+    if sup_access.enter_without_password(name):
         return
     if not passwords.can_enter(name, password):
         raise HTTPException(status_code=403, detail="Mot de passe incorrect.")
     if remember and password:
         passwords.remember_on_this_pc(name)
+    sup_access.set_local_identity(name)
+
+
+def _refuse_during_sup_entry(project_name: str | None = None) -> None:
+    """403 while a supervisor is inside another account, outside the project of that entry."""
+    from features.accounts import sup_access
+    refused = sup_access.refusal(project_name)
+    if refused:
+        raise HTTPException(status_code=403, detail=refused)
 
 
 def _require_role(project: str | None, action: str) -> None:
@@ -91,8 +107,11 @@ async def get_settings() -> dict:
     dcc_paths = await loop.run_in_executor(None, lambda: config.get("dcc_paths", {}))
     language = await loop.run_in_executor(None, lambda: config.get("language", "fr"))
     log_colors = await loop.run_in_executor(None, config.get_log_colors)
+    from features.accounts import sup_access
+    sup_entry = await loop.run_in_executor(None, sup_access.current_entry)
 
     return {
+        "sup_entry":    sup_entry,
         "first_launch": is_first,
         "workspace":    str(root) if root else None,
         "username":     user,
@@ -108,11 +127,12 @@ async def get_settings() -> dict:
 async def init_first_launch(req: InitRequest) -> dict:
     """First-launch setup: scaffold FLUX root structure, persist workspace + username."""
     # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
-    from features.accounts import identity, passwords
+    from features.accounts import identity, passwords, sup_access
 
     def _scaffold():
         root = Path(req.workspace)
         set_flux_root(root)   # users and aliases live under the chosen root
+        sup_access.forget()
         new_artist = bool(req.first_name or req.last_name)
         if new_artist:
             username = identity.make_user_id(req.first_name or "", req.last_name or "", _taken_names())
@@ -135,6 +155,7 @@ async def init_first_launch(req: InitRequest) -> dict:
         set_config_username(username)
         config.create_user(username, req.workspace)
         if new_artist:
+            sup_access.set_local_identity(username)
             identity.write_profile(username, req.first_name, req.last_name)
             if req.password:
                 passwords.set_password(username, req.password)
@@ -173,6 +194,7 @@ async def update_settings(req: SettingsUpdate) -> dict:
         )
 
     if req.last_project is not None:
+        await loop.run_in_executor(None, lambda: _refuse_during_sup_entry(req.last_project))
         await loop.run_in_executor(None, lambda: config.set_last_project(req.last_project))
 
     if req.language:
@@ -204,6 +226,8 @@ async def update_settings(req: SettingsUpdate) -> dict:
         log.info("User switched to '%s'", new_user)
 
     if req.workspace:
+        await loop.run_in_executor(None, _refuse_during_sup_entry)
+
         def _update_workspace():
             ws = Path(req.workspace)
             for d in FLUX_ROOT_DIRS:
@@ -280,11 +304,13 @@ async def list_users() -> dict:
 
 @router.get("/users/profiles")
 async def list_user_profiles() -> dict:
-    """Every artist with first / last name and whether a password is set (Login, Settings)."""
-    from features.accounts import identity
+    """Every artist: first / last name, password set or not, opens freely here (Login, Settings)."""
+    from features.accounts import identity, sup_access
 
     def _profiles() -> list[dict]:
-        return [identity.read_profile(u) for u in user_utils.list_users()]
+        is_supervisor = sup_access.identity_is_supervisor()
+        return [{**identity.read_profile(u), "free_entry": sup_access.is_free_entry(u, is_supervisor)}
+                for u in user_utils.list_users()]
 
     loop = asyncio.get_running_loop()
     return {"profiles": await loop.run_in_executor(None, _profiles)}
@@ -341,7 +367,7 @@ async def preview_user_id(req: NewArtistRequest) -> dict:
 @router.post("/users")
 async def create_artist(req: NewArtistRequest) -> dict:
     """Create an artist from first + last name (optional password), switch to it if asked."""
-    from features.accounts import identity, passwords
+    from features.accounts import identity, passwords, sup_access
 
     def _create() -> str:
         user_id = identity.make_user_id(req.first_name, req.last_name, _taken_names())
@@ -356,6 +382,7 @@ async def create_artist(req: NewArtistRequest) -> dict:
         if req.switch:
             user_utils.set_current_user(user_id)
             set_config_username(user_id)
+            sup_access.set_local_identity(user_id)
         return user_id
 
     loop = asyncio.get_running_loop()

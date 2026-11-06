@@ -151,6 +151,10 @@ async def get_projects() -> dict:
 
 @router.post("/projects")
 async def post_project(req: ProjectCreate) -> dict:
+    from features.accounts import sup_access
+    refused = sup_access.refusal()
+    if refused:
+        raise HTTPException(status_code=403, detail=refused)
     if project_exists(req.name):
         raise HTTPException(status_code=409, detail=f"Projet '{req.name}' existe déjà")
     loop = asyncio.get_running_loop()

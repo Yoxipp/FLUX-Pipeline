@@ -41,7 +41,7 @@ export function Login({ onDone }: Props) {
   // New-artist form: shown when asked, or when no artist exists yet.
   const showNew = creating || (loaded && users.length === 0)
   const selectedProfile = showNew ? null : users.find(u => u.id === selected) ?? null
-  const needsPassword = !!selectedProfile?.has_password
+  const needsPassword = !!selectedProfile?.has_password && !selectedProfile.free_entry
 
   const enter = async () => {
     setError('')
@@ -134,7 +134,7 @@ export function Login({ onDone }: Props) {
 
                     <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{full ? `${full} (${u})` : u}</span>
 
-                    {p.has_password && <Lock size={11} strokeWidth={1.75} color="var(--ink-4)" />}
+                    {p.has_password && !p.free_entry && <Lock size={11} strokeWidth={1.75} color="var(--ink-4)" />}
                     {isActive && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>}
                   </div>
                 )
