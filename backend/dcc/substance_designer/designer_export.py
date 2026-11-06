@@ -129,7 +129,7 @@ def publish_designer(
             files, tx_warns = convert_to_tx(files, "Designer")
             warnings.extend(f"{gdir.name} : {w}" for w in tx_warns)
         variante = variant_for(instance, gdir.name, len(graph_dirs) > 1)
-        done, warns = publish_maps(files, project_path, project, prefix, variante, description, user)
+        done, warns = publish_maps(files, project_path, project, prefix, variante, description, user, soft="designer")
         published.extend(done)
         warnings.extend(f"{gdir.name} : {w}" for w in warns)
         if tx_only:
@@ -145,7 +145,7 @@ def publish_designer(
         for f in of_kind:
             variante = variant_for(instance, f.stem, len(of_kind) > 1)
             target = "_".join([*prefix, kind[1:].upper(), *([variante] if variante else [])]).upper()
-            dest = publish_file(f, project_path, description, user, project, target)
+            dest = publish_file(f, project_path, description, user, project, target, soft="designer")
             if dest is None:
                 warnings.append(f"{f.name} non publie (nom FLUX invalide ?)")
                 continue

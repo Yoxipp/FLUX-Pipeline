@@ -13,6 +13,31 @@ log = get_logger(__name__)
 # builds USER/<name>/UserSettings/User.json), routed get/set like tokens.json.
 _COLLECTION = "user_settings"
 
+# An artist name is a folder name (USER/<name>) that rename and delete act on, so
+# anything that could address something else than a direct child of USER/ is refused.
+_FORBIDDEN_NAME_CHARS = frozenset('<>:"/\\|?*')
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def is_valid_user_name(name: str) -> bool:
+    """Return True if *name* is safe as the USER/<name> folder of an artist.
+
+    Refuses empty names, ``.`` / ``..``, separators, characters Windows forbids,
+    trailing dots or spaces (Windows strips them) and reserved device names.
+    Accents and inner spaces stay allowed: existing artists may use them.
+    """
+    if not name or name != name.strip() or name in (".", ".."):
+        return False
+    if name.endswith("."):
+        return False
+    if any(c in _FORBIDDEN_NAME_CHARS or ord(c) < 32 for c in name):
+        return False
+    return name.split(".")[0].upper() not in _WINDOWS_RESERVED
+
 
 def get_current_user() -> str | None:
     """Return the in-memory active user name, or None."""
@@ -22,6 +47,8 @@ def get_current_user() -> str | None:
 def set_current_user(name: str) -> None:
     """Set active user in memory, persist to config.json, ensure user dir exists."""
     name = name.strip().upper()   # artist names are always FULL UPPERCASE
+    if not is_valid_user_name(name):
+        raise ValueError(f"Nom d'artiste invalide : {name!r}")
     config.set_current_user(name)
     config.set("username", name)
     try:
@@ -40,7 +67,9 @@ def list_users() -> list[str]:
 
 
 def user_exists(name: str) -> bool:
-    """Return True if FLUX_ROOT/USER/<name>/ exists."""
+    """Return True if FLUX_ROOT/USER/<name>/ exists (False for an unsafe name)."""
+    if not is_valid_user_name(name):
+        return False
     try:
         return paths.get_user_dir(name).exists()
     except (RuntimeError, OSError):
@@ -49,6 +78,8 @@ def user_exists(name: str) -> bool:
 
 def create_user_dir(name: str) -> None:
     """Create FLUX_ROOT/USER/<name>/ if it does not exist."""
+    if not is_valid_user_name(name):
+        raise ValueError(f"Nom d'artiste invalide : {name!r}")
     paths.ensure_dir(paths.get_user_dir(name))
     log.debug("User dir ready for '%s'", name)
 
@@ -65,20 +96,52 @@ def rename_user(old: str, new: str) -> tuple[bool, str]:
         return False, "Le nom ne peut pas être vide."
     if new == old:
         return False, "Le nouveau nom est identique."
+    if not is_valid_user_name(new):
+        return False, f"Nom invalide : {new}"
     if not user_exists(old):
         return False, f"Artiste introuvable : {old}"
     if user_exists(new):
         return False, f"Un artiste nommé {new} existe déjà."
+    from features.accounts import aliases
+    if not aliases.can_take_name(old, new):
+        return False, f"{new} a appartenu à un autre artiste, son historique le suit."
     try:
         paths.get_user_dir(old).rename(paths.get_user_dir(new))
     except OSError as exc:
         log.error("rename_user %s -> %s failed: %s", old, new, exc)
         return False, f"Échec du renommage : {exc}"
+    try:
+        # Chat, mentions, activity, calendar keep the old name: readers resolve it.
+        aliases.record_rename(old, new)
+    except (OSError, RuntimeError) as exc:
+        log.error("rename_user %s -> %s: alias not recorded: %s", old, new, exc)
     if get_current_user() == old:
         config.set_current_user(new)
         config.set("username", new)
+        # Frozen: config.json (bootstrap) is a separate file from the prefs.
+        paths.set_config_username(new)
     log.info("Renamed artist '%s' -> '%s'", old, new)
     return True, f"{old} renommé en {new}"
+
+
+def follow_rename(name: str | None) -> str | None:
+    """Saved user of this machine renamed on another one: return the new name.
+
+    A machine keeps the old name in its prefs; without this it would keep writing as
+    the retired name and recreate an empty USER/<old> next to USER/<new>. Unchanged
+    when the name was never renamed, still has its own folder, or FLUX_ROOT is unset.
+    """
+    if not name:
+        return name
+    try:
+        from features.accounts import aliases
+        new = aliases.resolve_user(name.strip().upper())
+        if new != name.strip().upper() and not user_exists(name) and user_exists(new):
+            log.info("Saved user '%s' was renamed '%s', following", name, new)
+            return new
+    except (OSError, RuntimeError) as exc:
+        log.warning("follow_rename %s: %s", name, exc)
+    return name
 
 
 def delete_user(name: str) -> tuple[bool, str]:

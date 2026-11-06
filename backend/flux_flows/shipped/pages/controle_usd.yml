@@ -1,0 +1,14 @@
+page: 1
+id: controle_usd
+label: "Controle USD"
+icon: "list-checks"
+scope: shipped
+description: "Controle USD de FLUX sur chaque LAST USD du projet (assets, plans, lighting), hors ARCHIVE. Le tableau montre le dernier controle (flow controle_usd_projet)."
+data: []
+layout:
+  - folder: {id: lancer, label: Controle, mode: plain}
+    children:
+      - row:
+          - {id: controler, kind: button, label: "Controler les LAST USD", tooltip: "Lit chaque *_LAST.usd* du projet, n'ecrit rien dans les publishs", icon: "list-checks"}
+      - row:
+          - {id: resultat, kind: table, label: "Dernier controle", source: {flow: controle_usd_projet, output: rapport}}

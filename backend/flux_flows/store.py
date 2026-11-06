@@ -26,13 +26,14 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from flux_flows.model import NAME_RE, Flow, FlowSchemaError, dump_flow, load_flow_text
 
 SUFFIX = ".flow.yml"
 SCOPE_ORDER = ("perso", "project", "team", "shipped")
 LEGACY_PREFIX = "legacy_"
+EXAMPLE_PREFIX = "example_"   # shipped example_*: the Exemples category, duplicated to be used (ADR 0069)
 
 
 class FlowStoreError(ValueError):
@@ -71,6 +72,20 @@ def _contained(path: Path, root: Path) -> Path:
 
 def working_file(root: Path, name: str) -> Path:
     return _contained(root / f"{_check_name(name)}{SUFFIX}", root)
+
+
+def shipped_file(root: Path, name: str) -> Path:
+    """A shipped flow: top level, else a DCC node flow of shipped/dcc/<soft>/ (P6a)."""
+    path = working_file(root, name)
+    if path.is_file():
+        return path
+    from flux_flows import dcc_nodes
+
+    if Path(root).resolve() == dcc_nodes.shipped_dcc_dir().parent.resolve():
+        found = dcc_nodes.shipped_file(name)
+        if found is not None:
+            return found
+    return path
 
 
 def flow_folder(root: Path, name: str) -> Path:
@@ -173,7 +188,7 @@ def shipped_changed(roots: Mapping[str, Optional[Path]], scope: str, name: str) 
         return False
     started = read_state(Path(roots[scope]), name).get("shipped_hash")
     try:
-        text = working_file(Path(roots["shipped"]), name).read_text(encoding="utf-8")
+        text = shipped_file(Path(roots["shipped"]), name).read_text(encoding="utf-8")
     except OSError:
         return False
     return bool(started) and started != shipped_hash(text)
@@ -191,7 +206,10 @@ def resolve(roots: Mapping[str, Optional[Path]], name: str) -> Optional[str]:
     _check_name(name)
     for scope in SCOPE_ORDER:
         root = roots.get(scope)
-        if root is not None and working_file(Path(root), name).is_file():
+        if root is None:
+            continue
+        path = shipped_file(Path(root), name) if scope == "shipped" else working_file(Path(root), name)
+        if path.is_file():
             return scope
     return None
 
@@ -229,7 +247,10 @@ def read_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str,
               version: Optional[int] = None) -> Dict[str, Any]:
     """The working file (version None) or a frozen version, with its state."""
     root = _root(roots, scope)
-    path = working_file(root, name) if version is None else version_file(root, name, version)
+    if scope == "shipped" and version is None:
+        path = shipped_file(root, name)
+    else:
+        path = working_file(root, name) if version is None else version_file(root, name, version)
     if scope == "shipped" and version is not None:
         raise FlowStoreError("un flow livre n'a pas de versions", 404)
     try:
@@ -412,10 +433,62 @@ def copy_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, t
     copy to team; Enregistrer sous elsewhere). Refused if the target exists."""
     src = read_flow(roots, from_scope, name)
     flow = src["flow"].model_copy(update={"name": _check_name(new_name or name)})
+    if from_scope == "shipped" and name.startswith(EXAMPLE_PREFIX):
+        # Dupliquer an example (ADR 0069): a normal flow, its label and text no longer say "Exemple".
+        label = re.sub(r"^\s*Exemple\s*:\s*", "", flow.label or "")
+        desc = (flow.description or "").split(" Exemple livre :")[0].strip()
+        flow = flow.model_copy(update={"label": label[:1].upper() + label[1:], "description": desc})
     # Unlock: remember which shipped content the copy started from (W_SHIPPED_CHANGED, P4).
     extra = {"shipped_hash": shipped_hash(src["text"])} if from_scope == "shipped" and flow.name == name else None
     state = save_flow(roots, to_scope, flow, user=user, note=f"copie de {from_scope}/{name}", extra_state=extra)
     return {"state": state, "scope": to_scope, "name": flow.name}
+
+
+# State keys that belong to the old place: the activation gate is passed again in the new one.
+_RELOCATE_DROP = ("acked", "dry_run_ok", "shipped_hash")
+
+
+def relocate_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, to_scope: str, *,
+                  user: str, new_name: Optional[str] = None) -> Dict[str, Any]:
+    """Rename (same scope) or move to another scope (ADR 0069): the working file, every
+    frozen version and the state go along, renamed; the flow arrives inactive (rights and
+    triggers differ, the activation gate is passed again there); the old one goes to the
+    trash of its scope. Refused when the target name exists in the target scope."""
+    _require_writable(from_scope)
+    _require_writable(to_scope)
+    src, dst = _root(roots, from_scope), _root(roots, to_scope)
+    new = _check_name(new_name or name)
+    if (from_scope, name) == (to_scope, new):
+        raise FlowStoreError("meme nom et meme portee : rien a changer", 400)
+    if not working_file(src, name).is_file():
+        raise FlowStoreError(f"flow {name} introuvable ({from_scope})", 404)
+    if working_file(dst, new).exists() or flow_folder(dst, new).exists():
+        raise FlowStoreError(f"un flow {new} existe deja ({to_scope})", 409)
+    with _flow_lock(src, name):
+        flow = load_flow_text(working_file(src, name).read_text(encoding="utf-8")).model_copy(update={"name": new})
+        state = read_state(src, name)
+        versions = {n: version_file(src, name, n).read_text(encoding="utf-8") for n in _version_numbers(src, name)}
+        extras = [p for p in flow_folder(src, name).iterdir()
+                  if p.name not in ("versions", "state.json") and not p.name.startswith("state.json.")] \
+            if flow_folder(src, name).is_dir() else []
+    target = flow_folder(dst, new)
+    target.mkdir(parents=True, exist_ok=True)
+    with _flow_lock(dst, new):
+        for number, text in versions.items():
+            frozen = load_flow_text(text).model_copy(update={"name": new})
+            _write_text(version_file(dst, new, number), dump_flow(frozen, scope=to_scope, version=number))
+        for extra in extras:      # watcher memories (seen_<node>.json...) follow the flow
+            (shutil.copytree if extra.is_dir() else shutil.copy2)(extra, target / extra.name)
+        for key in _RELOCATE_DROP:
+            state.pop(key, None)
+        state.update(active=False, active_version=None)
+        state = _write_working(dst, to_scope, flow, state, user)
+    trash = delete_flow(roots, from_scope, name, user=user)["trash"]
+    kind = "rename" if from_scope == to_scope else "move"
+    _history(roots, to_scope, {"kind": kind, "user": user, "flow": new, "from": f"{from_scope}/{name}", "note": ""})
+    if from_scope != to_scope:
+        _history(roots, from_scope, {"kind": kind, "user": user, "flow": name, "to": f"{to_scope}/{new}", "note": ""})
+    return {"state": state, "scope": to_scope, "name": new, "trash": trash}
 
 
 def set_active(roots: Mapping[str, Optional[Path]], scope: str, name: str, active: bool, *,
@@ -438,3 +511,33 @@ def set_active(roots: Mapping[str, Optional[Path]], scope: str, name: str, activ
     _history(roots, scope, {"kind": "activate" if active else "deactivate", "user": user, "flow": name,
                             "version": state["active_version"], "note": ""})
     return state
+
+
+# -- P5: scheduler side (01 §9) ----------------------------------------------------
+
+def update_state(root: Path, name: str, change) -> Optional[Dict[str, Any]]:
+    """Apply ``change(state) -> bool`` to state.json under the flow lock; written only
+    when it returns True. Returns the new state, or None when nothing was written."""
+    with _flow_lock(root, name):
+        state = read_state(root, name)
+        if not change(state):
+            return None
+        _write_state(root, name, state)
+    return state
+
+
+def active_names(root: Path) -> List[Tuple[str, int]]:
+    """(name, active_version) of the active flows kept in *root* (a scope folder)."""
+    out: List[Tuple[str, int]] = []
+    try:
+        entries = sorted(root.glob(f"*{SUFFIX}"))
+    except OSError:
+        return out
+    for path in entries:
+        name = path.name[: -len(SUFFIX)]
+        if not NAME_RE.match(name):
+            continue
+        state = read_state(root, name)
+        if state.get("active") and state.get("active_version"):
+            out.append((name, int(state["active_version"])))
+    return out

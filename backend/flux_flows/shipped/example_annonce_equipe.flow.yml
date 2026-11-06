@@ -1,0 +1,25 @@
+flux_flow: 2
+name: example_annonce_equipe
+label: "Exemple : annonce a l'equipe"
+description: "Page annonces : une annonce ecrite va dans le fil de la page et dans le fil Activite. Annonce vide : un toast previent, rien n'est ecrit. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir pour l'utiliser dans ton projet."
+run_policy: queue
+nodes:
+  page: {type: event.page_inputs, pos: [0, 160], params: {page: annonces, ports: {outputs: {text: str, priorite: str, publier: exec}, labels: {text: Annonce, priorite: Priorite, publier: "Publier l'annonce"}}}}
+  vide: {type: logic.is_empty, pos: [320, 360], params: {}}
+  si_vide: {type: logic.if, pos: [320, 160], params: {}}
+  toast_vide: {type: flux.notify, pos: [640, 0], params: {text: "Annonce vide : ecris un texte avant de publier", level: warn, where: toast}}
+  ecrire: {type: flux.page_data_write, pos: [640, 200], params: {page: annonces, collection: annonces, op: put}}
+  texte: {type: data.template, pos: [640, 440], params: {text: "Annonce ({priorite}) de {user} : {text}"}}
+  activite: {type: flux.notify, pos: [960, 200], params: {level: info, where: both}}
+links:
+  - {from: ecrire.then, to: activite.exec}
+  - {from: page.publier, to: si_vide.exec}
+  - {from: page.text, to: vide.value}
+  - {from: page.values, to: ecrire.fields}
+  - {from: page.values, to: texte.values}
+  - {from: si_vide.else, to: ecrire.exec}
+  - {from: si_vide.then, to: toast_vide.exec}
+  - {from: texte.text, to: activite.text}
+  - {from: vide.result, to: si_vide.condition}
+notes:
+  - {id: k1, pos: [0, 560], text: "Page annonces : champ Annonce + Priorite, bouton Publier l'annonce.\nL'annonce part dans la collection annonces (widget Fil) et dans le fil Activite."}

@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core import config
 from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
@@ -22,7 +22,7 @@ from features.activity.activity_reader import (
 )
 from features.activity.history import read_archive_events
 from features.activity.chat_manager import (
-    get_mentions_and_unread, get_messages, get_user_list,
+    delete_message, edit_message, get_mentions_and_unread, get_messages, get_user_list,
     mark_mentions_read, resolve_chat_path, send_message,
 )
 
@@ -61,10 +61,22 @@ def _not_modified(request: Request, etag: str) -> bool:
     return any(_strip_weak(t) == target for t in inm.split(","))
 
 
+class ChatAttachment(BaseModel):
+    name: str = Field(max_length=200)
+    file: str = Field(pattern=r"^[0-9a-f]{20}\.[a-z0-9]{1,8}$")   # copied by POST /team/{project}/files
+    size: int = Field(ge=0)
+    image: bool = False
+
+
 class ChatMessage(BaseModel):
     user: str | None = None
     message: str
     project: str
+    # Team page (ADR 0077): all optional, the home chat sends none of them.
+    channel: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
+    reply_to: str | None = Field(default=None, max_length=80)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=10)
+    notify_all: bool = False
 
 
 class MarkReadRequest(BaseModel):
@@ -237,13 +249,24 @@ async def get_chat(
     # messages would never appear). The USER dir stat stays a real filesystem
     # validator — the @-autocomplete list is folders on disk, not a repo doc.
     validator = get_repository().version_token("chat_log", str(chat_path))
-    etag = _etag(validator, f"c:{project}:{limit}:{users_validator}") if validator != "0" else None
+    # Channels the artist does not see (Team, access per channel): their state is part of the view.
+    from features.team import team_meta
+    from flux_flows import page_data
+    me = config.get_current_user() or ""
+    try:
+        meta_tag = page_data.etag(team_meta.folder(project))
+    except (OSError, RuntimeError, ValueError):
+        meta_tag = ""
+    etag = _etag(validator, f"c:{project}:{limit}:{users_validator}:{me}:{meta_tag}") if validator != "0" else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
     loop = asyncio.get_running_loop()
     # get_messages caches internally (burst window); the stat above is the ETag's.
     messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit, path=chat_path))
+    hidden = await loop.run_in_executor(None, lambda: team_meta.hidden_channels(project, me))
+    if hidden:
+        messages = [m for m in messages if m.get("channel") not in hidden]
     users = await loop.run_in_executor(None, get_user_list)
     if etag:
         response.headers["ETag"] = etag
@@ -263,11 +286,82 @@ async def post_chat(req: ChatMessage) -> dict:
     except RuntimeError:
         raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
     loop = asyncio.get_running_loop()
+    audience = quiet = None
+    if req.notify_all:
+        # Muted channel / group (Team, P5): no phone for that artist, an @mention still rings.
+        from features.team import mutes, team_meta as tm
+        all_records = await loop.run_in_executor(None, lambda: tm.read(req.project)["records"])
+        quiet = lambda who: mutes.is_muted(who, req.project, req.channel, all_records)  # noqa: E731
+    if req.channel:
+        # A restricted channel: only the artists who see it may post, be @mentioned or notified.
+        from features.team import team_meta
+        records = await loop.run_in_executor(None, lambda: team_meta.read(req.project)["records"])
+        if req.channel in await loop.run_in_executor(None, lambda: team_meta.hidden_channels(req.project, user, records)):
+            raise HTTPException(status_code=403, detail=f"Tu ne vois pas le canal #{req.channel}")
+        # Read only / announcement channel: leads and supervisors post, the others read and react.
+        from features.roles import project_roles
+        if team_meta.is_read_only(team_meta.channel_record(records, req.channel)) and                 not await loop.run_in_executor(None, lambda: project_roles.can(req.project, "team_channels", user=user)):
+            raise HTTPException(status_code=403, detail=f"#{req.channel} est en lecture seule : seuls les leads y ecrivent")
+        channel = req.channel
+        audience = lambda who: channel not in team_meta.hidden_channels(req.project, who, records)  # noqa: E731
     ok = await loop.run_in_executor(
-        None, lambda: send_message(user, req.message, project=req.project),
+        None, lambda: send_message(user, req.message, project=req.project, channel=req.channel, reply_to=req.reply_to,
+                                   attachments=[a.model_dump() for a in req.attachments], notify_all=req.notify_all,
+                                   audience=audience, quiet=quiet),
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")
+    return {"success": True}
+
+
+class ChatEdit(BaseModel):
+    project: str
+    message: str = Field(max_length=4000)
+
+
+def _chat_project(project: str) -> None:
+    try:
+        resolve_chat_path(project)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nom de projet invalide")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    except RuntimeError:
+        raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
+
+
+@router.patch("/chat/{msg_id}")
+async def patch_chat(msg_id: str, req: ChatEdit) -> dict:
+    """Edit one's own message (ADR 0084: an appended record; the Discord bridge forwards it)."""
+    _chat_project(req.project)
+    user = config.get_current_user() or "unknown"
+    try:
+        await asyncio.to_thread(edit_message, user, msg_id, req.message, req.project)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Message introuvable (supprime ?)")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"success": True}
+
+
+@router.delete("/chat/{msg_id}")
+async def delete_chat(msg_id: str, project: str) -> dict:
+    """Delete one's own message, or any message for a lead / supervisor of the project."""
+    _chat_project(project)
+    user = config.get_current_user() or "unknown"
+    from features.roles import project_roles
+
+    def work() -> None:
+        delete_message(user, msg_id, project, is_lead=project_roles.can(project, "team_channels", user=user))
+
+    try:
+        await asyncio.to_thread(work)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Message introuvable (deja supprime ?)")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     return {"success": True}
 
 

@@ -59,6 +59,20 @@ class ConfigViaRepositoryTests(unittest.TestCase):
                 self.assertEqual(t["bg"], "#111111")
                 self.assertEqual(t["accent"], "#444444")
 
+    def test_first_launch_accent_is_orange_preset(self):
+        # A "#rrggbb" accent is a custom color for the front: the default must be the preset key.
+        with tempfile.TemporaryDirectory() as d:
+            prefs = Path(d) / "config.json"
+            with _patch_prefs(prefs):
+                self.assertEqual(config.get_theme()["accent"], "orange")
+
+    def test_legacy_default_accent_reads_as_orange_preset(self):
+        with tempfile.TemporaryDirectory() as d:
+            prefs = Path(d) / "config.json"
+            with _patch_prefs(prefs):
+                config.set_theme("#111111", "#222222", "#333333", "#F57C1F")
+                self.assertEqual(config.get_theme()["accent"], "orange")
+
     def test_dcc_exe_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:
             prefs = Path(d) / "config.json"

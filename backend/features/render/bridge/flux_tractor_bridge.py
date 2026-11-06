@@ -40,7 +40,7 @@ def _tq(req):
     import tractor.api.query as tq  # noqa: Tractor's Python only
 
     engine = req.get("engine") or ""
-    # Login account (school 2026-10-22: only "root" logs in, as tq does), not the job owner.
+    # Login account (studio environment engine_user, else the FLUX user), not the job owner.
     params = {"user": req.get("login") or req.get("user") or ""}
     if engine:
         host, _, port = engine.partition(":")
@@ -232,6 +232,23 @@ def _maxactive(req):
     return {"jid": int(req["jid"]), "maxactive": value}
 
 
+def _priority(req):
+    # One FLUX job of this user (checked by the backend): tq chpri on the exact job list.
+    value = int(req["value"])
+    if not 1 <= value <= 10000:
+        raise ValueError("priorite entre 1 et 10000")
+    tq = _tq(req)
+    tq.chpri(_one_job(tq, req["jid"]), priority=value)
+    return {"jid": int(req["jid"]), "priority": value}
+
+
+def _reload_limits(req):
+    # Environment screen only (password + "Understand" checked by the backend): the engine rereads limits.config.
+    _tq(req)
+    _engine_client().reloadLimitsConfig()
+    return {"reloaded": "limits.config"}
+
+
 def _engine_client():
     import tractor.api.query.base as qbase  # noqa: Tractor's Python only
     return qbase.ModuleEngineClient
@@ -314,7 +331,7 @@ VERBS = {
     "exit_codes": _exit_codes, "trace": _trace,
     "skip_errors": _job_op("skip_errors"), "restart": _job_op("restart"), "archive": _job_op("archive"),
     "restore": _job_op("restore"), "lock": _job_op("lock"), "unlock": _job_op("unlock"),
-    "shuffle_top": _job_op("shuffle_top"),
+    "shuffle_top": _job_op("shuffle_top"), "priority": _priority, "reload_limits": _reload_limits,
 }
 
 

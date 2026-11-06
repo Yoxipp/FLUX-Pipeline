@@ -2,7 +2,9 @@
 #
 # The Tractor API is never imported here: features.render.tractor_bridge runs the external
 # Python 2.7 bridge. Rendered images never go through this API (the UI opens the folder).
-# Until the school phase 0 is done, render.json keeps dry_run = true: .alf + .json are written, nothing is spooled.
+# render.json dry_run = true (opt-in simulation): .alf + .json are written, nothing is spooled. Default is the real farm.
+# Studio-specific values (engine, blade paths, tags, rooms) come from the studio environment file
+# (features.render.studio_env, linked from CONFIG/studio.json), never from this code.
 
 from __future__ import annotations
 
@@ -17,7 +19,9 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
-from features.render import exit_codes, farm_paths, farm_targets, freeze, job_builder, team_settings, tractor_bridge
+from features.render import (exit_codes, farm_limits, farm_paths, farm_targets, freeze, job_builder, studio_env,
+                             team_settings, tractor_bridge)
+from features.roles import project_roles
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -41,13 +45,99 @@ def _bridge_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=502, detail=str(exc))
 
 
+def _require(project: str, action: str) -> None:
+    """Project role check (lead / supervisor for these actions): HTTP 403 with the readable reason."""
+    try:
+        project_roles.require(project, action)
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
 # ── settings ────────────────────────────────────────────────────────────────
 
 @router.get("/settings")
 def get_settings(project: str):
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
-    return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user()}
+    shares = farm_limits.fetch_shares(settings["engine"])
+    tag, default_share = settings["render_tag"], settings["default_share"]
+    # Teams of the farm (engine limits.config, read only): Tractor shares the farm between them.
+    return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user(),
+            "farm_teams": farm_limits.teams(shares, tag, default_share),
+            # {team: {nominal, cap}} of FLUX's commands (render tag), default share = every other project. None = unknown.
+            "farm_shares": (shares or {}).get(tag),
+            "default_share": default_share,
+            "team_warning": farm_limits.team_warning(settings["tractor_project"], shares, tag, default_share)}
+
+
+# ── farm environment: the engine's limits.config (locked screen, 2026-10-23) ──
+# Role lead or supervisor on the project (project_roles "farm_env") + the "Understand" phrase.
+
+class EnvUnlock(BaseModel):
+    phrase: str = ""
+
+
+class EnvShares(EnvUnlock):
+    teams: dict  # {team: {"nominal": 0..1, "cap": 0..1}}
+
+
+@router.post("/env/state")
+def env_state(project: str, body: EnvUnlock):
+    """Shares as the engine serves them, and whether the configured folder holds that same file."""
+    _ensure_project(project)
+    _require(project, "farm_env")
+    try:
+        farm_limits.check_unlock(body.phrase)
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    settings = team_settings.effective_settings(project)
+    served = farm_limits.engine_text(settings["engine"])
+    out = {"engine": settings["engine"], "config_dir": settings["engine_config_dir"],
+           "engine_shares": farm_limits.parse_shares(served) if served else None, "folder_ok": False, "folder_error": None}
+    try:
+        _path, text = farm_limits.read_local(settings["engine_config_dir"])
+        out["folder_ok"] = served is not None and farm_limits.same_text(served, text)
+        if not out["folder_ok"]:
+            out["folder_error"] = ("Moteur injoignable" if served is None
+                                   else "Ce dossier ne contient pas le limits.config que sert le moteur")
+    except (farm_limits.LimitsError, OSError, UnicodeDecodeError) as exc:
+        out["folder_error"] = str(exc)
+    return out
+
+
+@router.put("/env/shares")
+def env_shares(project: str, body: EnvShares):
+    _ensure_project(project)
+    _require(project, "farm_env")
+    settings = team_settings.effective_settings(project)
+    if settings["dry_run"] is True:
+        raise HTTPException(status_code=400, detail="Mode simulation : la config de la farm n'est jamais modifiee")
+    try:
+        out = farm_limits.write_shares(settings["engine_config_dir"], settings["engine"], body.teams,
+                                       body.phrase, settings["default_share"])
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403 if "verrouilles" in str(exc) else 400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Ecriture impossible : {exc}")
+    log.warning("Farm limits.config Shares changed by %s (%s), backup %s", _user(), project, out["backup"])
+    return out
+
+
+@router.post("/env/reload")
+def env_reload(project: str, body: EnvUnlock):
+    _ensure_project(project)
+    _require(project, "farm_env")
+    try:
+        farm_limits.check_unlock(body.phrase)
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    settings = team_settings.effective_settings(project)
+    try:
+        out = tractor_bridge.reload_limits(settings, _user())
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    log.warning("Farm limits.config reloaded by %s (%s)", _user(), project)
+    return out
 
 
 # ── last launch form of each artist (follows the artist from desk to desk: stored in the project) ──
@@ -89,6 +179,7 @@ def put_last(project: str, last: dict):
 @router.put("/settings")
 def put_settings(project: str, patch: dict):
     _ensure_project(project)
+    _require(project, "render_settings")
     try:
         team_settings.write_settings(project, patch)
     except ValueError as exc:
@@ -160,6 +251,9 @@ class SubmitBody(BaseModel):
     groups: list[str] = []          # team groups (render.json host_groups) or rooms (ROOM17)
     share_percent: Optional[int] = None  # % of the farm for this job, None = team default
     share_of: Optional[str] = None       # "alive" | "free"
+    priority: Optional[int] = None       # this job only, None = team default (higher = dispatched first)
+    denoise: bool = False                # RenderMan denoise_batch after the render, same job
+    denoise_crossframe: Optional[bool] = None  # None = team default
 
 
 # ── farm snapshot (shared by /farm, /submit and the team balancer) ──────────
@@ -170,12 +264,12 @@ _snapshot: dict = {}
 
 def _farm_snapshot(settings: dict, user: str) -> dict:
     """Classified blades, counts and rooms. Cached a few seconds: one engine query per poll at most."""
-    key = settings.get("engine") or ""
+    key = (settings.get("engine") or "") + "|" + (settings.get("room_pattern") or "")
     cached = _snapshot.get(key)
     if cached and time.time() - cached["at"] < _SNAPSHOT_TTL:
         return cached["data"]
     raw = tractor_bridge.blades(settings, user)
-    blades = farm_targets.classify(raw.get("blades", []))
+    blades = farm_targets.classify(raw.get("blades", []), room_pattern=settings.get("room_pattern") or "")
     data = {"blades": blades, "counts": farm_targets.counts(blades), "rooms": farm_targets.rooms(blades),
             "active_by_project": raw.get("active_by_project", {}), "dry_run": raw.get("dry_run", False)}
     _snapshot[key] = {"at": time.time(), "data": data}
@@ -196,9 +290,8 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
         share["percent"] = body.share_percent
     if body.share_of:
         share["of"] = body.share_of
-    team = settings["team_cap"]
     snap = None
-    if body.groups or share["percent"] or team["percent"]:
+    if body.groups or share["percent"]:
         try:
             snap = _farm_snapshot(settings, user)
         except tractor_bridge.BridgeError as exc:
@@ -209,12 +302,10 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
         include = farm_targets.resolve_hosts(body.hosts, body.groups, settings["host_groups"], rooms)
         service = farm_targets.service_expression(base, include, settings["exclude_hosts"])
         own = 0
-        team_total = 0
         if snap:
             if not 0 <= int(share["percent"]) <= 100:
                 raise ValueError("pourcentage entre 0 et 100")
             own = farm_targets.cap_from_percent(int(share["percent"]), share["of"], counts)
-            team_total = farm_targets.cap_from_percent(team["percent"], team["of"], counts)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if (body.hosts or body.groups) and not include:
@@ -222,8 +313,12 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
     if include and not farm_targets.FLUX_HOST_TARGETING_VERIFIED:
         notes.append("Ciblage par nom de machine pas encore valide sur la farm (job test a faire)")
     own = _min_cap(settings["maxactive"], own)
-    # The team balancer refines this on the next farm poll; start under the team budget.
-    return service, _min_cap(own, team_total), own, notes
+    return service, own, own, notes
+
+
+def _team_note(settings: dict) -> list[str]:
+    note = farm_limits.team_warning(settings["tractor_project"], farm_limits.fetch_shares(settings["engine"]))
+    return [note] if note else []
 
 
 def _farm(path: Path | str, what: str, simulate: bool) -> str:
@@ -248,6 +343,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
         raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un rendu sur la farm")
     do_freeze = settings["freeze_by_default"] if body.freeze is None else body.freeze
     renderer = body.renderer or settings["renderer"]
+    if not renderer:
+        raise HTTPException(status_code=400, detail="Choisir un moteur de rendu (karma ou renderman) : "
+                                                    "aucun par defaut dans les reglages ni l'environnement du studio")
     freeze_when = body.freeze_when or settings["freeze_when"]
     if freeze_when not in team_settings.FREEZE_WHEN:
         raise HTTPException(status_code=400, detail=f"freeze_when inconnu : {freeze_when}")
@@ -284,7 +382,29 @@ def _submit(body: SubmitBody, user: str) -> dict:
     if start is None or end is None:
         raise HTTPException(status_code=400, detail="Plage de frames inconnue : la saisir")
 
+    # Published shot: its render layer's settings (ADR 0060). A stage from the HDA keeps Houdini's.
+    render_settings = ""
+    if not body.usd_path:
+        from features.usd_assembler.shot_render import stage_settings
+
+        render_settings = stage_settings(Path(frozen["usd"]), renderer)
+    priority = settings["priority"] if body.priority is None else body.priority
+    if not isinstance(priority, int) or not 1 <= priority <= 10000:
+        raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
+    if body.denoise and renderer != "renderman":
+        raise HTTPException(status_code=400, detail="Denoise apres rendu : RenderMan seulement (Karma : denoiser dans ses reglages)")
+    try:
+        if body.denoise:
+            team_settings.require_denoise(settings)
+        if at_start:
+            team_settings.require_houdini(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
+    if body.denoise and render_settings:
+        # ADR 0060: the generated render layer has the beauty only, not RenderMan's denoise AOVs.
+        notes.append("Denoise : le stage publie n'a que la beaute (pas les AOV de denoise RenderMan), "
+                     "le denoise risque d'echouer. Lancer depuis Houdini (Entree LOP) avec les AOV de denoise.")
     out_dir = freeze.reserve_render_dir(folder)
     render_usd = _farm(frozen["usd"], "Le USD", simulate)
     freeze_at_start = {}
@@ -294,7 +414,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         freeze_at_start = {
             "freeze_source": render_usd,
             "freeze_script": _farm(script, "Le script de gel", simulate),
-            "freeze_python": team_settings.BLADE_TRACTOR_PYTHON,
+            "freeze_python": settings["blade_tractor_python"],
             "freeze_houdini": settings["houdini_path"],
         }
         render_usd = _farm(out_dir / "_job" / f"{name}_frozen.usda", "Le dossier de rendu", simulate)
@@ -303,13 +423,19 @@ def _submit(body: SubmitBody, user: str) -> dict:
         project=settings["tractor_project"],
         user=user,
         usd_path=render_usd,
+        render_settings=render_settings,
         **freeze_at_start,
+        denoise=body.denoise,
+        denoise_exe=settings["denoise_path"],
+        denoise_tag=settings["denoise_tag"],
+        forbid_drive_letters=settings["forbid_drive_letters"],
+        denoise_crossframe=settings["denoise_crossframe"] if body.denoise_crossframe is None else body.denoise_crossframe,
         output_pattern=_farm(out_dir / f"{name}.$F4.exr", "Le dossier de rendu", simulate),
         frame_start=start,
         frame_end=end,
         renderer=renderer,
         chunk_size=body.chunk_size or settings["chunk_size"],
-        priority=settings["priority"],
+        priority=priority,
         maxactive=maxactive,
         service=service,
         envkeys=settings["envkeys"],
@@ -334,8 +460,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
     return {**result, "title": spec.title, "output": str(out_dir), "usd": spec.usd_path if at_start else frozen["usd"],
             "frozen": frozen["frozen"] or at_start, "freeze_when": "start" if at_start else "submit",
             "frames": [start, end], "start_at": spec.start_after,
-            "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes,
-            "priority_warning": team_settings.priority_warning(settings)}
+            "denoise": str(out_dir / job_builder.DENOISE_DIR) if spec.denoise else None,
+            "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes + _team_note(settings),
+            "priority": priority, "priority_warning": team_settings.priority_warning({**settings, "priority": priority})}
 
 
 _SUBMIT_LOCK = threading.Lock()
@@ -344,8 +471,9 @@ _SUBMIT_MAX = 10  # per backend and per 10 minutes: never flood the engine (2026
 _submits: list[float] = []
 
 
-def _guarded_submit(body: SubmitBody, user: str) -> dict:
-    """One submit at a time per backend, and a rate cap (a double click or a loop never floods the farm)."""
+def _guarded_submit(body, user: str, run=None) -> dict:
+    """One submit at a time per backend, and a rate cap (a double click or a loop never floods the farm).
+    run: the submit to guard (render by default, or the denoise of a rendered sequence)."""
     if not _SUBMIT_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Un lancement est deja en cours, attendre la fin")
     try:
@@ -354,7 +482,7 @@ def _guarded_submit(body: SubmitBody, user: str) -> dict:
         if len(_submits) >= _SUBMIT_MAX:
             raise HTTPException(status_code=429, detail=(
                 f"Trop de lancements ({_SUBMIT_MAX} en {_SUBMIT_WINDOW_S // 60} min) : attendre un peu"))
-        result = _submit(body, user)
+        result = (run or _submit)(body, user)
         if not result.get("dry_run"):
             _submits.append(now)
         return result
@@ -366,6 +494,93 @@ def _guarded_submit(body: SubmitBody, user: str) -> dict:
 async def submit(body: SubmitBody):
     # Freezing writes a stage version and audits USD dependencies: off the event loop.
     return await asyncio.to_thread(_guarded_submit, body, _user())
+
+
+# ── denoise of an already rendered sequence (2026-10-23) ─────────────────
+
+class DenoiseBody(BaseModel):
+    project: str
+    path: str                            # one frame, a pattern (####, $F4) or the folder of the sequence
+    frame_start: Optional[int] = None    # None = first frame found
+    frame_end: Optional[int] = None
+    crossframe: Optional[bool] = None    # None = team default
+    priority: Optional[int] = None
+    chunk_size: Optional[int] = None
+
+
+def _denoise_sequence(body: DenoiseBody, user: str) -> dict:
+    from features.render import image_sequence
+
+    _ensure_project(body.project)
+    settings = team_settings.effective_settings(body.project)
+    simulate = settings["dry_run"] is True
+    if not simulate and user in tractor_bridge.ANONYMOUS_USERS:
+        raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un denoise sur la farm")
+    try:
+        team_settings.require_denoise(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        seq = image_sequence.find(body.path)
+    except image_sequence.SequenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    start = seq["first"] if body.frame_start is None else body.frame_start
+    end = seq["last"] if body.frame_end is None else body.frame_end
+    if start > end or start < seq["first"] or end > seq["last"]:
+        raise HTTPException(status_code=400, detail=f"Plage {start}-{end} hors de la sequence ({seq['first']}-{seq['last']})")
+    holes = [f for f in seq["missing"] if start <= f <= end]
+    if holes:
+        shown = ", ".join(str(f) for f in holes[:10]) + (" ..." if len(holes) > 10 else "")
+        raise HTTPException(status_code=400, detail=f"Images manquantes dans la sequence : {shown}")
+    priority = settings["priority"] if body.priority is None else body.priority
+    if not isinstance(priority, int) or not 1 <= priority <= 10000:
+        raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
+    folder = seq["folder"]
+    try:
+        service = farm_targets.service_expression(settings["service_renderman"], [], settings["exclude_hosts"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    out = folder / job_builder.DENOISE_DIR
+    stem = seq["pattern"].split("$F")[0].rstrip("._") or folder.name
+    spec = job_builder.RenderJobSpec(
+        title=f"{body.project} denoise {stem} {folder.name}",
+        project=settings["tractor_project"],
+        user=user,
+        usd_path="",
+        output_pattern=_farm(folder, "La sequence", simulate) + "/" + seq["pattern"],
+        frame_start=start,
+        frame_end=end,
+        renderer="renderman",
+        chunk_size=body.chunk_size or settings["chunk_size"],
+        priority=priority,
+        service=service,
+        envkeys=settings["envkeys"],
+        denoise_only=True,
+        denoise_exe=settings["denoise_path"],
+        denoise_tag=settings["denoise_tag"],
+        forbid_drive_letters=settings["forbid_drive_letters"],
+        denoise_crossframe=settings["denoise_crossframe"] if body.crossframe is None else body.crossframe,
+        metadata={"flux_project": body.project, "entity": stem, "user": user, "kind": "denoise",
+                  "output": _farm(out, "Le dossier denoised", simulate)},
+    )
+    try:
+        result = tractor_bridge.spool(spec, settings, user, out / "_job")
+    except job_builder.JobValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    if result.get("jid") is not None:
+        _running[int(result["jid"])] = {"project": body.project, "title": spec.title,
+                                        "output": str(out), "user": user, "seen": time.time()}
+    log.info("Denoise %s %s -> %s", "simulated" if result["dry_run"] else "spooled", spec.title, result.get("jid"))
+    return {**result, "title": spec.title, "output": str(out), "frames": [start, end], "count": end - start + 1,
+            "pattern": seq["pattern"], "warnings": _team_note(settings),
+            "priority_warning": team_settings.priority_warning({**settings, "priority": priority})}
+
+
+@router.post("/denoise")
+async def denoise(body: DenoiseBody):
+    return await asyncio.to_thread(_guarded_submit, body, _user(), _denoise_sequence)
 
 
 # ── follow-up ───────────────────────────────────────────────────────────────
@@ -486,60 +701,14 @@ async def job_task_log(jid: int, tid: int, project: str):
     return await asyncio.to_thread(_task_log, project, jid, tid, _user())
 
 
-_BALANCE_MAX_CHANGES = 20  # engine writes per poll, at most (never flood the engine)
-_DONE_STATES = ("done", "deleted")
-
-
-def _as_int(value) -> int:
-    try:
-        return max(0, int(str(value or "0")))
-    except ValueError:
-        return 0
-
-
-def _balance_team(project: str, settings: dict, user: str, counts: dict) -> dict:
-    """Split the team cap between the team's unfinished FLUX jobs (jattr maxactive).
-
-    Every FLUX window of the team runs the same deterministic split, so they agree.
-    Only jobs with metadata.flux_project == project and the team's Tractor project are touched.
-    """
-    team = settings["team_cap"]
-    total = farm_targets.cap_from_percent(team["percent"], team["of"], counts) if team["percent"] else 0
-    out = {"enabled": bool(total), "slots": total, "used": 0, "targets": {}, "changed": 0, "errors": []}
-    if not total:
-        return out
-    listing = tractor_bridge.jobs(settings, user, project=settings["tractor_project"], days=30)
-    team_jobs = [j for j in listing.get("jobs", [])
-                 if j.get("metadata", {}).get("flux_project") == project and j.get("state") not in _DONE_STATES
-                 and settings["tractor_project"] in (j.get("projects") or [])]
-    out["used"] = sum(int(j.get("numActive") or 0) for j in team_jobs)
-    live = [j for j in team_jobs if j.get("state") != "paused"]
-    targets = farm_targets.split_team_cap(total, [
-        {"jid": j["jid"], "remaining": int(j.get("numTasks") or 0) - int(j.get("numDone") or 0),
-         "cap": _as_int(j.get("metadata", {}).get("cap"))} for j in live])
-    out["targets"] = targets
-    if settings.get("dry_run") is True:
-        return out  # computed and shown, never applied in simulation
-    current = {j["jid"]: int(j.get("maxactive") or 0) for j in live}
-    for jid, value in sorted(targets.items()):
-        if current.get(jid) == value:
-            continue
-        if out["changed"] >= _BALANCE_MAX_CHANGES:
-            break
-        try:
-            tractor_bridge.set_maxactive(settings, user, jid, value)
-            out["changed"] += 1
-        except tractor_bridge.BridgeError as exc:
-            out["errors"].append(f"{jid}: {exc}")
-    return out
-
+# No FLUX team cap any more (2026-10-23): the school's Shares (engine limits.config) share the farm,
+# FLUX never rewrites a job's maxactive. render.json may still hold "team_cap": read, never applied.
 
 def _farm_state(project: str, user: str) -> dict:
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
     try:
         out = dict(_farm_snapshot(settings, user))
-        out["team_cap"] = _balance_team(project, settings, user, out["counts"])
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
     out["schedule"] = settings["schedule"]
@@ -586,6 +755,26 @@ def _action(project: str, jid: int, action: str, user: str) -> dict:
         raise _bridge_error(exc)
 
 
+class PriorityBody(BaseModel):
+    priority: int
+
+
+def _set_priority(project: str, jid: int, value: int, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        out = tractor_bridge.set_priority(settings, user, jid, value)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    return {**out, "priority_warning": team_settings.priority_warning({**settings, "priority": value})}
+
+
+# Declared before /jobs/{jid}/{action}: FastAPI matches routes in order.
+@router.post("/jobs/{jid}/priority")
+async def job_priority(jid: int, project: str, body: PriorityBody):
+    return await asyncio.to_thread(_set_priority, project, jid, body.priority, _user())
+
+
 @router.post("/jobs/{jid}/{action}")
 async def job_action(jid: int, action: str, project: str):
     if action not in tractor_bridge.JOB_ACTIONS:
@@ -605,3 +794,74 @@ def _trace(project: str, jid: int, user: str) -> dict:
 @router.get("/jobs/{jid}/trace")
 async def job_trace(jid: int, project: str):
     return await asyncio.to_thread(_trace, project, jid, _user())
+
+
+# ── studio environment: the link in CONFIG/studio.json and the file it points to (ADR 0063) ──
+# Role lead or supervisor ("project_settings") to change anything. Reading is open to the project.
+
+class StudioEnvBody(BaseModel):
+    name: Optional[str] = None
+    farm: Optional[dict] = None
+
+
+class StudioEnvLink(BaseModel):
+    link: str = ""
+    create: bool = False  # create the file (empty environment) when the link points to nothing yet
+
+
+def _studio_env_state() -> dict:
+    from core import studio_config
+
+    link = studio_config.read_studio()["environment"]
+    path = studio_config.environment_path()
+    env = studio_env.read_environment(path) if path else studio_env.read_environment(None)
+    try:
+        exists = bool(path and path.is_file())
+    except OSError:
+        exists = False
+    return {"link": link, "path": str(path) if path else "", "exists": exists, "name": env["name"],
+            "values": env["farm"], "defaults": studio_env.FARM_DEFAULTS}
+
+
+@router.get("/studio-env")
+def get_studio_env(project: str):
+    _ensure_project(project)
+    return _studio_env_state()
+
+
+@router.put("/studio-env")
+def put_studio_env(project: str, body: StudioEnvBody):
+    _ensure_project(project)
+    _require(project, "project_settings")
+    patch = {k: v for k, v in (("name", body.name), ("farm", body.farm)) if v is not None}
+    try:
+        studio_env.write_environment(patch)
+    except studio_env.StudioEnvError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log.warning("Studio environment changed by %s (%s)", _user(), project)
+    _snapshot.clear()
+    return _studio_env_state()
+
+
+@router.put("/studio-env/link")
+def put_studio_env_link(project: str, body: StudioEnvLink):
+    from core import studio_config
+    from core.json_manager import write_json
+
+    _ensure_project(project)
+    _require(project, "project_settings")
+    try:
+        target = studio_config.resolve_link(body.link)
+        if target is not None and not target.is_file():
+            if not body.create:
+                raise HTTPException(status_code=400, detail=f"Fichier d'environnement introuvable : {target}")
+            if not write_json(target, studio_env.DEFAULTS):
+                raise HTTPException(status_code=400, detail=f"Creation impossible : {target}")
+        studio_config.write_studio({"environment": body.link})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=f"Dossier FLUX_ROOT non configure : {exc}")
+    log.warning("Studio environment link changed by %s (%s)", _user(), project)
+    _snapshot.clear()
+    return _studio_env_state()

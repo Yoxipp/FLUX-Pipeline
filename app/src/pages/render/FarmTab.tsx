@@ -1,22 +1,25 @@
-// FarmTab.tsx: who uses the farm right now. Blade states, team cap, usage per team (Tractor project)
+// FarmTab.tsx: who uses the farm right now. Blade states, usage per team (Tractor project)
 // and per room. Source: running commands on the engine (backend /render/farm), polled every 30 s.
 
 import { useMemo, useState } from 'react'
-import type { RenderBladeState, RenderFarm } from '../../api/client'
-import { Activity, Clock, Layers, Users } from 'lucide-react'
+import type { RenderBladeState, RenderFarm, RenderShareRule } from '../../api/client'
+import { ShareSummary } from './ShareSummary'
+import { Activity, Clock, Users } from 'lucide-react'
 import { MachinePicker } from './MachinePicker'
-import { BLADE_COLOR, Bar, Section, bladeStateLabel, card, hint, roomLabel, useTr, warnText } from './renderUi'
+import { BLADE_COLOR, Bar, Section, bladeStateLabel, card, hint, roomLabel, useTr } from './renderUi'
 
 const STATES: RenderBladeState[] = ['free', 'busy', 'nimby', 'offline']
 
-export function FarmTab({ farm }: { farm: RenderFarm | null }) {
+export function FarmTab({ farm, project, shares }: {
+  farm: RenderFarm | null; project: string; shares: Record<string, RenderShareRule> | null
+}) {
   const { tr } = useTr()
   const [showList, setShowList] = useState(false)
 
   const byRoom = useMemo(() => {
     const out: Record<string, Record<RenderBladeState, number>> = {}
     for (const b of farm?.blades ?? []) {
-      if (b.state === 'offline') continue
+      if (b.state === 'offline' || !b.room) continue   // no room_pattern in the studio environment: no rooms
       const r = (out[b.room] ??= { free: 0, busy: 0, nimby: 0, offline: 0 })
       r[b.state] += 1
     }
@@ -30,7 +33,6 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
   const c = farm.counts
   const teams = Object.entries(farm.active_by_project).sort((a, b) => b[1] - a[1])
   const maxTeam = Math.max(1, ...teams.map(t => t[1]))
-  const cap = farm.team_cap
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -44,6 +46,8 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
         ))}
       </div>
 
+      <ShareSummary farm={farm} project={project} shares={shares} />
+
       <Section title={tr('Mon equipe', 'My team')}>
         <div style={{ fontSize: 11.5, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Users size={12} /><b>{farm.tractor_project}</b></span>
@@ -54,21 +58,8 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
             <Clock size={12} />{farm.schedule.enabled ? `${farm.schedule.start}-${farm.schedule.end}` : '24/24'}
           </span>
         </div>
-        {cap.enabled ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11.5 }}>
-              <span style={{ width: 140, color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Layers size={12} />{tr('Plafond', 'Cap')}</span>
-              <Bar value={cap.used} max={cap.slots} color={cap.used > cap.slots ? 'var(--warn)' : 'var(--accent)'} />
-              <span style={{ color: 'var(--ink-3)', minWidth: 50, textAlign: 'right' }}>{cap.used} / {cap.slots}</span>
-            </div>
-            {Object.keys(cap.targets).length > 0 && (
-              <div style={hint}>{Object.entries(cap.targets).map(([j, n]) => `#${j} : ${n}`).join('   ')}</div>
-            )}
-            {cap.errors.map((e, i) => <div key={i} style={warnText}>{e}</div>)}
-          </>
-        ) : (
-          <div style={hint}>{tr('Pas de plafond', 'No cap')}</div>
-        )}
+        <div style={hint}>{tr("Part de la farm : celle de l'equipe dans limits.config, Tractor equilibre lui-meme.",
+          "Farm share: the team's in limits.config, Tractor balances by itself.")}</div>
       </Section>
 
       <Section title={tr('Par equipe (projet Tractor)', 'Per team (Tractor project)')}>
@@ -85,7 +76,7 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
         })}
       </Section>
 
-      <Section title={tr('Par salle', 'Per room')}>
+      {byRoom.length > 0 && <Section title={tr('Par salle', 'Per room')}>
         {byRoom.map(([room, n]) => {
           const total = n.free + n.busy + n.nimby
           return (
@@ -105,7 +96,7 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
           {showList ? tr('Masquer les machines', 'Hide machines') : tr('Voir les machines', 'Show machines')}
         </button>
         {showList && <MachinePicker blades={farm.blades} selected={[]} onChange={() => undefined} hideOffline={false} readOnly />}
-      </Section>
+      </Section>}
     </div>
   )
 }

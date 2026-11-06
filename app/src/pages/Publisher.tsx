@@ -22,8 +22,10 @@ import { api } from '../api/client'
 import type { DesignerPackage, MayaUsdPreview, MayaUsdTreeNode, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useWorkProfile } from '../WorkProfileContext'
-import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../hooks/useVisibleDccs'
 import { SOFTWARE } from '../lib/dccs'
+import { flowsApi } from '../api/flows'
+import { GeneratedPublishPanel } from './tool_pages/GeneratedPublishPanel'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import { PublishDestination } from './publisher/PublishDestination'
 import type { MapOpts } from './publisher/TextureMapTable'
@@ -690,9 +692,16 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   // Work profile (ADR 0042): first software shown, unless the user or a navigation
   // (Production prefill, ZBrush freeze) already picked one.
   const { ready: prefsReady, prefs: workPrefs } = useWorkProfile()
-  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const { isVisible: isDccEnabled } = useVisibleDccs()
   const dccPicked = useRef(readSession(PUB + 'dcc') !== undefined)
   const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
+  // P7: softwares added as extension bridges (P6c), each with a generated panel.
+  const [extSofts, setExtSofts] = useState<{ soft: string; label: string }[]>([])
+  useEffect(() => {
+    flowsApi.bridges().then(r => setExtSofts(r.bridges.filter(b => b.ok && b.manifest).map(b => ({ soft: b.soft, label: b.manifest!.label }))
+      .filter(e => !SOFTWARE.some(x => x.name === e.label)))).catch(() => setExtSofts([]))
+  }, [])
+  const extSoft = extSofts.find(e => e.label === dcc)
   const dccEnabled = useCallback((name: string) => {
     const key = SOFTWARE.find(x => x.name === name)?.key
     return !key || isDccEnabled(key)
@@ -1460,6 +1469,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           port:         readActiveInstancePort('Maya') ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Maya`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Houdini') {
         if (!houdiniConnected) {
           toast.error(tr('Houdini non connecté : lance le serveur FLUX dans Houdini', 'Houdini not connected: start the FLUX server in Houdini'))
@@ -1512,6 +1522,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:          settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → ${res.rop_node}`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
           toast.error(tr('ZBrush non connecté : active le bridge FLUX dans ZBrush', 'ZBrush not connected: enable the FLUX bridge in ZBrush'))
@@ -1526,6 +1537,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → ZBrush`)
+        res.warnings?.forEach(w => toast.warning(w))
         setZbrushConnected(false)
         setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
@@ -1550,6 +1562,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Nuke`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Photoshop') {
         if (!bridgeStatus.connected) {
           toast.error(tr('Photoshop non connecté : ouvre Photoshop (photoshop-python-api requis)', 'Photoshop not connected: open Photoshop (photoshop-python-api required)'))
@@ -2031,12 +2044,14 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
 
       {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
       <div className="page-toolbar">
-        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} />
+        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} extra={extSofts.map(e => e.label)} />
         <ProjectPicker />
         <div style={{ flex: 1 }} />
         {connectionPill}
       </div>
 
+      {/* P7 (04 §7): a software added as an extension gets its generated panel, the rest stays as is. */}
+      {extSoft ? <GeneratedPublishPanel soft={extSoft.soft} label={extSoft.label} project={project || undefined} /> : <>
       <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
@@ -2954,6 +2969,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           {publishing ? tr('Publication…', 'Publishing…') : 'Publish'}
         </Btn>
       </div>
+      </>}
 
       {/* Instance picker: several Maya / Houdini are open */}
       {instancePick && (

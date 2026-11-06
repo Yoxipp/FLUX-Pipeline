@@ -18,7 +18,8 @@
 # value that came through a link is never resolved again (01 §11).
 # Errors: on_error linked = error_handled (``error`` output, the flow follows it),
 # else the run stops in ``error``. Timeouts: ``params.timeout_s``, 120 s (600 s for
-# session / dcc nodes); a thread cannot be killed: abandoned, result ignored.
+# session / dcc nodes, none for the dcc publish cores); a thread cannot be killed: abandoned,
+# result ignored.
 # Cancel: ``cancelled`` flag between nodes + CancelledError on the current await.
 #
 # Admission (RunManager): run_policy skip_if_running / queue (FIFO, 20 max per
@@ -39,32 +40,38 @@ import time
 import weakref
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from flux_flows import events, resolver, runs
+from flux_flows import events, page_inputs, resolver, runs
 from flux_flows.model import SUBNET_TYPE, Flow
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import EXEC_KEY, NodeContext, NodeError
 from flux_flows.nodes.data import cast_literal
 from flux_flows.nodes.operator import (BLOCK_ENDS, BREAK_LOOP, CONDITION_KEY, FOR_BEGIN, FOREACH_BEGIN,
                                        ITEMS_KEY, LIMIT_KEY, SEQUENCE_KEY, WHILE_BEGIN)
-from flux_flows.nodes.subflow import FLOW_CALL
+from flux_flows.nodes.subflow import FLOW_CALL, FLOW_OUTPUT
+from flux_flows.page_inputs import PAGE_NODE
 
 log = logging.getLogger("flux.flows.engine")
 
+SET_VARIABLE = "data.set_variable"
+
 DEFAULT_TIMEOUT_S = 120.0
 DCC_TIMEOUT_S = 600.0
+PUBLISH_CORE_SUFFIX = "_publish_core"    # dcc.<p>_publish_core: no engine timeout (P8 n°1)
 MAX_RUNNING = 4
 MAX_QUEUE = 20
 PUSH_TICK_S = 0.1          # node_state / link_value grouped: 10 pushes per second per run at most
 WRITE_EVERY_S = 1.0        # record rewritten once per second at most
-START_EVENTS = ("event.manual", "event.button")
+START_EVENTS = ("event.manual", "event.page_inputs", "event.button", "event.publish_request",
+                "event.team_command")
 DRY_LIMITS_FR = ("Essai a blanc : apres un effet simule, les lectures voient le disque reel ; "
                  "l'essai estime, il ne garantit pas.")
 
 MAX_SUBFLOW_DEPTH = 8     # 01 §8, E_SUBFLOW_CYCLE beyond
 END_TYPES = frozenset(BLOCK_ENDS.values())
-_TEXT_TYPES = ("str", "path", "dir", "pattern", "any", "list[str]", "list[path]", "list[any]")
+_TEXT_TYPES = ("str", "path", "dir", "pattern", "any", "dcc_node", "list[str]", "list[path]", "list[any]")
 
 Frames = Tuple[Tuple[str, int], ...]
 
@@ -107,6 +114,16 @@ def base_context(user: Optional[str], project: Optional[str], flow: str, run_id:
             "date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H-%M-%S"), "flow": flow, "run_id": run_id}
 
 
+def start_node_for(flow: Flow, event: str) -> Optional[str]:
+    """Node id started by *event* when it is not a node id: the button_id of an
+    event.button (a page button, 04 §4), else an event type (publish_request, 04 §7)."""
+    tops = sorted(flow.nodes.items())
+    for nid, node in tops:
+        if node.type == "event.button" and str(node.params.get("button_id") or "") == event:
+            return nid
+    return next((nid for nid, node in tops if node.type == f"event.{event}"), None)
+
+
 def precheck(flow: Flow, event: Optional[str], mode: str = "real",
              project: Optional[str] = None) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """(start event id, blocking issues): the validation of 01 §8 (P4). A type mismatch
@@ -117,6 +134,8 @@ def precheck(flow: Flow, event: Optional[str], mode: str = "real",
     issues: List[Dict[str, Any]] = [i.to_dict() for i in validate.errors(found, dry_run=mode == "dry")
                                     if i.code != "E_NO_EVENT"]
     event_ids = [nid for nid, n in flow.nodes.items() if n.type.startswith("event.")]
+    if event is not None and event not in event_ids:
+        event = start_node_for(flow, event) or event
     if event is not None:
         if event not in event_ids:
             issues.append({"level": "error", "code": "E_NO_EVENT", "node": event, "port": None,
@@ -139,7 +158,8 @@ class Run:
                  base_revision: Optional[int] = None, event: Optional[str] = None,
                  values: Optional[Dict[str, Any]] = None, folder=None,
                  context: Optional[Dict[str, Any]] = None, depth: int = 0,
-                 call_stack: Tuple[str, ...] = (), flow_loader=None) -> None:
+                 call_stack: Tuple[str, ...] = (), flow_loader=None,
+                 payload: Optional[Dict[str, Any]] = None, checked: bool = True) -> None:
         if mode not in ("real", "dry"):
             raise ValueError(f"mode inconnu '{mode}'")
         self.flow = flow
@@ -149,12 +169,26 @@ class Run:
         self.run_id = runs.make_run_id(user)
         self.cancelled = threading.Event()
         self.task: Optional[asyncio.Task] = None
-        self.event_id, self.issues = precheck(flow, event, mode, project)
+        # checked=False: a probe of the scheduler (event inputs), never a real run.
+        self.event_id, self.issues = precheck(flow, event, mode, project) if checked else (event, [])
         self.values = dict(values or {})
+        # Payload of the event that started the run (scheduler, hooks: 01 §9), read by event nodes.
+        self.payload = dict(payload or {})
+        # Jobs of the ForEach loops in mode dispatch, innermost last (ADR 0067).
+        self._dispatch: List[Dict[str, Any]] = []
+        self.interrupted: Optional[str] = None   # reason when the scheduler stops the run (lock lost, stop)
+        self._cleanups: List[Any] = []          # closed at the end of the run (headless sessions, P6a)
         self.record = runs.new_record(run_id=self.run_id, flow=flow.name, scope=scope, project=project,
                                       version=version, draft=draft, mode=mode, user=user,
                                       base_revision=base_revision,
-                                      trigger={"event": self.event_id, "values": self.values})
+                                      trigger={"event": self.event_id, "values": self.values,
+                                               # P7: the page button_id (or event type) the run was asked with
+                                               **({"button": event} if event and event != self.event_id else {}),
+                                               # ADR 0068: "<page>/<button>" of a page click
+                                               **({"page_button": f"{payload['page']}/{payload['button']}"}
+                                                  if payload and payload.get("page") and payload.get("button") else {}),
+                                               **({"payload": {k: runs.preview(v) for k, v in self.payload.items()}}
+                                                  if self.payload else {})})
         self.context = base_context(user, project, flow.name, self.run_id)
         if context:
             self.context.update(context)
@@ -329,6 +363,15 @@ class Run:
                 out[key] = val
         return out
 
+    async def evaluate_inputs(self, nid: str) -> Dict[str, Any]:
+        """Inputs of node *nid* pulled from their pure sources (event.when condition,
+        event.new_file folder): the scheduler probes an event without running the flow."""
+        node, spec = self._spec(nid)
+        got: Dict[str, Any] = {}
+        params = self._params(node, spec)
+        await self._inputs(nid, node, spec, got, params)
+        return {**params, **got}
+
     # -- subflows (02 §10) ---------------------------------------------------------
     def set_output(self, ident: str, value: Any) -> None:
         declared = {o.id for o in self.flow.interface.outputs}
@@ -348,14 +391,16 @@ class Run:
         number = None if version in (None, "", "current") else int(version)
         return store.read_flow(roots, scope, name, number)["flow"]
 
-    async def call_flow(self, nid: str, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_flow(self, nid: str, name: str, version: Any, values: Dict[str, Any],
+                        flow: Optional[Flow] = None) -> Dict[str, Any]:
         chain = self.call_stack + (self.flow_name,)
         if name in chain:
             raise NodeError(f"Sous-flow en boucle : {' > '.join(chain + (name,))}", code="E_SUBFLOW_CYCLE")
         if self.depth + 1 > MAX_SUBFLOW_DEPTH:
             raise NodeError(f"Plus de {MAX_SUBFLOW_DEPTH} sous-flows imbriques", code="E_SUBFLOW_CYCLE")
         try:
-            flow = await asyncio.to_thread(self._load_flow, name, version)
+            if flow is None:      # a DCC subflow node hands its flow (dcc_nodes.py)
+                flow = await asyncio.to_thread(self._load_flow, name, version)
         except NodeError:
             raise
         except Exception as exc:
@@ -368,6 +413,7 @@ class Run:
                     event=manual[0], values=values, folder=None, context=context, depth=self.depth + 1,
                     call_stack=chain, flow_loader=self._flow_loader)
         child.cancelled = self.cancelled
+        child._cleanups = self._cleanups      # a session opened in a subflow lives until the end of the caller
         errors = [i for i in child.issues if i.get("level") == "error"]
         if errors:
             raise NodeError(f"Le flow `{name}` a des erreurs : {errors[0]['message_fr']}")
@@ -413,8 +459,10 @@ class Run:
                 return float(raw)
         except (TypeError, ValueError):
             pass
-        if spec.type == FLOW_CALL:
+        if spec.type == FLOW_CALL or spec.subflow:
             return None     # the called flow's nodes have their own timeouts
+        if spec.type.startswith("dcc.") and spec.type.endswith(PUBLISH_CORE_SUFFIX):
+            return None     # P8 n°1: like v1, only the soft client's own timeout (a long cache cooks)
         return DCC_TIMEOUT_S if spec.family in ("session", "dcc") else DEFAULT_TIMEOUT_S
 
     async def _invoke(self, nid: str, node, spec, inputs: Dict[str, Any],
@@ -451,14 +499,26 @@ class Run:
     async def _inputs(self, nid: str, node, spec, got: Dict[str, Any],
                       params: Dict[str, Any]) -> Dict[str, Any]:
         declared = {p.name: p for p in spec.inputs if p.type != "exec"}
+        params_of = {p.name for p in spec.params}
         for name in list(declared) + [p for p in self._data_ports.get(nid, []) if p not in declared]:
             if (nid, name) in self._data_in:
                 got[name] = await self._pull(nid, name)
+                if name not in declared and name in params_of:
+                    params[name] = got[name]          # promoted param: the body reads params
             elif name in params:
                 got[name] = params[name]
             else:
                 got[name] = declared[name].default if name in declared else None
         for p in declared.values():
+            # Dry run: an Instance without an open instance gives a null session, the DCC
+            # nodes behind it are skipped by their simulate / readers (01 §5).
+            if self.mode == "dry" and p.type.startswith("session[") and got.get(p.name) is None:
+                continue
+            # A FlowOutput may give back an empty value it received (nothing found, a skipped
+            # Instance in a dry run); a SetVariable may store one (T1: StrJoin of no issue = "",
+            # the variable type still checks it). An unlinked one is E_REQUIRED_EMPTY at validation.
+            if spec.type in (FLOW_OUTPUT, SET_VARIABLE) and (nid, p.name) in self._data_in:
+                continue
             if p.required and got.get(p.name) in (None, ""):
                 raise NodeError(f"{spec.label} attend `{p.name}` : relie un lien ou saisis une valeur")
         return got
@@ -480,11 +540,23 @@ class Run:
             self._note_dep(frames, False)
             return outs
         node, spec = self._spec(snode)
+        if node.type == PAGE_NODE:
+            # ADR 0068: a Page node that did not start this run gives the page defaults.
+            return await self._page_defaults(snode, node)
         if spec.family == "event":
             raise NodeError(f"{reader} lit l'evenement {snode}, qui n'a pas declenche ce run")
         if snode in self._exec_targets:
             raise NodeError(f"{reader} lit {snode}, qui n'est pas execute avant lui (donnee lue avant d'etre produite)")
         return await self._eval_pure(snode, node, spec)
+
+    async def _page_defaults(self, nid: str, node) -> Dict[str, Any]:
+        memo = self._memo.get(nid)
+        if memo is not None:
+            return memo[2]
+        page = await asyncio.to_thread(page_inputs.load_page, str(node.params.get("page") or ""), self.project)
+        outs = page_inputs.node_outputs(node, page, {})
+        self._memo[nid] = ((), None, outs)
+        return outs
 
     async def _eval_pure(self, nid: str, node, spec) -> Dict[str, Any]:
         if node.bypass:
@@ -610,6 +682,32 @@ class Run:
             raise NodeError(f"While attend un booleen, recu {value!r} : utilise Compare")
         return value
 
+    def dispatch_batch(self) -> Optional[Dict[str, Any]]:
+        return self._dispatch[-1] if self._dispatch else None
+
+    async def _dispatch_send(self, end: str, batch: Dict[str, Any]) -> str:
+        """Send the job of a dispatch loop (ADR 0067); dry run = described, nothing sent."""
+        tasks = batch["tasks"]
+        if self.mode == "dry":
+            self.record["report"].append({"node": end, "kind": "dispatch",
+                                          "text_fr": f"enverrait un job de {len(tasks)} tache(s) au dispatcher"})
+            return f"dry:{end}"
+        from features.dispatcher import api
+        from features.dispatcher.jobs import DispatchError, DispatchJob
+
+        c = self.context
+        job = DispatchJob(title=str(batch.get("title") or self.flow_name), user=str(c.get("user") or ""),
+                          project=str(c.get("project") or ""), tasks=tasks,
+                          priority=int(batch.get("priority") or 100),
+                          metadata={"flow": self.flow_name, "run": self.run_id})
+        path = c.get("project_path")
+        try:
+            result = await asyncio.to_thread(api.submit, job, Path(path) if path else None)
+        except DispatchError as exc:
+            raise NodeError(str(exc), code="E_DISPATCH") from None
+        self.node_log(end, "info", f"job {result['job_id']} envoye ({result['backend']}, {len(tasks)} tache(s))")
+        return result["job_id"]
+
     async def _loop(self, bid: str, node, outs: Dict[str, Any], got: Dict[str, Any]) -> Optional[str]:
         """ForEach, For and While blocks: body = chain from ``loop`` up to the End."""
         kind = node.type
@@ -626,6 +724,9 @@ class Run:
             self.node_log(bid, "info", f"{len(items)} tour(s)")
         index = 0
         self._loops += 1
+        batch = {"tasks": []} if kind == FOREACH_BEGIN and str(node.params.get("mode") or "") == "dispatch" else None
+        if batch is not None:
+            self._dispatch.append(batch)
         try:
             while True:
                 if kind == WHILE_BEGIN:
@@ -674,11 +775,26 @@ class Run:
                     break
         finally:
             self._loops -= 1
+            if batch is not None:
+                self._dispatch.pop()
+        job_id = ""
+        if batch is not None:
+            if batch["tasks"]:
+                try:
+                    job_id = await self._dispatch_send(end, batch)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._set_state(end, "running")
+                    return self._fail(end, exc, {})
+            else:
+                self.node_log(end, "info", "mode dispatch : aucun Submit dans la boucle, rien a envoyer")
         final = {"count": len(items)} if kind == FOREACH_BEGIN else {"index": index}
         self._exec_out[bid] = (tuple(self._frames), final)
         self._set_state(bid, "ok")
         self._set_state(end, "running")
-        self._exec_out[end] = (tuple(self._frames), {"results": results} if kind == FOREACH_BEGIN else {})
+        self._exec_out[end] = (tuple(self._frames),
+                               {"results": results, "job_id": job_id} if kind == FOREACH_BEGIN else {})
         self._set_state(end, "ok")
         return self._exec_next.get((end, "done"))
 
@@ -688,6 +804,8 @@ class Run:
             self.record["status"] = status
             self.record["error"] = error
             self.record["ended"] = runs.now_iso()
+            if self._outputs:   # flow_output values, read by the page widgets fed by this flow (P7)
+                self.record["outputs"] = {k: runs.output_value(v) for k, v in self._outputs.items()}
             if self._t0:
                 self.record["duration_ms"] = int((time.monotonic() - self._t0) * 1000)
             self._dirty = True
@@ -719,7 +837,7 @@ class Run:
         except _StopRun as stop:
             status, error = stop.status, stop.error
         except asyncio.CancelledError:
-            status, error = "cancelled", "annule"
+            status, error = ("interrupted", self.interrupted) if self.interrupted else ("cancelled", "annule")
             task = asyncio.current_task()
             if task is not None:
                 task.uncancel()
@@ -732,10 +850,32 @@ class Run:
             status, error = "error", f"erreur interne du moteur : {_message(exc)}"
         finally:
             ticker.cancel()
+            await self._run_cleanups()
             self._close(status, error)
             self._flush_pushes()
             await self._write()
             events.emit(self._finished_msg())
+
+    def add_cleanup(self, fn) -> None:
+        """Call *fn()* at the end of the run, whatever its outcome (01 §4 ``finally``)."""
+        self._cleanups.append(fn)
+
+    async def _run_cleanups(self) -> None:
+        while self._cleanups:
+            fn = self._cleanups.pop()
+            try:
+                await asyncio.wait_for(asyncio.to_thread(fn), 30.0)
+            except Exception as exc:  # noqa: BLE001 - a cleanup never changes the run status
+                log.warning("run %s: cleanup failed: %s", self.run_id, exc)
+
+    def stop_reason(self) -> Tuple[str, str]:
+        """(status, error) of a run stopped before its start."""
+        return ("interrupted", self.interrupted) if self.interrupted else ("cancelled", "annule avant le depart")
+
+    def interrupt(self, reason: str) -> None:
+        """Stop the run as ``interrupted`` (host lock lost, backend stop: 01 §9)."""
+        self.interrupted = reason
+        self.cancel()
 
     def cancel(self) -> None:
         self.cancelled.set()
@@ -783,11 +923,11 @@ class RunManager:
             async with lock:
                 async with self._slots:
                     if run.cancelled.is_set():
-                        await run.refuse("cancelled", "annule avant le depart")
+                        await run.refuse(*run.stop_reason())
                     else:
                         await run.execute()
         except asyncio.CancelledError:    # cancelled while queued
-            await run.refuse("cancelled", "annule avant le depart")
+            await run.refuse(*run.stop_reason())
         finally:
             if run in self._by_flow[key]:
                 self._by_flow[key].remove(run)

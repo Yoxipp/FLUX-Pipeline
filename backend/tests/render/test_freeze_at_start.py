@@ -13,6 +13,7 @@ from pxr import Sdf, UsdUtils
 from features.publisher import last_pointer as lp
 from features.render import job_builder, team_settings
 from features.render.blade import flux_freeze_at_start as blade
+from tests.render.studio_fixture import write_env
 
 _LEAF = '#usda 1.0\n(\n    defaultPrim = "A"\n)\ndef Xform "A" {}\n'
 
@@ -124,7 +125,7 @@ class SerialJob(unittest.TestCase):
     def test_freeze_source_drive_letter_is_refused(self):
         with self.assertRaises(job_builder.JobValidationError):
             job_builder.to_alf(_spec(freeze_source="U:/p/SH.usda", freeze_script="//srv/x.py", freeze_python="p.exe",
-                                     freeze_houdini="C:/H"))
+                                     freeze_houdini="C:/H", forbid_drive_letters=True))
         with self.assertRaises(job_builder.JobValidationError):
             job_builder.to_alf(_spec(freeze_source="//srv/SH.usda", freeze_script="//srv/x.py", freeze_python="p.exe"))
 
@@ -135,7 +136,7 @@ class Settings(unittest.TestCase):
             path = Path(tmp) / "render.json"
             s = team_settings.read_settings("P", path)
             self.assertEqual(s["freeze_when"], "start")
-            self.assertTrue(s["houdini_path"].endswith("Houdini 20.5.445"))
+            self.assertEqual(s["houdini_path"], "")  # no studio default in the code
             with self.assertRaises(ValueError):
                 team_settings.write_settings("P", {"freeze_when": "later"}, path)
             s = team_settings.write_settings("P", {"freeze_when": "submit", "houdini_path": "D:\\H21\\"}, path)
@@ -200,7 +201,9 @@ class RouterWiring(unittest.TestCase):
             mock.patch("core.paths.get_project_render_path", return_value=self.render_json),
             mock.patch.object(render.config, "get_current_user", return_value="adam"),
             mock.patch.object(render.farm_paths, "_unc_of_drive", return_value=None),
-            mock.patch.object(render.team_settings, "TRACTOR_PYTHON_CANDIDATES", ()),
+            # Hermetic: no studio environment, and the active user may do everything (roles have their own tests).
+            mock.patch.object(render.studio_env, "environment_file", return_value=write_env(self.tmp)),
+            mock.patch.object(render.project_roles, "require"),
             mock.patch.dict("os.environ", {"TRACTOR_ENGINE": ""}),
             mock.patch.object(shot_stage, "load_project_production", return_value=({}, False)),
             mock.patch.object(shot_stage, "read_frame_range", return_value=(1, 10)),

@@ -1,5 +1,5 @@
 # flux.py — pipeline nodes (02_NODES §7). P2: notify, legacy_command. P3: the rest
-# of the family (find_publishes ... refresh_shot_stage), refuse_publish is P8.
+# of the family (find_publishes ... refresh_shot_stage). P8: refuse_publish.
 #
 # flux.legacy_command runs a v1 command (flux_core public API: get_command,
 # cast_value) with a shim carrying ``.buffer.context``, the only part of the v1
@@ -66,12 +66,16 @@ def _simulate_notify(ctx, inputs, params):
                    port("text", "str", "Message", "Message", "Daily copie", required=True),
                    port("path", "path", "Chemin lie (optionnel)", "Related path (optional)")],
            outputs=[port("then", "exec"), port("on_error", "exec")],
-           params=[port("level", "str", "info, warn ou error", "info, warn or error", "info", default="info"),
+           params=[port("level", "str", "info, warn ou error", "info, warn or error", "info", default="info",
+                        choices=NOTIFY_LEVELS),
                    port("where", "str", "toast, activity ou both", "toast, activity or both", "toast",
-                        default="toast")],
-           effect=True, simulate=_simulate_notify, shelf=40, aliases=["toast", "message", "alerte"],
-           doc_fr="Affiche un message dans FLUX (toast) et / ou le poste dans le fil Activite du projet.",
-           doc_en="Shows a message in FLUX (toast) and / or posts it in the project Activity feed.")
+                        default="toast", choices=NOTIFY_WHERE)],
+           effect=True, simulate=_simulate_notify, shelf=40,
+           aliases=["toast", "message", "alerte", "notification", "prevenir", "envoyer", "notifier"],
+           doc_fr="Affiche un message dans FLUX (toast, seulement dans les fenetres FLUX du poste qui execute) et / "
+                  "ou le poste dans le fil Activite du projet (vu par toute l'equipe : where activity ou both).",
+           doc_en="Shows a message in FLUX (toast, only in the FLUX windows of the executing workstation) and / or "
+                  "posts it in the project Activity feed (seen by the whole team: where activity or both).")
 def notify(ctx, inputs, params):
     text, level, where, path = _notify_args(inputs, params)
     if where in ("toast", "both"):
@@ -319,6 +323,40 @@ def publish_record(path: Any, **meta: Any) -> Dict[str, Any]:
             "ext": ext}
 
 
+# R1 retakes 3 and 10: one "infos" dict for PublishRequest and OnPublish, read by the
+# data.publish_infos node and by the OnPublish filters. Tokens come from the FLUX name
+# (features/folder_manager/naming_validator.parse_filename, read only): asset
+# CLASS_TYPE_NAME_INSTANCE, shot SEQ_SHOT_TYPE_VARIANTE. task = the TYPE token (department
+# of the asset, task of the shot). soft: given by the caller, else from the extension.
+PUBLISH_INFO_KEYS = ("mode", "project", "soft", "user", "task", "class", "asset", "seq", "shot", "instance",
+                     "variant", "version", "file_type", "ext", "file", "path")
+
+
+def publish_infos(file_name: Any, *, soft: str = "", project: str = "", user: str = "", path: Any = "",
+                  version: Any = None) -> Dict[str, Any]:
+    """The infos of a publish (asked or done). Unknown fields are "" (version None)."""
+    from features.folder_manager.naming_validator import parse_filename
+
+    name = Path(str(file_name or path or "")).name
+    record = publish_record(path or name) if (path or name) else {}
+    parsed = parse_filename(name) if name else None
+    shot = bool(parsed and parsed.get("is_shot"))
+    out: Dict[str, Any] = {k: "" for k in PUBLISH_INFO_KEYS}
+    out.update({"mode": ("shot" if shot else "asset") if parsed else "", "project": project or "",
+                "soft": soft or record.get("soft") or "", "user": user or "",
+                "file_type": record.get("type") or "", "ext": record.get("ext") or "",
+                "file": record.get("file") or "", "path": str(path) if path else "",
+                "version": version if version is not None else record.get("version")})
+    if parsed:
+        out.update({"task": parsed.get("TYPE") or "", "instance": parsed.get("INSTANCE") or "",
+                    "variant": parsed.get("VARIANTE") or ""})
+        if shot:
+            out.update({"seq": parsed.get("SEQ") or "", "shot": parsed.get("SHOT") or ""})
+        else:
+            out.update({"class": parsed.get("CLASS") or "", "asset": parsed.get("NAME") or ""})
+    return out
+
+
 def _type_tags(record: Dict[str, Any]) -> List[str]:
     kind = record.get("type") or "other"
     return [kind, "capture"] if kind in ("image", "video") else [kind]
@@ -446,10 +484,11 @@ def publish_fields(ctx, inputs, params):
                     port("dir", "dir", "Dossier du publish", "Publish folder"),
                     port("exists", "bool", "Le fichier existe", "The file exists", True)],
            params=[port("project", "str", "Projet (vide : celui du flow)", "Project (empty: the flow's one)", "DEMO"),
-                   port("class", "str", "Classe (token CLASS)", "Class (CLASS token)", "CHAR"),
-                   port("type", "str", "Type / departement (token TYPE)", "Type / department (TYPE token)", "MOD"),
-                   port("name", "str", "Nom de l'asset", "Asset name", "HERO"),
-                   port("instance", "str", "Instance", "Instance", "null", default="null"),
+                   port("class", "str", "Classe (token CLASS)", "Class (CLASS token)", "CHAR", tokens="CLASS"),
+                   port("type", "str", "Type / departement (token TYPE)", "Type / department (TYPE token)", "MOD",
+                        tokens="TYPE"),
+                   port("name", "str", "Nom de l'asset", "Asset name", "HERO", tokens="NAME"),
+                   port("instance", "str", "Instance", "Instance", "null", default="null", tokens="INSTANCE"),
                    port("variant", "str", "Variante (optionnelle)", "Variant (optional)", ""),
                    port("iter", "str", "LAST ou vNNN", "LAST or vNNN", "LAST", default="LAST")],
            shelf=43, aliases=["chemin asset", "resoudre", "path", "last"],
@@ -541,8 +580,8 @@ def asset_info(ctx, inputs, params):
 
 @flow_node("flux.shot_info", "ShotInfo", icon="Clapperboard",
            inputs=[_PROJECT,
-                   port("seq", "str", "Sequence", "Sequence", "SEQ010", required=True),
-                   port("shot", "str", "Plan", "Shot", "SHOT010", required=True)],
+                   port("seq", "str", "Sequence", "Sequence", "SEQ010", required=True, tokens="SEQ"),
+                   port("shot", "str", "Plan", "Shot", "SHOT010", required=True, tokens="SHOT")],
            outputs=[port("found", "bool", "Le plan existe dans la Production", "The shot exists in Production", True),
                     port("folder", "dir", "Dossier du plan", "Shot folder"),
                     port("record", "dict", "Fiche Production du plan", "Production record of the shot")],
@@ -668,7 +707,7 @@ def _simulate_log_activity(ctx, inputs, params):
                    port("folder", "dir", "Dossier lie (optionnel)", "Related folder (optional)")],
            outputs=list(_EXITS),
            params=[port("action", "str", "update, import ou error", "update, import or error", "update",
-                        default="update")],
+                        default="update", choices=LOG_ACTIONS)],
            effect=True, simulate=_simulate_log_activity, shelf=80, aliases=["activite", "journal", "log"],
            doc_fr="Poste un evenement dans le fil Activite du projet (vu par l'equipe).",
            doc_en="Posts an event in the project Activity feed (seen by the team).")
@@ -991,13 +1030,37 @@ def _flatten_args(ctx, inputs, params) -> Tuple[Path, Path, bool]:
     return source, dest, overwrite
 
 
+def _unresolved(source: Path) -> List[str]:
+    """Asset paths the stage of *source* points to but that do not resolve (T1: a shot stage
+    whose character LAST was archived flattens without it, silently). Read only."""
+    from pxr import UsdUtils
+
+    try:
+        _layers, _assets, missing = UsdUtils.ComputeAllDependencies(str(source))
+    except Exception:  # noqa: BLE001 - an unreadable stage is reported by the flatten itself
+        return []
+    from core.paths import to_flux_token
+
+    def portable(m: str) -> str:
+        try:
+            return to_flux_token(m)
+        except Exception:  # noqa: BLE001 - no FLUX_ROOT: keep the path
+            return m
+
+    return sorted({portable(str(m)).replace("\\", "/") for m in missing})
+
+
 def _simulate_flatten(ctx, inputs, params):
     source, dest, _overwrite = _flatten_args(ctx, inputs, params)
     text = f"aplatirait {source} vers {dest}" + (" (ecrase l'existant)" if dest.exists() else "")
     lines = [_line("flatten", text, dest)]
+    missing: List[str] = []
     if not source.is_file():
         lines.append(_line("warn", f"{source} n'existe pas encore", source))
-    return {"lines": lines, "outputs": {"path": str(dest)}}
+    else:
+        missing = _unresolved(source)
+        lines += [_line("warn", f"reference introuvable, absente du fichier aplati : {m}", m) for m in missing]
+    return {"lines": lines, "outputs": {"path": str(dest), "missing": missing, "complete": not missing}}
 
 
 @flow_node("flux.usd_flatten", "UsdFlatten", icon="Layers",
@@ -1005,7 +1068,12 @@ def _simulate_flatten(ctx, inputs, params):
                    port("source", "path", "USD source", "Source USD", "shot/SEQ010/SH010/stage.usda", required=True),
                    port("dest", "path", "USD aplati (.usda / .usdc)", "Flattened USD (.usda / .usdc)",
                         "deliver/SH010_flat.usdc", required=True)],
-           outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file")],
+           outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file"),
+                    port("missing", "list[str]", "References introuvables, absentes du fichier aplati",
+                         "References that do not resolve, missing from the flattened file",
+                         ["assets/chara/HERO/usd/HERO_LAST.usda"]),
+                    port("complete", "bool", "Toutes les references ont ete trouvees", "Every reference was found",
+                         True)],
            params=[port("overwrite", "bool", "Ecraser dest s'il existe", "Overwrite dest when it exists", False,
                         default=False)],
            destructive={"param": "overwrite", "equals": True}, simulate=_simulate_flatten, shelf=87,
@@ -1017,7 +1085,10 @@ def usd_flatten(ctx, inputs, params):
     if not source.is_file():
         raise NodeError(f"USD source introuvable : {source}")
     out = _run_v1(ctx, "usd_flatten", {"source": str(source), "destination": str(dest)})
-    return {"path": out.get("path") or str(dest)}
+    missing = _unresolved(source)
+    for m in missing:
+        ctx.log(f"reference introuvable, absente du fichier aplati : {m}", "warn")
+    return {"path": out.get("path") or str(dest), "missing": missing, "complete": not missing}
 
 
 # -- flux.refresh_component / refresh_shot_stage ------------------------------------
@@ -1066,3 +1137,86 @@ refresh_shot_stage = flow_node(
     effect=True, simulate=_sim_stage, shelf=89, aliases=["stage", "shot stage", "usd plan"],
     doc_fr="Regenere le stage USD du plan depuis un dossier de publish d'un departement de plan.",
     doc_en="Regenerates the shot USD stage from a publish folder of a shot department.")(_body_stage)
+
+
+# -- flux.refuse_publish (P8) -------------------------------------------------------
+# The "before publish" of a team (01 §13): placed before the black box of publish_<soft>,
+# it stops the run with the team's message. publish_runner.py reads the verdict from the
+# probe of the run context (dcc_publish.PROBE_KEY) and hands the message to the Publisher
+# as is; a refusal never falls back to v1. No hook in publish_core.
+
+def _refuse_message(inputs) -> str:
+    text = str(inputs.get("message") or "").strip()
+    if not text:
+        raise NodeError("RefusePublish attend `message` : la raison montree a l'artiste")
+    return text
+
+
+def _simulate_refuse(ctx, inputs, params):
+    return {"lines": [_line("refuse", f"refuserait le publish : {_refuse_message(inputs)}")], "outputs": {}}
+
+
+@flow_node("flux.refuse_publish", "RefusePublish", icon="ShieldX",
+           inputs=[_EXEC, port("message", "str", "Raison montree a l'artiste dans le Publisher",
+                               "Reason shown to the artist in the Publisher", "Le nom ne suit pas la nomenclature",
+                               required=True)],
+           outputs=[], effect=True, simulate=_simulate_refuse, shelf=90,
+           aliases=["refuser", "bloquer", "avant publish", "verification", "refuse"],
+           doc_fr="Arrete le publish avec un message (verdict \"refuse\") : a placer avant le node publish du flow "
+                  "publish_<soft>, derriere un If de verification. Rien n'est publie.",
+           doc_en="Stops the publish with a message (\"refused\" verdict): place it before the publish node of the "
+                  "publish_<soft> flow, behind a check If. Nothing is published.")
+def refuse_publish(ctx, inputs, params):
+    from flux_flows.nodes.dcc_publish import PROBE_KEY, REFUSED_CODE
+
+    message = _refuse_message(inputs)
+    probe = (ctx.context or {}).get(PROBE_KEY)
+    if isinstance(probe, dict) and not probe.get("core_started"):
+        probe["refused"] = message
+    raise NodeError(message, code=REFUSED_CODE)
+
+
+# -- flux.team_reply (ADR 0081) -------------------------------------------------------
+
+def _reply_args(ctx, inputs) -> Tuple[str, Dict[str, Any]]:
+    text = _required_text(inputs.get("text"), "text")
+    return text, ctx.payload if ctx.payload.get("message_id") else {}
+
+
+def _simulate_team_reply(ctx, inputs, params):
+    text, cmd = _reply_args(ctx, inputs)
+    where = f"#{cmd.get('channel') or 'general'}" if cmd else "nulle part (run hors d'une commande)"
+    return {"lines": [_line("chat", f"repondrait dans {where} : {text}")], "outputs": {}}
+
+
+@flow_node("flux.team_reply", "TeamReply", icon="MessageSquareReply",
+           inputs=[_EXEC, port("text", "str", "Reponse", "Answer", "Zip pret : //server/proj/SEQ010.zip",
+                               required=True)],
+           outputs=list(_EXITS),
+           effect=True, simulate=_simulate_team_reply, shelf=50,
+           aliases=["repondre", "reponse", "chat", "team", "commande", "reply"],
+           doc_fr="Repond a la commande du chat Team (TeamCommand) : message signe FLUX dans le fil du message, meme "
+                  "canal. Lance autrement (Run de l'editeur), il ne poste rien et le note dans le journal.",
+           doc_en="Answers the Team chat command (TeamCommand): a message signed FLUX in the thread of the message, "
+                  "same channel. Started another way (editor Run), it posts nothing and says so in the log.")
+def team_reply(ctx, inputs, params):
+    from features.activity.chat_manager import post_message
+    from flux_flows.team_commands import REPLY_NAME
+
+    text, cmd = _reply_args(ctx, inputs)
+    if not cmd:
+        ctx.log(f"Pas de commande Team a qui repondre (run hors du chat) : {text}", "warn")
+        return {}
+    project = _text((ctx.context or {}).get("project"))
+    if not project:
+        raise NodeError("Pas de projet : le chat est celui d'un projet")
+    channel = cmd.get("channel") or "general"
+    audience = None
+    if channel != "general":   # a restricted channel: only those who see it are mentioned
+        from features.team import team_meta
+
+        audience = lambda who: channel not in team_meta.hidden_channels(project, who)  # noqa: E731
+    if post_message(REPLY_NAME, text, project, channel=channel, reply_to=cmd.get("thread") or cmd.get("message_id"),
+                    via=cmd.get("user"), audience=audience) is None:
+        raise NodeError("La reponse n'a pas pu etre ecrite dans le chat")
+    return {}

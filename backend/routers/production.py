@@ -20,6 +20,7 @@ from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
 from core.executors import HEAVY
 from core.logger import get_logger
 from core.paths import get_project_path
+from features.accounts.alias_views import alias_etag, resolve_production_doc
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
 from features.folder_manager.tokens import load_tokens, remove_token
@@ -56,6 +57,16 @@ class CommentNotify(BaseModel):
 def _ensure_project(project: str) -> None:
     if not project_utils.project_exists(project):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+
+def _require_role(project: str, action: str) -> None:
+    """403 when the active user's project role is too low (ADR 0064)."""
+    from features.roles import project_roles
+
+    try:
+        project_roles.require(project, action)
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 # In-process cache of parsed modif_logs.json, keyed by folder path → (mtime,
@@ -158,9 +169,13 @@ async def get_production(project: str, request: Request):
             "sequences_on_disk": [],
             "shots_on_disk": [],
         }
+    # A rename changes the shown names without touching production.json.
+    etag = alias_etag(etag)
     if _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
-    return JSONResponse(result, headers={"ETag": etag})
+    # Renamed artists: resolve on a copy (result is shared by scan_cache, never mutate it).
+    shown = {**result, "production": resolve_production_doc(result.get("production"))}
+    return JSONResponse(shown, headers={"ETag": etag})
 
 
 async def _compute_production(project: str) -> dict:
@@ -290,9 +305,19 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     prod_archive.keep_archived_out(payload.production, previous)
     # Locked seq / shot records come back as stored (2026-09-30).
     locked_kept = prod_lock.keep_locked(payload.production, previous)
+    # A junior changes task progress, not the seq / shot records (2026-10-24).
+    from features.roles import project_roles
+    if not project_roles.can(project, "edit_entity"):
+        locked_kept += prod_lock.keep_all_records(payload.production, previous)
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
+    # Phone notify (ADR 0062): a new assignee or retake, seen as a diff of the saved doc.
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_production(project, previous, payload.production, config.get_current_user() or "")
+    except Exception as e:  # noqa: BLE001 — the save already succeeded
+        log.warning("Notify after Production save skipped for %r: %s", project, e)
 
     # A4 (ADR 0020): a casting or frame range edit regenerates that shot's stage.
     stages: list[str] = []
@@ -345,6 +370,56 @@ async def notify_comment(project: str, payload: CommentNotify) -> dict:
     return {"success": True}
 
 
+class ShotRetake(BaseModel):
+    seq:  str
+    shot: str
+    task: str
+    text: str
+
+
+@router.post("/{project}/retake")
+async def add_shot_retake(project: str, payload: ShotRetake) -> dict:
+    """Add one 'retake' comment to a shot task (ADR 0083: an idea of the board shotboard
+    sent to Production). Read, append, save in one step on the backend: the board never
+    PUTs the whole production.json. A locked shot still takes it (task progress stays
+    editable on a locked record, features/production/lock.py)."""
+    _ensure_project(project)
+    user = config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+
+    def _do() -> dict:
+        import copy
+        from datetime import datetime
+        production = store.load_production(project)
+        previous = copy.deepcopy(production)
+        now = datetime.now()
+        comment = store.add_shot_retake_comment(production, payload.seq, payload.shot, payload.task,
+                                                payload.text, user, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"))
+        if not store.save_production(project, production):
+            raise RuntimeError("Écriture production.json échouée")
+        return {"previous": previous, "production": production, "comment": comment}
+
+    try:
+        res = await loop.run_in_executor(None, _do)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.exception("shot retake failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    # Same side effects as a retake typed in the task panel: phone notify, Activity event.
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_production(project, res["previous"], res["production"], user)
+    except Exception as e:  # noqa: BLE001 — the retake is saved
+        log.warning("Notify after board retake skipped for %r: %s", project, e)
+    try:
+        filename = "_".join([payload.seq.upper(), payload.shot.upper(), payload.task.upper()])
+        await loop.run_in_executor(None, lambda: log_event(user, "comment", project, filename=filename, dest_folder=None))
+    except Exception as e:  # noqa: BLE001
+        log.warning("Activity event after board retake skipped for %r: %s", project, e)
+    return {"ok": True, "comment": res["comment"]}
+
+
 # ── Delete = archive (never hard-delete) ──────────────────────────────────────
 
 class ArchiveRequest(BaseModel):
@@ -382,6 +457,7 @@ async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
     """Move an entity folder into <project>/ARCHIVE/<timestamp>/. The frontend
     removes the logical entity from production.json AFTER this succeeds."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
     try:
@@ -419,6 +495,7 @@ async def delete_seq_shot(project: str, payload: DeleteSeqShotRequest) -> dict:
     its tokens and remove it from production.json in one go, with a tombstone so neither
     an old publish nor a stale save brings it back."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     if payload.kind not in ("seq", "shot"):
         raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
     project_path = get_project_path(project)
@@ -458,6 +535,7 @@ async def rename_seq_shot(project: str, payload: RenameSeqShotRequest) -> dict:
     from features.production import rename as prod_rename
 
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     if payload.kind not in ("seq", "shot"):
         raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
     project_path = get_project_path(project)
@@ -606,6 +684,7 @@ async def archive_token(project: str, payload: ArchiveTokenRequest) -> dict:
     """Archive a composer token's folder (into ARCHIVE/) and drop the token from
     tokens.json. Never hard-deletes — mirrors the entity archive flow."""
     _ensure_project(project)
+    _require_role(project, "edit_entity")
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
 

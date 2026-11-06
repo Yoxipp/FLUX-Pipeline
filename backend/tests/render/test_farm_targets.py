@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from features.render import farm_targets as ft
 from features.render import team_settings
 from routers import render
+from tests.render.studio_fixture import write_env
 
 NOW = datetime(2026, 10, 23, 11, 0, 0)
 FRESH = "2026-10-23 10:58:00.1+02"
@@ -34,13 +35,18 @@ class BladeStates(unittest.TestCase):
 
     def test_counts_and_rooms(self):
         rows = ft.classify([blade("ROOM1701"), blade("ROOM1702", nimby="x"), blade("ROOM2601", beat=OLD),
-                            blade("ROOM17PROF", busy={"jid": 1, "project": "CEB"}), blade("WIN-ABC")], NOW)
+                            blade("ROOM17PROF", busy={"jid": 1, "project": "CEB"}), blade("WIN-ABC")], NOW, r"^([A-Za-z]+)(\d{2})[A-Za-z0-9]+$")
         c = ft.counts(rows)
         self.assertEqual((c["free"], c["nimby"], c["busy"], c["offline"], c["alive"]), (2, 1, 1, 1, 4))
         rooms = ft.rooms(rows)
         self.assertEqual(rooms["ROOM17"], ["ROOM1701", "ROOM1702", "ROOM17PROF"])
         self.assertNotIn("ROOM26", rooms)  # offline only
         self.assertEqual(rooms[ft.OTHER_GROUP], ["WIN-ABC"])
+
+    def test_no_room_pattern_means_no_rooms(self):
+        rows = ft.classify([blade("ROOM1701"), blade("WIN-ABC")], NOW)
+        self.assertEqual([r["room"] for r in rows], ["", ""])
+        self.assertEqual(ft.rooms(rows), {})
 
 
 class ServiceExpression(unittest.TestCase):
@@ -75,20 +81,6 @@ class Shares(unittest.TestCase):
         self.assertEqual(ft.cap_from_percent(1, "free", {"free": 0}), 1)  # never 0 = never "no cap"
         with self.assertRaises(ValueError):
             ft.cap_from_percent(10, "nope", counts)
-
-    def test_split_team_cap_even(self):
-        jobs = [{"jid": 2, "remaining": 50}, {"jid": 1, "remaining": 50}, {"jid": 3, "remaining": 50}]
-        self.assertEqual(ft.split_team_cap(10, jobs), {1: 4, 2: 3, 3: 3})
-
-    def test_split_team_cap_small_jobs_release_budget(self):
-        jobs = [{"jid": 1, "remaining": 2}, {"jid": 2, "remaining": 100}, {"jid": 3, "remaining": 100, "cap": 3}]
-        self.assertEqual(ft.split_team_cap(20, jobs), {1: 2, 2: 15, 3: 3})
-
-    def test_split_team_cap_each_job_keeps_one(self):
-        jobs = [{"jid": i, "remaining": 10} for i in range(1, 6)]
-        self.assertEqual(ft.split_team_cap(2, jobs), {i: 1 for i in range(1, 6)})
-        self.assertEqual(ft.split_team_cap(0, jobs), {})
-        self.assertEqual(ft.split_team_cap(5, [{"jid": 1, "remaining": 0}]), {})
 
 
 class Settings(unittest.TestCase):
@@ -137,7 +129,9 @@ class RouterTargeting(unittest.TestCase):
             mock.patch("core.paths.get_project_render_path", return_value=self.render_json),
             mock.patch.object(render.config, "get_current_user", return_value="adam"),
             mock.patch.object(render.farm_paths, "_unc_of_drive", return_value=None),
-            mock.patch.object(render.team_settings, "TRACTOR_PYTHON_CANDIDATES", ()),
+            # Hermetic: no studio environment, and the active user may do everything (roles have their own tests).
+            mock.patch.object(render.studio_env, "environment_file", return_value=write_env(self.tmp)),
+            mock.patch.object(render.project_roles, "require"),
             mock.patch.dict("os.environ", {"TRACTOR_ENGINE": ""}),
             mock.patch.object(render, "_farm_snapshot", return_value=SNAP),
         ]
@@ -167,43 +161,22 @@ class RouterTargeting(unittest.TestCase):
         self.assertIn("-maxactive 10", alf)
         self.assertIn('"cap": "10"', alf)
 
-    def test_team_cap_bounds_the_job(self):
-        team_settings.write_settings("P", {"team_cap": {"percent": 5}, "job_share": {"percent": 50}},
-                                     path=self.render_json)
-        body = self._submit().json()
-        self.assertEqual(body["maxactive"], 10)  # 5 % of 200 alive, under the 100 of the job share
+    def test_team_cap_never_applied(self):
+        # The school's Shares decide (2026-10-23): an old render.json team_cap is read, never applied.
+        team_settings.write_settings("P", {"team_cap": {"percent": 5}}, path=self.render_json)
+        self.assertEqual(self._submit(share_percent=0).json()["maxactive"], 0)  # was 5 % of 200 = 10
+        team_settings.write_settings("P", {"dry_run": False}, path=self.render_json)
+        with mock.patch.object(render.tractor_bridge, "jobs") as lister, \
+                mock.patch.object(render.tractor_bridge, "set_maxactive") as setter:
+            r = self.client.get("/render/farm", params={"project": "P"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertNotIn("team_cap", r.json())
+        lister.assert_not_called()
+        setter.assert_not_called()
 
     def test_unknown_group_is_400(self):
         self.assertEqual(self._submit(groups=["nope"]).status_code, 400)
         self.assertEqual(self._submit(hosts=["a b"]).status_code, 400)
-
-    def test_balancer_only_touches_team_flux_jobs(self):
-        team_settings.write_settings("P", {"team_cap": {"percent": 5}, "dry_run": False}, path=self.render_json)
-
-        def job(jid, project="P", flux="P", state="active", done=0, maxactive=0):
-            return {"jid": jid, "projects": [project], "state": state, "numTasks": 40, "numDone": done,
-                    "numActive": 2, "maxactive": maxactive, "metadata": {"flux_project": flux} if flux else {}}
-        listing = {"jobs": [job(1), job(2, maxactive=5), job(3, flux=None), job(4, project="FIE"),
-                            job(5, state="done"), job(6, state="paused")]}
-        with mock.patch.object(render.tractor_bridge, "jobs", return_value=listing), \
-                mock.patch.object(render.tractor_bridge, "set_maxactive") as setter:
-            r = self.client.get("/render/farm", params={"project": "P"})
-        self.assertEqual(r.status_code, 200, r.text)
-        cap = r.json()["team_cap"]
-        self.assertEqual(cap["slots"], 10)
-        self.assertEqual(cap["targets"], {"1": 5, "2": 5})
-        self.assertEqual(cap["used"], 6)  # jobs 1, 2 and the paused 6
-        setter.assert_called_once_with(mock.ANY, "adam", 1, 5)  # job 2 already at 5
-
-    def test_balancer_never_writes_in_simulation(self):
-        team_settings.write_settings("P", {"team_cap": {"percent": 5}}, path=self.render_json)
-        listing = {"jobs": [{"jid": 1, "projects": ["P"], "state": "active", "numTasks": 9, "numDone": 0,
-                             "maxactive": 0, "metadata": {"flux_project": "P"}}]}
-        with mock.patch.object(render.tractor_bridge, "jobs", return_value=listing), \
-                mock.patch.object(render.tractor_bridge, "set_maxactive") as setter:
-            r = self.client.get("/render/farm", params={"project": "P"})
-        self.assertEqual(r.json()["team_cap"]["targets"], {"1": 9})
-        setter.assert_not_called()
 
 
 class TractorProjects(RouterTargeting):
@@ -213,6 +186,77 @@ class TractorProjects(RouterTargeting):
             r = self.client.get("/render/tractor_projects", params={"project": "P"})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json(), {"projects": [{"name": "FIE", "jobs": 2}, {"name": "CEB", "jobs": 1}], "current": "P"})
+
+
+class FarmTeams(RouterTargeting):
+    """Teams of the farm from the engine limits.config (read only): FLUX warns, Tractor balances."""
+
+    def test_settings_and_submit_warn_outside_the_shares(self):
+        from features.render import farm_limits
+        from tests.render.test_farm_limits import SAMPLE
+
+        with mock.patch.object(farm_limits, "fetch_shares", return_value=farm_limits.parse_shares(SAMPLE)):
+            body = self.client.get("/render/settings", params={"project": "P"}).json()
+            self.assertEqual(body["farm_teams"], ["Andhakara", "Hold", "Lum", "MortalKoil"])
+            self.assertEqual(body["farm_shares"]["default"], {"nominal": 0.25, "cap": 0.1})  # Farm tab summary
+            self.assertIn("'default'", body["team_warning"])  # tractor_project defaults to the FLUX name "P"
+            self.assertTrue(any("'default'" in w for w in self._submit().json()["warnings"]))
+            self.client.put("/render/settings", params={"project": "P"}, json={"tractor_project": "Lum"})
+            self.assertIsNone(self.client.get("/render/settings", params={"project": "P"}).json()["team_warning"])
+
+    def test_priority_per_job(self):
+        body = self._submit(priority=7).json()
+        self.assertEqual(body["priority"], 7)
+        self.assertIn("Priorite 7", body["priority_warning"])
+        alf = next((self.usd.parent / "render" / "v001" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("-priority 7", alf)
+        self.assertEqual(self._submit(priority=0).status_code, 400)
+        with mock.patch.object(render.tractor_bridge, "set_priority", return_value={"jid": 5, "priority": 3}) as setter:
+            r = self.client.post("/render/jobs/5/priority", params={"project": "P"}, json={"priority": 3})
+        self.assertEqual(r.status_code, 200, r.text)  # not swallowed by /jobs/{jid}/{action}
+        setter.assert_called_once_with(mock.ANY, "adam", 5, 3)
+
+    def test_denoise_after_render(self):
+        self.assertEqual(self._submit(renderer="karma", denoise=True).status_code, 400)
+        body = self._submit(renderer="renderman", denoise=True).json()
+        self.assertTrue(body["denoise"].endswith("denoised"))
+        alf = next((self.usd.parent / "render" / "v001" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("Task -title {denoise} -subtasks {", alf)
+        self.assertIn("-cf --frame-include", alf)  # crossframe by default
+
+    def test_denoise_rendered_sequence(self):
+        frames = self.tmp / "v003"
+        frames.mkdir()
+        for f in (1, 2, 3, 5):
+            (frames / f"SH010.{f:04d}.exr").write_bytes(b"")
+        r = self.client.post("/render/denoise", json={"project": "P", "path": str(frames / "SH010.0002.exr"), "frame_end": 3})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["frames"], body["count"], body["pattern"]), ([1, 3], 3, "SH010.$F4.exr"))
+        alf = next((frames / "denoised" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("SH010.####.exr 1-3", alf)
+        self.assertNotIn("husk", alf)
+        r = self.client.post("/render/denoise", json={"project": "P", "path": str(frames)})
+        self.assertEqual(r.status_code, 400)  # frame 4 missing
+        self.assertIn("4", r.json()["detail"])
+
+    def test_env_locked_and_never_in_simulation(self):
+        for path in ("/render/env/state", "/render/env/reload"):
+            self.assertEqual(self.client.post(path, params={"project": "P"}, json={"phrase": "nope"}).status_code, 403)
+        teams = {"default": {"nominal": 0.1, "cap": 0.1}}
+        with mock.patch.object(render.farm_limits, "write_shares") as writer:
+            r = self.client.put("/render/env/shares", params={"project": "P"},
+                                json={"phrase": "Understand", "teams": teams})
+        self.assertEqual(r.status_code, 400)  # setUp: simulation
+        writer.assert_not_called()
+        with mock.patch.object(render.farm_limits, "engine_text", return_value=None):
+            r = self.client.post("/render/env/state", params={"project": "P"}, json={"phrase": "Understand"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["folder_ok"])
+
+    def test_no_engine_no_warning(self):
+        body = self.client.get("/render/settings", params={"project": "P"}).json()
+        self.assertEqual((body["farm_teams"], body["team_warning"]), ([], None))
 
 
 class LastForm(RouterTargeting):

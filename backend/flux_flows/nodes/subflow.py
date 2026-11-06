@@ -42,11 +42,14 @@ async def flow_call(ctx, inputs, params):
                    port("value", "any", "Valeur rendue au flow appelant", "Value given back to the caller",
                         required=True)],
            outputs=[port("then", "exec")],
-           params=[port("id", "str", "Sortie declaree dans interface.outputs", "Output declared in interface.outputs",
-                        "scene", required=True)],
+           params=[port("id", "str", "Quelle sortie de l'interface du flow remplir (menu : les sorties declarees "
+                        "dans le panneau du flow)", "Which flow interface output to fill (menu: the outputs declared in "
+                        "the flow panel)", "scene", required=True)],
            shelf=91, aliases=["sortie", "retour", "output"],
-           doc_fr="Rend une valeur au FlowCall qui a appele ce flow.",
-           doc_en="Gives a value back to the FlowCall that called this flow.")
+           doc_fr="Rend une valeur au FlowCall qui a appele ce flow : elle sort sur le port du meme nom du FlowCall. "
+                  "Lance seul, le flow garde la valeur dans son run.",
+           doc_en="Gives a value back to the FlowCall that called this flow: it comes out on the FlowCall port of the "
+                  "same name. Run alone, the flow keeps the value in its run.")
 async def flow_output(ctx, inputs, params):
     ident = str(params.get("id") or "")
     ctx.set_output(ident, inputs.get("value"))

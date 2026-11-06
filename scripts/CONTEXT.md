@@ -9,6 +9,11 @@ Test de charge serveur : `loadtest/` (`flux_loadtest.py` seed / run / cleanup, `
 
 Details : `docs/development/BUILD.md`.
 
+## backend.spec : modeles de bridge (2026-10-23, Flows P6c)
+
+`app_datas` copie `backend/flux_flows/bridges/templates/*_server.py` (lus et copies par l'installeur des bridges d'extension,
+jamais importes) ; `test_frozen_bundle.py` les verifie.
+
 ## backend.spec : flows livres (2026-10-22)
 
 `app_datas` copie le dossier `backend/flux_flows/shipped` (recursif) vers `flux_flows/shipped` : flows v2 livres (`legacy_*`, puis

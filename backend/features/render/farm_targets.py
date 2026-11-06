@@ -2,11 +2,11 @@
 
 * Blade states from the bridge 'blades' verb: free / busy / nimby / offline.
 * Machine targeting (list of PCs, room groups, team groups, exclusions) -> a Tractor
-  service key expression. A blade name is a valid service key: validated at school on
-  2026-10-23 (echo job 34026, -service {ROOM0321}, ran on ROOM0321).
-* "X % of the farm" -> a job maxactive (max chunks running at once, 1 slot per blade at school).
-* Team cap: one budget shared by every FLUX job of the team, split into per-job maxactive.
-  Deterministic, so every FLUX window of the team computes the same split.
+  service key expression. A blade name is a valid service key: validated on a real farm on
+  2026-10-23 (echo job 34026, -service {<blade name>}, ran on that blade).
+* "X % of the farm" -> a job maxactive (max chunks running at once, 1 slot per blade on that farm).
+* No team cap: the engine's Shares (limits.config) share the farm between teams (2026-10-23).
+* Rooms: only when the studio environment gives a room_pattern (studio_env), otherwise no grouping.
 """
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
+from features.render import studio_env
+
 FLUX_HOST_TARGETING_VERIFIED = True
 # Blade seen by the engine within this delay = alive (heartbeat every few minutes).
 ALIVE_MINUTES = 15
 SHARE_BASES = ("alive", "free")
 _HOST = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-# School names: TLSS + 2 digit room + desk (ROOM1720 = room 17, ROOM17PROF = teacher desk), confirmed by 2026-10-23.
-_ROOM = re.compile(r"^([A-Za-z]+)(\d{2})[A-Za-z0-9]+$")
 OTHER_GROUP = "autres"
 
 
@@ -36,9 +36,11 @@ def _heartbeat(value) -> Optional[datetime]:
         return None
 
 
-def room_of(name: str) -> str:
-    m = _ROOM.match(name or "")
-    return f"{m.group(1).upper()}{m.group(2)}" if m else OTHER_GROUP
+def room_of(name: str, pattern: str = "") -> str:
+    """Room of a blade from the studio room_pattern. "" = no pattern (no grouping), OTHER_GROUP = no match."""
+    if not pattern:
+        return ""
+    return studio_env.room_of(name, pattern) or OTHER_GROUP
 
 
 def blade_state(blade: dict, now: Optional[datetime] = None) -> str:
@@ -53,15 +55,15 @@ def blade_state(blade: dict, now: Optional[datetime] = None) -> str:
     return "free"
 
 
-def classify(blades: Iterable[dict], now: Optional[datetime] = None) -> List[dict]:
-    """Blades sorted by name with state and room group."""
+def classify(blades: Iterable[dict], now: Optional[datetime] = None, room_pattern: str = "") -> List[dict]:
+    """Blades sorted by name with state and room group (room "" when the studio has no room_pattern)."""
     out = []
     for b in blades:
         name = str(b.get("name") or "")
         if not name:
             continue
         busy = b.get("busy") or None
-        out.append({"name": name, "state": blade_state(b, now), "room": room_of(name),
+        out.append({"name": name, "state": blade_state(b, now), "room": room_of(name, room_pattern),
                     "slots": int(b.get("numslots") or 1), "nimby": str(b.get("nimby") or ""),
                     "job": busy.get("jid") if busy else None, "project": busy.get("project") if busy else None,
                     "heartbeat": str(b.get("heartbeattime") or "")})
@@ -79,7 +81,7 @@ def counts(classified: Iterable[dict]) -> Dict[str, int]:
 def rooms(classified: Iterable[dict]) -> Dict[str, List[str]]:
     groups: Dict[str, List[str]] = {}
     for b in classified:
-        if b["state"] != "offline":
+        if b["state"] != "offline" and b["room"]:
             groups.setdefault(b["room"], []).append(b["name"])
     return dict(sorted(groups.items()))
 
@@ -127,36 +129,3 @@ def cap_from_percent(percent: int, base: str, farm_counts: Dict[str, int]) -> in
     return max(1, math.floor(pool * percent / 100))
 
 
-def split_team_cap(cap: int, jobs: List[dict]) -> Dict[int, int]:
-    """Share a team budget between its unfinished FLUX jobs: {jid: maxactive}.
-
-    jobs: {"jid", "remaining" (tasks not done), "cap" (own job cap, 0 = none)}.
-    Oldest jid first gets the remainder; every job keeps at least 1 so none starves.
-    """
-    live = sorted((j for j in jobs if j.get("remaining", 0) > 0), key=lambda j: j["jid"])
-    if cap <= 0 or not live:
-        return {}
-    out: Dict[int, int] = {}
-    budget = max(cap, len(live))
-    pending = list(live)
-    # Water filling: jobs that need less than an even share (remaining or own cap) release the rest.
-    while pending:
-        even = budget // len(pending)
-        small = [j for j in pending if _need(j) <= even]
-        if not small:
-            extra = budget - even * len(pending)
-            for i, j in enumerate(pending):
-                out[j["jid"]] = max(1, even + (1 if i < extra else 0))
-            break
-        for j in small:
-            out[j["jid"]] = max(1, _need(j))
-            budget -= out[j["jid"]]
-            pending.remove(j)
-        budget = max(budget, len(pending))
-    return out
-
-
-def _need(job: dict) -> int:
-    remaining = int(job.get("remaining") or 0)
-    own = int(job.get("cap") or 0)
-    return min(remaining, own) if own > 0 else remaining

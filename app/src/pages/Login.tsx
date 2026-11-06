@@ -2,45 +2,70 @@
 // Créer / renommer / supprimer les artistes : Paramètres > Projet > Artistes ; son propre
 // compte : Paramètres > User. Le champ de création ne reste ici que si aucun artiste n'existe.
 
-import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
-import { api } from '../api/client'
+import { useEffect, useState } from 'react'
+import { Lock, UserPlus, X } from 'lucide-react'
+import { api, type UserProfile } from '../api/client'
 import { Avatar } from '../components/shared/ui'
+import {
+  EMPTY_NEW_ARTIST, NewArtistFields, RememberCheckbox, newArtistError, newArtistPayload,
+  type NewArtistValue,
+} from './FirstLaunch'
 
 interface Props {
   onDone: () => void
 }
 
 export function Login({ onDone }: Props) {
-  const [users, setUsers]     = useState<string[]>([])
+  const [users, setUsers]     = useState<UserProfile[]>([])
+  const [loaded, setLoaded]   = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const [newName, setNewName]   = useState('')
+  const [creating, setCreating] = useState(false)
+  const [newArtist, setNewArtist] = useState<NewArtistValue>(EMPTY_NEW_ARTIST)
+  const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(false)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
   const [hovered, setHovered]   = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
-  const refreshUsers = () => api.listUsers().then(d => setUsers(d.users)).catch(() => {})
+  const refreshUsers = () => api.listUserProfiles()
+    .then(d => setUsers(d.profiles))
+    .catch(() => api.listUsers()
+      .then(d => setUsers(d.users.map(id => ({ id, first_name: '', last_name: '', has_password: false }))))
+      .catch(() => {}))
+    .finally(() => setLoaded(true))
 
   useEffect(() => {
     void refreshUsers()
   }, [])
 
+  // New-artist form: shown when asked, or when no artist exists yet.
+  const showNew = creating || (loaded && users.length === 0)
+  const selectedProfile = showNew ? null : users.find(u => u.id === selected) ?? null
+  const needsPassword = !!selectedProfile?.has_password
+
   const enter = async () => {
-    const name = newName.trim() || selected
-    if (!name) return
-    setLoading(true)
     setError('')
+    if (showNew) {
+      const err = newArtistError(newArtist)
+      if (err) { setError(err); return }
+    } else if (!selectedProfile) return
+    setLoading(true)
     try {
-      await api.updateSettings({ username: name })
+      if (showNew) await api.createUser({ ...newArtistPayload(newArtist), switch: true })
+      else await api.updateSettings(needsPassword
+        ? { username: selectedProfile!.id, password, remember }
+        : { username: selectedProfile!.id })
       window.location.reload()
-    } catch {
-      setError("Erreur lors du changement d'utilisateur.")
+    } catch (e) {
+      // 403 "Mot de passe incorrect." and other backend messages are shown as they come.
+      setError(e instanceof Error && e.message ? e.message : "Erreur lors du changement d'utilisateur.")
       setLoading(false)
     }
   }
 
-  const canEnter = !loading && (newName.trim().length > 0 || selected !== null)
+  const canEnter = !loading && (showNew
+    ? newArtist.first.trim().length > 0 && newArtist.last.trim().length > 0
+    : selectedProfile !== null && (!needsPassword || password.length > 0))
 
   return (
     <>
@@ -86,12 +111,14 @@ export function Login({ onDone }: Props) {
               Artistes
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
-              {users.map(u => {
-                const isActive = u === selected
+              {users.map(p => {
+                const u = p.id
+                const isActive = !showNew && u === selected
+                const full = `${p.first_name} ${p.last_name}`.trim()
                 return (
                   <div
                     key={u}
-                    onClick={() => { setSelected(u); setNewName('') }}
+                    onClick={() => { setSelected(u); setCreating(false); setPassword(''); setError('') }}
                     onMouseEnter={() => setHovered(u)}
                     onMouseLeave={() => setHovered(h => (h === u ? null : h))}
                     style={{
@@ -105,38 +132,59 @@ export function Login({ onDone }: Props) {
                   >
                     <Avatar ch={u[0].toUpperCase()} size={20} />
 
-                    <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
+                    <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{full ? `${full} (${u})` : u}</span>
 
+                    {p.has_password && <Lock size={11} strokeWidth={1.75} color="var(--ink-4)" />}
                     {isActive && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>}
                   </div>
                 )
               })}
+              <div
+                onClick={() => { setCreating(true); setSelected(null); setError('') }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 7,
+                  background: showNew ? 'var(--accent-soft)' : 'transparent',
+                  border: '1px solid ' + (showNew ? 'var(--rule-3)' : 'transparent'),
+                  cursor: 'pointer', fontSize: 11, color: showNew ? 'var(--ink)' : 'var(--ink-3)',
+                }}
+              >
+                <UserPlus size={14} strokeWidth={1.75} /> Nouvel artiste
+              </div>
             </div>
           </div>
         )}
 
-        {/* champ nouvel artiste : premier lancement seulement (aucun artiste) */}
-        {users.length === 0 && <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
-            Nouvel artiste
+        {/* mot de passe de l'artiste choisi */}
+        {needsPassword && <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+            Mot de passe
           </div>
           <input
-            ref={inputRef}
-            value={newName}
-            onChange={e => { setNewName(e.target.value.toUpperCase()); if (e.target.value) setSelected(null) }}
+            type="password" autoFocus autoComplete="current-password"
+            value={password}
+            onChange={e => { setPassword(e.target.value); setError('') }}
             onKeyDown={e => { if (e.key === 'Enter' && canEnter) void enter() }}
-            placeholder="NOM DE L'ARTISTE"
+            placeholder="Mot de passe"
             style={{
               width: '100%', padding: '7px 10px',
               background: 'var(--bg-deep)',
               border: '1px solid var(--rule-2)',
               borderRadius: 6, outline: 'none',
               fontFamily: 'inherit', fontSize: 11, color: 'var(--ink-2)',
-              textTransform: 'uppercase',
               boxShadow: 'var(--shadow-inset)',
               boxSizing: 'border-box',
             }}
           />
+          <RememberCheckbox checked={remember} onChange={setRemember} />
+        </div>}
+
+        {/* nouvel artiste : prénom + nom, aperçu de l'identifiant, mot de passe facultatif */}
+        {showNew && <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
+            Nouvel artiste
+          </div>
+          <NewArtistFields compact value={newArtist} onChange={v => { setNewArtist(v); setError('') }}
+            onSubmit={() => { if (canEnter) void enter() }} />
         </div>}
 
         {/* erreur */}

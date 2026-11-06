@@ -1,9 +1,18 @@
 // preload.ts — bridge sécurisé Electron ↔ React (contextIsolation).
 // Seul endroit où Node.js et le renderer se parlent.
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Board (ADR 0074): clipboard image saved as a temp PNG (null: no image), and the local
+  // path of a file dropped from the explorer ('' for a file that has none).
+  saveClipboardImage: (): Promise<string | null> =>
+    ipcRenderer.invoke('clipboard:saveImage'),
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
+  // Board export (ADR 0075): save dialog, then the bytes are written by the main process.
+  saveBytes: (defaultName: string, filters: { name: string; extensions: string[] }[], data: Uint8Array): Promise<string | null> =>
+    ipcRenderer.invoke('file:saveBytes', { defaultName, filters, data }),
+
   openFolder: (): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openFolder'),
 
@@ -30,6 +39,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Launches "Uninstall FLUX.exe" and quits FLUX (Settings > Desinstaller FLUX).
   uninstallFlux: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('app:uninstall'),
+  // https links only (Team call links, ADR 0077), opened in the system browser.
+  openExternal: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke('shell:openExternal', url),
+  // A Discord channel link opened in the Discord app when installed (Team voice, P5).
+  openDiscord: (url: string): Promise<'app' | 'web' | false> =>
+    ipcRenderer.invoke('shell:openDiscord', url),
+
   openPath: (filePath: string): Promise<void> =>
     ipcRenderer.invoke('shell:openPath', filePath),
 

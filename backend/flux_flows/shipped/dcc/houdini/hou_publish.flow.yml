@@ -1,0 +1,69 @@
+flux_flow: 2
+name: hou_publish
+label: houPublish
+description: "Publish Houdini (node livre, verrouille ; boite noire, decision 9) : meme code que le Publisher Houdini, vNNN immuable + LAST, activite, flows OnPublish. Double clic pour voir dedans ; Deverrouiller = copie d'equipe (verifications avant publish)."
+node_type: dcc.hou_publish
+interface:
+  inputs:
+    - {id: session, type: "session[houdini]", label: "Session Houdini (Live)"}
+    - {id: name, type: str, label: "Nom FLUX (tokens, sans version)", default: ""}
+    - {id: node, type: dcc_node, label: "ROP ou node (vide = selection)"}
+    - {id: format, type: str, label: "Extension", default: ".abc"}
+    - {id: description, type: str, label: "Description", default: ""}
+    - {id: frame_range, type: str, label: "Plage", default: ""}
+    - {id: sequence, type: bool, label: "Sequence", default: false}
+    - {id: frame_padding, type: int, label: "Chiffres du numero de frame", default: 4}
+    - {id: options, type: dict, label: "Parms du ROP (Publisher)"}
+    - {id: attr_filter, type: dict, label: "Filtre d'attributs"}
+  outputs:
+    - {id: publish, type: publish, label: "Le publish"}
+    - {id: path, type: path, label: "Fichier LAST publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+    - {id: rop_node, type: str, label: "ROP cuit"}
+nodes:
+  ev: {type: event.manual, pos: [0, 160]}
+  in_session: {type: data.flow_input, pos: [0, 320], params: {id: session}}
+  in_name: {type: data.flow_input, pos: [0, 440], params: {id: name}}
+  in_node: {type: data.flow_input, pos: [0, 560], params: {id: node}}
+  in_format: {type: data.flow_input, pos: [0, 680], params: {id: format}}
+  in_description: {type: data.flow_input, pos: [0, 800], params: {id: description}}
+  in_frame_range: {type: data.flow_input, pos: [0, 920], params: {id: frame_range}}
+  in_sequence: {type: data.flow_input, pos: [0, 1040], params: {id: sequence}}
+  in_frame_padding: {type: data.flow_input, pos: [0, 1160], params: {id: frame_padding}}
+  in_options: {type: data.flow_input, pos: [0, 1280], params: {id: options}}
+  in_attr_filter: {type: data.flow_input, pos: [0, 1400], params: {id: attr_filter}}
+  core: {type: dcc.hou_publish_core, pos: [320, 160]}
+  out_publish: {type: subflow.flow_output, pos: [640, 160], params: {id: publish}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  out_rop_node: {type: subflow.flow_output, pos: [2240, 160], params: {id: rop_node}}
+links:
+  - {from: ev.then, to: core.exec}
+  - {from: in_session.value, to: core.session}
+  - {from: in_name.value, to: core.name}
+  - {from: in_node.value, to: core.node}
+  - {from: in_format.value, to: core.format}
+  - {from: in_description.value, to: core.description}
+  - {from: in_frame_range.value, to: core.frame_range}
+  - {from: in_sequence.value, to: core.sequence}
+  - {from: in_frame_padding.value, to: core.frame_padding}
+  - {from: in_options.value, to: core.options}
+  - {from: in_attr_filter.value, to: core.attr_filter}
+  - {from: core.then, to: out_publish.exec}
+  - {from: core.publish, to: out_publish.value}
+  - {from: out_publish.then, to: out_path.exec}
+  - {from: core.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: core.version, to: out_version.value}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: core.files, to: out_files.value}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: core.warnings, to: out_warnings.value}
+  - {from: out_warnings.then, to: out_rop_node.exec}
+  - {from: core.rop_node, to: out_rop_node.value}
+notes:
+  - {id: k1, pos: [0, 1560], text: "Node livre avec FLUX : lecture seule. Deverrouiller (Team TD) pour ajouter des verifications avant le publish ; Revenir au defaut supprime la copie."}

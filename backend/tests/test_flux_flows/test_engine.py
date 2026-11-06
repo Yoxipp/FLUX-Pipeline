@@ -174,6 +174,14 @@ class Errors(unittest.TestCase):
         self.assertEqual(h.refused_codes(run_flow(f)), ["E_REQUIRED_EMPTY"])
         self.assertIn("attend `value`", run_flow(f, checked=False)["nodes"]["s"]["error"])
 
+    def test_set_variable_stores_an_empty_linked_value(self) -> None:
+        # T1: StrJoin of an empty list gives "" ; a linked SetVariable stores it (the type still checks).
+        f = flow({"n1": "event.manual", "v": ("data.value", {"type": "str", "value": ""}),
+                  "s": ("data.set_variable", {"name": "x"})}, ["n1.then->s.exec", "v.value->s.value"],
+                 variables=[{"name": "x", "type": "str", "default": "old"}])
+        rec = run_flow(f)
+        self.assertEqual(rec["status"], "ok", rec)
+
     def test_timeout(self) -> None:
         f = flow({"n1": "event.manual", "s": ("action.t_sleep", {"seconds": 5, "timeout_s": 0.1})},
                  ["n1.then->s.exec"])

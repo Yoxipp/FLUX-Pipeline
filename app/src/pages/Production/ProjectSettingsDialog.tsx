@@ -1,4 +1,6 @@
-// ProjectSettingsDialog - advanced settings of a project, shown right after its creation.
+// ProjectSettingsDialog - advanced settings of a project, shown right after its creation
+// (onCancel set: the cross cancels the creation) or later from Production > Settings
+// (no onCancel: the cross only closes).
 // The form is generated from project.json and its schema (backend PROJECT_SCHEMA): every
 // property shows up with its "title", except those flagged "x-flux-hidden". A key present
 // in project.json but missing from the schema still shows up, its field inferred from the
@@ -18,6 +20,7 @@ type Schema = {
   minItems?: number
   maxItems?: number
   additionalProperties?: Schema | boolean
+  default?: unknown
   'x-flux-hidden'?: boolean
 }
 type Json = Record<string, unknown>
@@ -56,7 +59,7 @@ function Field({ name, schema, value, onChange }: { name: string; schema: Schema
   const s = Object.keys(schema).length ? schema : inferSchema(value)
   const title = label(name, s)
   if (s.enum) {
-    return <label>{title}<select value={String(value ?? '')} onChange={e => onChange(s.enum!.find(o => String(o) === e.target.value))}>
+    return <label>{title}<select value={String(value ?? s.default ?? '')} onChange={e => onChange(s.enum!.find(o => String(o) === e.target.value))}>
       {s.enum.map(o => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
     </select></label>
   }
@@ -109,8 +112,9 @@ function Field({ name, schema, value, onChange }: { name: string; schema: Schema
 }
 
 // onClose: settings kept (Enregistrer / Passer). onCancel: the cross or Escape, the caller
-// cancels the creation.
-export function ProjectSettingsDialog({ project, onClose, onCancel }: { project: string; onClose: () => void; onCancel: () => Promise<void> }) {
+// cancels the creation; without it (existing project) they only close.
+export function ProjectSettingsDialog({ project, onClose, onCancel }: { project: string; onClose: () => void; onCancel?: () => Promise<void> }) {
+  const creating = Boolean(onCancel)
   const [schema, setSchema] = useState<Schema | null>(null)
   const [draft, setDraft] = useState<Json>({})
   const [error, setError] = useState('')
@@ -130,13 +134,14 @@ export function ProjectSettingsDialog({ project, onClose, onCancel }: { project:
   }
   const cancel = async () => {
     setBusy(true); setError('')
+    if (!onCancel) { onClose(); return }
     try { await onCancel() } catch (e) { setError(e instanceof Error ? e.message : String(e)); setBusy(false) }
   }
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) void cancel() }}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog project-settings-dialog"
       onPointerDownOutside={e => e.preventDefault()}>
-      <div className="production-dialog-heading"><Dialog.Title>Paramètres avancés · {project}</Dialog.Title><Dialog.Close disabled={busy} aria-label="Annuler la création du projet" title="Annuler la création du projet"><X size={16} /></Dialog.Close></div>
-      <Dialog.Description>Valeurs par défaut du projet. Modifiez ce qui doit changer ou passez pour les garder.</Dialog.Description>
+      <div className="production-dialog-heading"><Dialog.Title>Paramètres avancés · {project}</Dialog.Title><Dialog.Close disabled={busy} aria-label={creating ? 'Annuler la création du projet' : 'Fermer'} title={creating ? 'Annuler la création du projet' : 'Fermer'}><X size={16} /></Dialog.Close></div>
+      <Dialog.Description>{creating ? 'Valeurs par défaut du projet. Modifiez ce qui doit changer ou passez pour les garder.' : 'Réglages partagés par toute l’équipe du projet.'}</Dialog.Description>
       <div className="project-settings-form">
         {!schema && !error && <span style={{ color: 'var(--ink-3)' }}>Chargement...</span>}
         {keys.map(k => <Field key={k} name={k} schema={schema?.properties?.[k] ?? {}} value={draft[k]} onChange={v => setDraft(prev => ({ ...prev, [k]: v }))} />)}
@@ -144,7 +149,7 @@ export function ProjectSettingsDialog({ project, onClose, onCancel }: { project:
       {error && <div role="alert" style={{ marginTop: 10 }}>{error}</div>}
       <div className="project-settings-actions">
         <button className="btn primary" disabled={busy || !schema} onClick={() => void save()}>Enregistrer</button>
-        <button disabled={busy} onClick={onClose}>Passer</button>
+        <button disabled={busy} onClick={onClose}>{creating ? 'Passer' : 'Fermer'}</button>
       </div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   )

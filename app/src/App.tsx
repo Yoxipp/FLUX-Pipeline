@@ -5,6 +5,7 @@ import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkPr
 import { notificationReason, REASON_LABEL } from './lib/activityNotify'
 import { useProject } from './ProjectContext'
 import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
+import { WelcomeDialog } from './components/shared/WelcomeDialog'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
@@ -15,18 +16,22 @@ import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
+import { usePresenceHeartbeat } from './hooks/usePresenceHeartbeat'
+import { PresenceProvider } from './hooks/usePresence'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
 import { ActionPublish } from './pages/ActionPublish'
 import { FlowEditor }    from './pages/flow_editor/FlowEditor'
-import { LegacyEditor }  from './pages/flow_editor/LegacyEditor'
+import { ToolPage }      from './pages/tool_pages/ToolPage'
+import { PageBuilder }   from './pages/tool_pages/PageBuilder'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
 import { Production }    from './pages/Production/Production'
 import { Calendar }      from './pages/Calendar'
+import { Team }          from './pages/Team'
 import { Render }        from './pages/Render'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
@@ -139,7 +144,8 @@ function AppShell({ settings }: { settings: Settings }) {
     <HashRouter>
       <WorkProfileProvider>
       {!DETACHED && <StartPageRedirect />}
-      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
+      {/* Detached windows are frameless: a dark edge sets them apart from the main window under them. */}
+      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)', ...(DETACHED ? { border: '2px solid #000', borderTop: 'none' } : {}) }}>
         {showLogin && <Login onDone={() => setShowLogin(false)} />}
 
         <TitleBar
@@ -161,7 +167,9 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/action-publish" element={<ActionPublish />} />
               {/* Flows editor (P0); the old YAML action editor stays reachable until P8. */}
               <Route path="/action-graph" element={<FlowEditor />} />
-              <Route path="/action-graph-legacy" element={<LegacyEditor />} />
+              {/* TOOL pages (Flows P7, 04 §6); /tool/:id/edit = the page editor. */}
+              <Route path="/tool" element={<ToolPage />} />
+              <Route path="/tool/:id/edit" element={<PageBuilder />} />
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
@@ -170,6 +178,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/templates" element={<Navigate to="/settings?tab=advanced&sub=templates" replace />} />
               <Route path="/production" element={<Production />} />
               <Route path="/calendar"  element={<Calendar />} />
+              <Route path="/team"      element={<Team />} />
               <Route path="/render"    element={<Render />} />
               <Route path="/settings"  element={<SettingsPage />} />
               <Route path="/advanced"  element={<Navigate to="/settings?tab=advanced" replace />} />
@@ -183,6 +192,7 @@ function AppShell({ settings }: { settings: Settings }) {
         {!DETACHED && <MentionWatcher />}
         {!DETACHED && <FavoriteWatcher />}
         <WorkProfileDialog />
+        {!DETACHED && <WelcomeDialog />}
       </div>
       <Toaster
         position="top-center"
@@ -247,6 +257,8 @@ function BackendDownScreen() {
 
 export function App() {
   const { settings, loading } = useSettings()
+  // Team presence (ADR 0077): this artist's own file, rewritten every minute while FLUX runs.
+  usePresenceHeartbeat(!!settings?.username)
 
   // Apply theme CSS vars from settings
   useEffect(() => {
@@ -284,7 +296,9 @@ export function App() {
 
   return (
     <FeedsProvider>
-      <AppShell settings={settings} />
+      <PresenceProvider>
+        <AppShell settings={settings} />
+      </PresenceProvider>
     </FeedsProvider>
   )
 }

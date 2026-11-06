@@ -13,6 +13,7 @@ from core.paths import (
     get_mentions_path, get_mentions_read_path, get_project_chat_path, get_users_dir,
 )
 from core.repository_factory import get_repository
+from features.accounts.aliases import load_aliases, resolve_user, same_user
 from features.activity.history import append_events
 from features.activity.read_state import is_read, load_read_ids, mark_read
 
@@ -53,15 +54,38 @@ def resolve_chat_path(project: str | None) -> Path:
 
 
 def send_message(
-    user: str, message: str, project: str | None = None, path: Path | None = None,
+    user: str, message: str, project: str | None = None, path: Path | None = None, *,
+    channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
+    notify_all: bool = False, audience=None, quiet=None,
 ) -> bool:
-    """Append a chat message to the team chat of *project*. Returns True on success.
+    """Append a chat message to the team chat of *project*. Returns True on success
+    (post_message gives the id of the message)."""
+    return post_message(user, message, project, path, channel=channel, reply_to=reply_to,
+                        attachments=attachments, notify_all=notify_all, audience=audience, quiet=quiet) is not None
+
+
+def post_message(
+    user: str, message: str, project: str | None = None, path: Path | None = None, *,
+    channel: str | None = None, reply_to: str | None = None, attachments: list[dict] | None = None,
+    notify_all: bool = False, audience=None, via: str | None = None, discord: str | None = None,
+    at: datetime | None = None, quiet=None,
+) -> str | None:
+    """Append a chat message to the team chat of *project*. Returns its id, None on failure.
 
     *path* (tests) overrides the project's chat file. Any @name that matches a known
     user (case-insensitive, never the author) is recorded as an unread mention so
     that user gets a red notification, tagged with the project it was said in.
+    Team page (ADR 0077): *channel* (absent = general), *reply_to* (thread), *attachments*
+    (files copied by features.team.files) are stored only when given, so the home chat
+    reads the same file; *notify_all* (a call link posted with "Prevenir l'equipe")
+    sends a phone notification to every artist. *audience* (user -> bool): who may be
+    mentioned or notified (a channel restricted to some artists); None = everyone.
+    *via* (ADR 0081): the artist whose team command made FLUX write this message.
+    *discord* (ADR 0084): id of the Discord message this one copies (the bridge never sends it back).
+    *at*: when it was written (Discord history copied by the bridge): kept as is, and an old
+    message never notifies or records a mention.
     """
-    date, time = _now()
+    date, time = (at.strftime("%Y-%m-%d"), at.strftime("%H:%M")) if at else _now()
     msg_id = _make_id(user)
     text = message.strip()
     entry = {
@@ -71,32 +95,143 @@ def send_message(
         "date":    date,
         "time":    time,
     }
+    if channel and channel != "general":
+        entry["channel"] = channel
+    if reply_to:
+        entry["reply_to"] = reply_to
+    if attachments:
+        entry["attachments"] = attachments
+    if via:
+        entry["via"] = via
+    if discord:
+        entry["discord"] = discord
     chat_path = path or resolve_chat_path(project)
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
     ok = get_repository().append_log(_CHAT_COLLECTION, str(chat_path), [entry])
     if not ok:
         log.error("Failed to write team chat at %s", chat_path)
-        return ok
+        return None
 
+    if at:
+        return msg_id
     # Record mentions (best-effort — never fail the send if this part errors).
     try:
         _record_mentions(
             from_user=user, msg_id=msg_id, text=text, date=date, time=time, project=project,
+            audience=audience,
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to record chat mentions: %s", exc)
-    return ok
+    if notify_all:
+        try:
+            _notify_everyone(user, text, project, audience, quiet)
+        except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
+            log.warning("Notify everyone skipped: %s", exc)
+    return msg_id
+
+
+def _notify_everyone(user: str, text: str, project: str | None, audience=None, quiet=None) -> None:
+    """Phone notification to every artist but the author (a call posted in the chat).
+    *quiet(user)* True: that artist muted the channel (Team, P5), no phone for them."""
+    table = load_aliases()
+    targets = [u for u in get_user_list() if not same_user(u, user, table) and (audience is None or audience(u))
+               and not (quiet is not None and quiet(u))]
+    if targets and project:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_mentions(user, targets, project, "mention", "appel", "chat", text)
+
+
+# Edit and delete (ADR 0084, 2026-10-31): the log stays append-only. A change is one more
+# record {"id", "op": "edit" | "delete", "target", "user", "date", "time"} (+ "message" for an
+# edit, + "from_discord" when the bridge copied it from Discord); get_messages merges them: an
+# edited message carries "edited" (date time of the last edit), a deleted one is left out.
+OPS = ("edit", "delete")
+
+
+def _merge(rows: list[dict]) -> list[dict]:
+    messages: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        op = row.get("op")
+        if op in OPS:
+            target = messages.get(str(row.get("target") or ""))
+            if target is None:
+                continue
+            if op == "edit":
+                target["message"] = str(row.get("message") or "")
+                target["edited"] = f"{row.get('date', '')} {row.get('time', '')}".strip()
+            else:
+                target["deleted"] = True
+        elif op is None and row.get("id"):
+            if row["id"] not in messages:
+                order.append(row["id"])
+            messages[row["id"]] = dict(row)
+    return [messages[i] for i in order if not messages[i].get("deleted")]
+
+
+def read_chat(project: str | None = None, path: Path | None = None) -> tuple[list[dict], list[dict]]:
+    """Raw messages (edits / deletes not applied) and the edit / delete records, in file
+    order (the Discord bridge forwards each change once)."""
+    rows = get_repository().read_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)))
+    return [r for r in rows if r.get("op") is None], [r for r in rows if r.get("op") in OPS]
+
+
+def _current(project: str | None, path: Path | None, msg_id: str) -> dict | None:
+    rows = get_repository().read_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)))
+    return next((m for m in _merge(rows) if m.get("id") == msg_id), None)
+
+
+def edit_message(user: str, msg_id: str, message: str, project: str | None = None, path: Path | None = None, *,
+                 from_discord: bool = False) -> str | None:
+    """Change the text of a message: its author only (the bridge: a Discord edit). Returns the
+    id of the edit record, None when nothing changed. KeyError: unknown or deleted message;
+    PermissionError: not the author."""
+    current = _current(project, path, msg_id)
+    if current is None:
+        raise KeyError(msg_id)
+    if not from_discord and not same_user(current.get("user"), user, load_aliases()):
+        raise PermissionError("on ne modifie que ses propres messages")
+    text = message.strip()
+    if not text and not current.get("attachments"):
+        raise ValueError("message vide")
+    if text == str(current.get("message") or ""):
+        return None
+    return _append_op("edit", user, msg_id, project, path, from_discord, message=text)
+
+
+def delete_message(user: str, msg_id: str, project: str | None = None, path: Path | None = None, *,
+                   is_lead: bool = False, from_discord: bool = False) -> str | None:
+    """Delete a message: its author, a lead (or the bridge: a Discord delete). Returns the id of
+    the delete record. KeyError: unknown or already deleted; PermissionError: not allowed."""
+    current = _current(project, path, msg_id)
+    if current is None:
+        raise KeyError(msg_id)
+    if not (from_discord or is_lead or same_user(current.get("user"), user, load_aliases())):
+        raise PermissionError("on ne supprime que ses propres messages (ou lead)")
+    return _append_op("delete", user, msg_id, project, path, from_discord)
+
+
+def _append_op(op: str, user: str, target: str, project, path, from_discord: bool, **extra) -> str | None:
+    date, time = _now()
+    entry = {"id": _make_id(user), "op": op, "target": target, "user": user, "date": date, "time": time, **extra}
+    if from_discord:
+        entry["from_discord"] = True
+    ok = get_repository().append_log(_CHAT_COLLECTION, str(path or resolve_chat_path(project)), [entry])
+    return entry["id"] if ok else None
 
 
 def get_messages(
     limit: int = 100, project: str | None = None, path: Path | None = None,
 ) -> list[dict]:
-    """Return up to *limit* messages of *project*'s chat, oldest first."""
+    """Return up to *limit* messages of *project*'s chat, oldest first (edits applied,
+    deleted messages left out)."""
     chat_path = path or resolve_chat_path(project)
-    messages = get_repository().read_log(_CHAT_COLLECTION, str(chat_path))
+    messages = _merge(get_repository().read_log(_CHAT_COLLECTION, str(chat_path)))
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
-    return messages[-limit:]
+    table = load_aliases()
+    return [{**m, "user": resolve_user(m.get("user"), table)} if "user" in m else m
+            for m in messages[-limit:]]
 
 
 def get_user_list() -> list[str]:
@@ -117,20 +252,30 @@ def parse_pings(message: str) -> list[str]:
 
 def _record_mentions(
     from_user: str, msg_id: str, text: str, date: str, time: str, project: str | None = None,
+    *, notify_kind: str = "mention", notify_detail: str = "", notify_entity: str = "",
+    notify_text: str | None = None, audience=None,
 ) -> None:
     """Persist an unread mention entry for each valid @name in *text*.
 
     Resolves each @name against the real user list (case-insensitive) so a typo
-    doesn't spam a phantom user, and skips self-mentions.
+    doesn't spam a phantom user, and skips self-mentions. The same targets get a
+    phone notification (features.notify, *notify_kind* "calendar" for calendar pings)
+    carrying *notify_text* (default: the message), shown only when the project allows
+    it (include_text, ADR 0072).
     """
     raw = parse_pings(text)
     if not raw:
         return
+    table = load_aliases()
     users = {u.lower(): u for u in get_user_list()}
+    for old, new in table.items():          # @OLDNAME reaches the artist's current name
+        current = users.get(new.lower())
+        if current:
+            users.setdefault(old.lower(), current)
     targets: list[str] = []
     for name in raw:
         real = users.get(name.lower())
-        if real and real.upper() != (from_user or "").upper() and real not in targets:
+        if real and not same_user(real, from_user, table) and real not in targets                 and (audience is None or audience(real)):
             targets.append(real)
     if not targets:
         return
@@ -153,6 +298,12 @@ def _record_mentions(
     # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
     if not append_events(mpath, new_entries, ARCHIVE_STEM_MENTIONS, _MENTIONS_COLLECTION):
         log.error("Failed to write chatMentions.json at %s", mpath)
+    try:
+        from features.notify import hooks as notify_hooks
+        notify_hooks.on_mentions(from_user, targets, project, notify_kind, notify_detail, notify_entity,
+                                 text if notify_text is None else notify_text)
+    except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
+        log.warning("Notify for mentions skipped: %s", exc)
 
 
 def _mentions_read_path(path: Path | None) -> Path:
@@ -163,6 +314,13 @@ def _mentions_read_path(path: Path | None) -> Path:
     return p.with_name(f"{p.stem}_read.json")
 
 
+def _shown_mention(m: dict, read_ids, table: dict[str, str]) -> dict:
+    """Copy of mention *m* with current names and the read flag overlaid."""
+    return {**m, "read": is_read(m, read_ids),
+            "to_user": resolve_user(m.get("to_user"), table),
+            "from_user": resolve_user(m.get("from_user"), table)}
+
+
 def get_mentions(user: str, unread_only: bool = False, path: Path | None = None) -> list[dict]:
     """Return mention entries addressed to *user*, newest first.
 
@@ -170,13 +328,13 @@ def get_mentions(user: str, unread_only: bool = False, path: Path | None = None)
     to_user and the current user never silently drops notifications. Read-status
     is overlaid from the companion set-file (Phase 5).
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(_MENTIONS_COLLECTION, str(path or get_mentions_path()))
     read_ids = load_read_ids(_mentions_read_path(path))
     out = [
-        {**m, "read": is_read(m, read_ids)}
+        _shown_mention(m, read_ids, table)
         for m in mentions
-        if str(m.get("to_user", "")).upper() == who and (not unread_only or not is_read(m, read_ids))
+        if same_user(m.get("to_user"), user, table) and (not unread_only or not is_read(m, read_ids))
     ]
     out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
     return out
@@ -201,15 +359,15 @@ def get_mentions_and_unread(
     *sig* (mtime_ns, size) may be passed by the router so the cache reuses the
     stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(
         _MENTIONS_COLLECTION, str(path or get_mentions_path()), sig=sig,
     )
     read_ids = load_read_ids(_mentions_read_path(path))
-    mine = [m for m in mentions if str(m.get("to_user", "")).upper() == who]
+    mine = [m for m in mentions if same_user(m.get("to_user"), user, table)]
     unread = sum(1 for m in mine if not is_read(m, read_ids))
     out = [
-        {**m, "read": is_read(m, read_ids)}
+        _shown_mention(m, read_ids, table)
         for m in mine
         if (not unread_only or not is_read(m, read_ids))
     ]
@@ -222,10 +380,10 @@ def mark_mentions_read(user: str, path: Path | None = None) -> bool:
 
     The append-only mentions log is never rewritten.
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(
         _MENTIONS_COLLECTION, str(path or get_mentions_path()), fresh=True,
     )   # fresh: live ids
     live_ids = {str(m.get("id", "")) for m in mentions}
-    mine_ids = {str(m.get("id", "")) for m in mentions if str(m.get("to_user", "")).upper() == who}
+    mine_ids = {str(m.get("id", "")) for m in mentions if same_user(m.get("to_user"), user, table)}
     return mark_read(_mentions_read_path(path), mine_ids, live_ids=live_ids)

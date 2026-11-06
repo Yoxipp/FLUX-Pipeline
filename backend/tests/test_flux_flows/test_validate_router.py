@@ -86,7 +86,7 @@ class ValidateRouter(unittest.TestCase):
         self.client.post("/flows/daily/increment", json={"scope": "team"})
         r = self.client.post("/flows/daily/activate", json={"scope": "team"})
         self.assertEqual(r.status_code, 409)
-        self.assertEqual(r.json()["detail"]["gate"][0]["code"], "E_REQUIRED_EMPTY")
+        self.assertEqual(r.json()["detail"]["gate"]["errors"][0]["code"], "E_REQUIRED_EMPTY")
 
     def test_destructive_needs_the_slider(self) -> None:
         r = self._put(_doc(erase=True))

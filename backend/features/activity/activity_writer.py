@@ -88,8 +88,29 @@ def log_event(
 
 # ── shortcuts ─────────────────────────────────────────────────────────────────
 
-def log_publish(user: str, filename: str, project: str, dest_folder: Path | str | None = None) -> bool:
-    return log_event(user, "publish", project, filename, dest_folder=dest_folder)
+def log_publish(user: str, filename: str, project: str, dest_folder: Path | str | None = None,
+                soft: str = "") -> bool:
+    # soft: the software that published (maya, houdini...), for the Flows OnPublish soft
+    # filter; empty = deduced from the extension there (R1 audit F6, 2026-10-25).
+    ok = log_event(user, "publish", project, filename, dest_folder=dest_folder)
+    # Flows event.on_publish (P5, 01 §9 A9): every soft reaches this point after a
+    # successful publish. Non blocking, a no-op without an active OnPublish flow, cut by
+    # FLUX_FLOWS_HOOKS=0; it never changes the publish or its result.
+    try:
+        from flux_flows.events import publish_done
+
+        publish_done(user, filename, project, dest_folder, soft=soft)
+    except Exception as exc:  # noqa: BLE001 - a flow hook never fails a publish
+        log.warning("Flows on_publish skipped: %s", exc)
+    # Phone notify (ADR 0062): followers / assignees of the entity, grouped. Returns at
+    # once (worker thread), cut by FLUX_NOTIFY=0.
+    try:
+        from features.notify import hooks as notify_hooks
+
+        notify_hooks.on_publish(user, filename, project)
+    except Exception as exc:  # noqa: BLE001 - a notification never fails a publish
+        log.warning("Notify on_publish skipped: %s", exc)
+    return ok
 
 
 def log_import(user: str, filename: str, project: str, dest_folder: Path | str | None = None) -> bool:

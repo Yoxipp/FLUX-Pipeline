@@ -11,7 +11,7 @@ import {
   Check, Clapperboard, Copy, Download, Film, FolderOpen, FolderTree, Heart, History,
   Image as ImageIcon, List, Pin, RotateCcw, Trash2, UploadCloud, X,
 } from 'lucide-react'
-import { api, type RefVersion } from '../../api/client'
+import { api, type RefVersion, type UsdAssetInfo, type UsdShotInfo } from '../../api/client'
 import { readSession, writeSession } from '../../hooks/useSessionState'
 import { openInKeyframe } from '../../lib/keyframe'
 import { useI18n } from '../../i18n'
@@ -426,6 +426,9 @@ export function TaskDetail({
 
           <MediaEmbed project={project || ''} relPath={refBasePath} unresolved={refError} color={color}
             context={`${entityKind === 'shot' ? `${asset.class} ${asset.name}` : asset.name} · ${task.name}${subtaskFilter ? ` · ${subtaskFilter}` : ''}`} />
+
+          <TaskUsd project={project || ''} asset={asset} entityKind={entityKind}
+            publishes={sortedPublishes} user={settings?.username || ''} />
         </div>
       </div>
 
@@ -440,6 +443,142 @@ export function TaskDetail({
           onExplorer={openInExplorer}
         />
       )}
+    </div>
+  )
+}
+
+// ── USD of the task (2026-10-23) ─────────────────────────────────────────
+// USD is not a task: every task shows its own department layer (newest USD publish)
+// and the assembled USD that composes it: the component / assembly of an asset
+// (-> USD page) or the shot stage of a shot (ADR 0020, regenerated here).
+const USD_FILE = /\.usd[ac]?$/i
+const SHOT_STATE_LABEL: Record<UsdShotInfo['state'], string> = {
+  none: 'pas encore généré', up_to_date: 'à jour', outdated: 'à régénérer', frozen: 'figé',
+}
+
+function TaskUsd({ project, asset, entityKind, publishes, user }: {
+  project: string; asset: Asset; entityKind: 'asset' | 'shot' | 'seq'
+  publishes: ProductionPublish[]; user: string
+}) {
+  const navigate = useNavigate()
+  const layer = publishes.find(p => USD_FILE.test(p.file)) ?? null
+  const seq = asset.class.toUpperCase()
+  const shotName = asset.name.toUpperCase()
+  const [assetInfo, setAssetInfo] = useState<UsdAssetInfo | null>(null)
+  const [shot, setShot] = useState<UsdShotInfo | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!project || entityKind === 'seq') return
+    try {
+      if (entityKind === 'asset') setAssetInfo(await api.getUsdAsset(project, asset.name))
+      else setShot((await api.getUsdShot(project, seq, shotName)).shots[0] ?? null)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }, [project, entityKind, asset.name, seq, shotName])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const h = () => { void load() }
+    window.addEventListener('flux:refresh', h)
+    return () => window.removeEventListener('flux:refresh', h)
+  }, [load])
+
+  const generate = async (frozen: boolean) => {
+    setBusy(true)
+    try {
+      const r = await api.generateUsdShot(project, seq, shotName, user, frozen)
+      if (r.changed) toast.success(`Stage ${r.version} écrit`)
+      else toast.info('Rien de changé : pas de nouvelle version')
+      r.warnings.slice(0, 3).forEach(w => toast.warning(w))
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const comp = assetInfo?.component ?? null
+  const asm = assetInfo?.assembly ?? null
+  const line: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)', lineHeight: '20px',
+  }
+  const cut: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }
+  const btn: React.CSSProperties = {
+    height: 22, padding: '0 8px', borderRadius: 4, border: '1px solid var(--rule-2)',
+    background: 'var(--paper)', color: 'var(--ink-2)', fontSize: 10.5, cursor: 'pointer',
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ ..._lbl, marginBottom: 6 }}>USD</div>
+      <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: '8px 10px',
+                    display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* This task's own department layer. */}
+        <div style={line}>
+          <span style={{ fontWeight: 600, color: 'var(--ink-3)', flexShrink: 0 }}>Couche</span>
+          {layer
+            ? <span style={cut} title={layer.file}>{layer.file}</span>
+            : <span style={{ ...cut, color: 'var(--ink-4)' }}>aucun publish USD pour cette tâche</span>}
+          {layer && project && (
+            <OpenInMenu project={project} relPath={projectRelPath(project, `${layer.dest_folder}/${layer.file}`)} compact />
+          )}
+        </div>
+
+        {err && <div style={{ fontSize: 11, color: 'var(--err)' }}>{err}</div>}
+
+        {/* Asset: component / assembly that composes the department layers. */}
+        {entityKind === 'asset' && (
+          <div style={line}>
+            <span style={{ fontWeight: 600, color: 'var(--ink-3)', flexShrink: 0 }}>{asm && !comp ? 'Assembly' : 'Component'}</span>
+            <span style={{ ...cut, color: 'var(--ink-4)' }}>
+              {comp ? `${comp.version} · ${comp.state === 'stale' ? 'à régénérer' : comp.state === 'empty' ? 'vide' : 'à jour'}`
+                : asm ? `${asm.version} · ${asm.instances.length} instance(s)` : assetInfo ? 'pas encore créé' : '…'}
+            </span>
+            <button style={btn} onClick={() => navigate('/usd', { state: { openUsd: asset.name } })}>
+              Ouvrir dans l'USD Assembler
+            </button>
+          </div>
+        )}
+
+        {/* Shot: the stage that stacks every department of the shot (ADR 0020). */}
+        {entityKind === 'shot' && (<>
+          <div style={line}>
+            <span style={{ fontWeight: 600, color: 'var(--ink-3)', flexShrink: 0 }}>Stage du shot</span>
+            <span style={{ ...cut, color: shot?.state === 'outdated' ? 'var(--warn)' : 'var(--ink-4)' }}>
+              {shot ? `${shot.last_version ?? '—'} · ${SHOT_STATE_LABEL[shot.state]}` : '…'}
+            </span>
+            {shot?.rel_last && project && <OpenInMenu project={project} relPath={shot.rel_last} compact />}
+          </div>
+          {shot && shot.departments.length > 0 && (
+            <div style={{ ...line, paddingLeft: 10, flexWrap: 'wrap', gap: 4 }}>
+              {shot.departments.map(d => (
+                <span key={d.department} style={{ ..._tag, opacity: d.files.length ? 1 : 0.45 }}
+                  title={d.files.length ? d.files.join('\n') : 'pas encore publié'}>{d.department}</span>
+              ))}
+            </div>
+          )}
+          {shot?.render && (
+            <div style={line} title="Couche render du stage : ce que Tractor rend (ADR 0060)">
+              <span style={{ fontWeight: 600, color: 'var(--ink-3)', flexShrink: 0 }}>Rendu</span>
+              <span style={{ ...cut, color: shot.render.camera ? 'var(--ink-4)' : 'var(--warn)' }}>
+                {shot.render.camera || 'aucune caméra dans le layout'} · {shot.render.resolution.join('x')}
+              </span>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button style={btn} disabled={busy} onClick={() => { void generate(false) }}>
+              {busy ? 'Génération…' : 'Régénérer le stage'}
+            </button>
+            <button style={btn} disabled={busy} onClick={() => { void generate(true) }}
+              title="Chaque couche vise son vNNN (rendu farm)">Figer</button>
+          </div>
+        </>)}
+      </div>
     </div>
   )
 }

@@ -86,34 +86,47 @@ def keep_locked(production: dict, previous: dict | None) -> list[str]:
     prev_seqs = {s.get("id"): s for s in previous.get("sequences", [])}
     locked_seq_ids = {i for i, s in prev_seqs.items() if s.get(LOCK_KEY)}
     restored: list[str] = []
-
-    def _guard(key: str, is_locked) -> None:
-        prev_items = {e.get("id"): e for e in previous.get(key, [])}
-        items = production.setdefault(key, [])
-        present = {e.get("id") for e in items}
-        for idx, e in enumerate(items):
-            old = prev_items.get(e.get("id"))
-            if old is not None and is_locked(old):
-                kept = copy.deepcopy(old)
-                for k in EDITABLE_WHEN_LOCKED:
-                    if k in e:
-                        kept[k] = e[k]
-                    else:
-                        kept.pop(k, None)
-                if e != kept:
-                    items[idx] = kept
-                    restored.append(old.get("name") or str(old.get("id")))
-            else:
-                # Lock state follows the stored one (none for a new or unlocked record).
-                if old is not None and old.get(LOCK_KEY):
-                    e[LOCK_KEY] = copy.deepcopy(old[LOCK_KEY])
-                else:
-                    e.pop(LOCK_KEY, None)
-        for i, old in prev_items.items():
-            if i not in present and is_locked(old):
-                items.append(copy.deepcopy(old))
-                restored.append(old.get("name") or str(i))
-
-    _guard("sequences", lambda s: bool(s.get(LOCK_KEY)))
-    _guard("shots", lambda sh: bool(sh.get(LOCK_KEY)) or sh.get("seq_id") in locked_seq_ids)
+    _guard(production, previous, "sequences", lambda s: bool(s.get(LOCK_KEY)), restored)
+    _guard(production, previous, "shots",
+           lambda sh: bool(sh.get(LOCK_KEY)) or sh.get("seq_id") in locked_seq_ids, restored)
     return restored
+
+
+def keep_all_records(production: dict, previous: dict | None) -> list[str]:
+    """Save of a junior (ADR 0064): every existing seq / shot record comes back as stored,
+    like a locked one (task progress, notes and order stay editable). New records pass."""
+    previous = previous or {}
+    restored: list[str] = []
+    for key in ("sequences", "shots"):
+        _guard(production, previous, key, lambda _e: True, restored)
+    return restored
+
+
+def _guard(production: dict, previous: dict, key: str, is_locked, restored: list[str]) -> None:
+    prev_items = {e.get("id"): e for e in previous.get(key, [])}
+    items = production.setdefault(key, [])
+    present = {e.get("id") for e in items}
+    for idx, e in enumerate(items):
+        old = prev_items.get(e.get("id"))
+        if old is not None and is_locked(old):
+            kept = copy.deepcopy(old)
+            for k in EDITABLE_WHEN_LOCKED:
+                if k in e:
+                    kept[k] = e[k]
+                else:
+                    kept.pop(k, None)
+            # The lock itself is not compared: the client shows it with renamed artists
+            # resolved (locked.by, ADR 0079), and only set_lock may change it anyway.
+            if {k: v for k, v in e.items() if k != LOCK_KEY} != {k: v for k, v in kept.items() if k != LOCK_KEY}:
+                restored.append(old.get("name") or str(old.get("id")))
+            items[idx] = kept
+        else:
+            # Lock state follows the stored one (none for a new or unlocked record).
+            if old is not None and old.get(LOCK_KEY):
+                e[LOCK_KEY] = copy.deepcopy(old[LOCK_KEY])
+            else:
+                e.pop(LOCK_KEY, None)
+    for i, old in prev_items.items():
+        if i not in present and is_locked(old):
+            items.append(copy.deepcopy(old))
+            restored.append(old.get("name") or str(i))

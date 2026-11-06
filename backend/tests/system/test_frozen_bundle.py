@@ -52,8 +52,18 @@ class FrozenBundleData(unittest.TestCase):
             "dcc/houdini/flux_houdini_server.py",
             "dcc/substance_designer/substance_designer_bridge.py",
             "dcc/marvelous/marvelous_bridge.py",
+            "flux_flows/bridges/templates/tcp_json_server.py",
+            "flux_flows/bridges/templates/file_mailbox_server.py",
         ):
             self.assertIn(str((_BACKEND / rel).resolve()), bundled, rel)
+
+    def test_backend_on_sys_path_before_collect_submodules(self) -> None:
+        # pathex only applies to Analysis: without this, collect_submodules("flux_flows.nodes")
+        # returns [] and the exe has no Flows node (empty catalogue, HTTP 500 on /flows/catalog).
+        text = _SPEC.read_text(encoding="utf-8")
+        insert = text.find('sys.path.insert(0, str(ROOT / "backend"))')
+        self.assertGreater(insert, 0)
+        self.assertLess(insert, text.find('collect_submodules("flux_flows.nodes")'))
 
 
 class UnhandledErrorHandler(unittest.TestCase):

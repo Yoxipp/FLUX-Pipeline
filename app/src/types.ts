@@ -172,70 +172,6 @@ export interface ActionPreviewResponse {
   message:   string
 }
 
-// ── Node flow (read-only graph view of a YAML action) ────────────────────────
-
-export interface ActionGraphParam {
-  name:  string
-  type:  string
-  label: string
-  value: unknown
-  wired: boolean          // fed from another command's output (never user-typed)
-  hide:  boolean
-  tooltip?: string
-}
-
-export interface ActionGraphNode {
-  id:       string        // "step.command"
-  position: { x: number; y: number }
-  data: {
-    label:   string
-    command: string       // registry key
-    step:    string
-    index:   number
-    status:  string
-    params:  ActionGraphParam[]
-    doc?:    string       // first paragraph of the command's docstring
-    doc_fr?: string       // French doc (UI in French)
-    module?: string       // python module of the command
-    outputs?: string[]    // B4: output keys the command returns (its ports)
-    effects?: ActionGraphEffect[]   // B4: files written + hidden hooks
-    note?:    string      // B4: YAML comments inside the command block
-  }
-}
-
-// B4: what a command writes besides its outputs, or a hook that runs behind it.
-export interface ActionGraphEffect { kind: 'output' | 'hook'; label: string; detail: string }
-
-// B6 node editor catalogue: registered commands (FLUX + team) and code functions.
-export interface CatalogParam { name: string; type: string; value: unknown; label?: string; hide?: boolean; tooltip?: string; required?: boolean }
-export interface CatalogCommand { key: string; doc: string; doc_fr?: string; params: CatalogParam[]; outputs: string[]; origin: 'flux' | 'equipe'; module: string }
-export interface CatalogFunction { id: string; module: string; name: string; useful?: boolean; args: CatalogParam[]; doc: string; outputs: string[] }
-export interface ActionCatalog { commands: CatalogCommand[]; functions: CatalogFunction[]; node_errors: Record<string, string> }
-
-// B4: what the runner injects at launch (context snapshot or set_parameter).
-export interface ActionGraphInput { kind: 'context' | 'runtime'; name: string; target: string; function: string }
-
-export interface ActionGraphEdge {
-  id:     string
-  source: string
-  target: string
-  kind:   'order' | 'dataflow'
-  label?: string
-}
-
-export interface ActionGraph {
-  name:  string
-  nodes: ActionGraphNode[]
-  edges: ActionGraphEdge[]
-  steps?: { name: string; index: number; commands: string[]; note?: string }[]
-  inputs?: ActionGraphInput[]
-  origin?: 'flux' | 'equipe'   // B6: "equipe" = team copy in CONFIG/actions
-  has_default?: boolean        // B6: a shipped YAML exists (reset possible)
-  description?: string    // header comment of the YAML
-  description_fr?: string // its French part (after a "FR:" line)
-  file?: string
-}
-
 export interface HoudiniPublishPayload {
   project_name: string
   filename: string
@@ -257,6 +193,7 @@ export interface HoudiniPublishResult {
   version_str: string
   rop_node: string
   is_sequence: boolean
+  warnings?: string[]
 }
 
 export interface HoudiniState {
@@ -282,6 +219,7 @@ export interface ZBrushPublishResult {
   path:        string
   version:     number
   version_str: string
+  warnings?:   string[]
 }
 
 // ── Production Tab ───────────────────────────────────────────────────────────

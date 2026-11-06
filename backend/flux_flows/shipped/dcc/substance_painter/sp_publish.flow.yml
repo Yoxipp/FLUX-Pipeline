@@ -1,0 +1,78 @@
+flux_flow: 2
+name: sp_publish
+label: spPublish
+description: "Publish Substance Painter (node livre, verrouille ; boite noire, decision 9) : meme code que le Publisher Substance Painter, vNNN immuable + LAST, activite, flows OnPublish. Live, instance du Publisher. Double clic pour voir dedans ; Deverrouiller = copie d'equipe (verifications avant publish)."
+node_type: dcc.sp_publish
+interface:
+  inputs:
+    - {id: session, type: "session[painter]", label: "Session Substance Painter (Live)"}
+    - {id: "class", type: "str", label: "Token CLASS", default: ""}
+    - {id: "task", type: "str", label: "Token TYPE (tache)", default: ""}
+    - {id: "name", type: "str", label: "Token NAME", default: ""}
+    - {id: "instance", type: "str", label: "Token INSTANCE", default: "null"}
+    - {id: "preset", type: "str", label: "Preset d'export", default: "PBR Metallic Roughness"}
+    - {id: "format", type: "str", label: "Format", default: "png"}
+    - {id: "bit_depth", type: "str", label: "Profondeur", default: "8"}
+    - {id: "size", type: "int", label: "Largeur (vide = celle du texture set)"}
+    - {id: "maps", type: "list[str]", label: "Maps (vide = toutes)"}
+    - {id: "conform_tx", type: "bool", label: "Ecrire aussi les .tx", default: false}
+    - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
+    - {id: options, type: dict, label: "Options du Publisher (export, knobs...)"}
+  outputs:
+    - {id: publish, type: publish, label: "Le publish"}
+    - {id: path, type: path, label: "Fichier publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+    - {id: tx, type: "list[path]", label: "Fichiers .tx ecrits"}
+nodes:
+  ev: {type: event.manual, pos: [0, 160]}
+  in_session: {type: data.flow_input, pos: [0, 320], params: {id: session}}
+  in_class: {type: data.flow_input, pos: [0, 440], params: {id: class}}
+  in_task: {type: data.flow_input, pos: [0, 560], params: {id: task}}
+  in_name: {type: data.flow_input, pos: [0, 680], params: {id: name}}
+  in_instance: {type: data.flow_input, pos: [0, 800], params: {id: instance}}
+  in_preset: {type: data.flow_input, pos: [0, 920], params: {id: preset}}
+  in_format: {type: data.flow_input, pos: [0, 1040], params: {id: format}}
+  in_bit_depth: {type: data.flow_input, pos: [0, 1160], params: {id: bit_depth}}
+  in_size: {type: data.flow_input, pos: [0, 1280], params: {id: size}}
+  in_maps: {type: data.flow_input, pos: [0, 1400], params: {id: maps}}
+  in_conform_tx: {type: data.flow_input, pos: [0, 1520], params: {id: conform_tx}}
+  in_description: {type: data.flow_input, pos: [0, 1640], params: {id: description}}
+  core: {type: dcc.sp_publish_core, pos: [320, 160]}
+  out_publish: {type: subflow.flow_output, pos: [640, 160], params: {id: publish}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  in_options: {type: data.flow_input, pos: [0, 1760], params: {id: options}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  out_tx: {type: subflow.flow_output, pos: [2240, 160], params: {id: tx}}
+links:
+  - {from: ev.then, to: core.exec}
+  - {from: in_session.value, to: core.session}
+  - {from: in_class.value, to: core.class}
+  - {from: in_task.value, to: core.task}
+  - {from: in_name.value, to: core.name}
+  - {from: in_instance.value, to: core.instance}
+  - {from: in_preset.value, to: core.preset}
+  - {from: in_format.value, to: core.format}
+  - {from: in_bit_depth.value, to: core.bit_depth}
+  - {from: in_size.value, to: core.size}
+  - {from: in_maps.value, to: core.maps}
+  - {from: in_conform_tx.value, to: core.conform_tx}
+  - {from: in_description.value, to: core.description}
+  - {from: core.then, to: out_publish.exec}
+  - {from: core.publish, to: out_publish.value}
+  - {from: out_publish.then, to: out_path.exec}
+  - {from: core.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: core.version, to: out_version.value}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: core.files, to: out_files.value}
+  - {from: in_options.value, to: core.extra}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: core.warnings, to: out_warnings.value}
+  - {from: out_warnings.then, to: out_tx.exec}
+  - {from: core.tx, to: out_tx.value}
+notes:
+  - {id: k1, pos: [0, 1800], text: "Node livre avec FLUX : lecture seule. Deverrouiller (Team TD) pour ajouter des verifications avant le publish ; Revenir au defaut supprime la copie."}

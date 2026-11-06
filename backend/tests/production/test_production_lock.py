@@ -67,6 +67,16 @@ class ProductionLock(unittest.TestCase):
         self.assertEqual(new["shots"][0]["frame_start"], 1001)
         self.assertEqual(restored, ["SHOT010"])
 
+    def test_renamed_locker_is_not_an_edit(self):
+        # The client gets locked.by with renames resolved (ADAM -> ADAM_FR, ADR 0079):
+        # saving it back unchanged must not count as an edit of a locked shot (no toast loop).
+        prev = _prod()
+        lock.set_lock(prev, "shot", "SEQ010", "SHOT010", True, "ADAM")
+        new = copy.deepcopy(prev)
+        new["shots"][0]["locked"]["by"] = "ADAM_FR"
+        self.assertEqual(lock.keep_locked(new, prev), [])
+        self.assertEqual(new["shots"][0]["locked"]["by"], "ADAM")   # stored lock kept
+
     def test_save_cannot_add_or_drop_a_lock(self):
         prev = _prod()
         lock.set_lock(prev, "shot", "SEQ020", "SHOT010", True, "adam")

@@ -9,7 +9,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../api/client'
-import type { RenderFarm, RenderJob, RenderJobScope, RenderSettings, RenderShot } from '../api/client'
+import type {
+  RenderFarm, RenderJob, RenderJobScope, RenderSettings, RenderSettingsResponse, RenderShareRule, RenderShot,
+} from '../api/client'
 import { startAdaptivePoll } from '../lib/adaptivePoll'
 import { useProject } from '../ProjectContext'
 import { AdvancedTab } from './render/AdvancedTab'
@@ -51,8 +53,13 @@ export function Render() {
   const [jobsDry, setJobsDry] = useState(false)
   const [farm, setFarm] = useState<RenderFarm | null>(null)
 
-  const applySettings = useCallback((r: { settings: RenderSettings; warning: string | null }) => {
+  const [farmTeams, setFarmTeams] = useState<string[]>([])
+  const [teamWarning, setTeamWarning] = useState<string | null>(null)
+  const [farmShares, setFarmShares] = useState<Record<string, RenderShareRule> | null>(null)
+
+  const applySettings = useCallback((r: RenderSettingsResponse) => {
     setSettings(r.settings); setWarning(r.warning)
+    setFarmTeams(r.farm_teams ?? []); setTeamWarning(r.team_warning ?? null); setFarmShares(r.farm_shares ?? null)
   }, [])
 
   useEffect(() => {
@@ -111,6 +118,7 @@ export function Render() {
         {settings?.dry_run && (
           <Banner color="var(--warn)">{tr('Simulation : rien n\'est envoye a la farm', 'Simulation: nothing is sent to the farm')}</Banner>
         )}
+        {teamWarning && <Banner color="var(--warn)">{teamWarning}</Banner>}
         {!settings ? <div style={hint}>{tr('Chargement...', 'Loading...')}</div> : (
           <>
             {tab === 'launch' && (
@@ -121,9 +129,9 @@ export function Render() {
               <JobsTab project={project} jobs={jobs} dryRun={jobsDry} scope={scope} setScope={setScope}
                 days={days} setDays={setDays} reload={() => { void loadJobs() }} />
             )}
-            {tab === 'farm' && <FarmTab farm={farm} />}
+            {tab === 'farm' && <FarmTab farm={farm} project={project} shares={farmShares} />}
             {tab === 'advanced' && (
-              <AdvancedTab project={project} settings={settings} warning={warning} farm={farm}
+              <AdvancedTab project={project} settings={settings} warning={warning} farm={farm} farmTeams={farmTeams}
                 onSaved={r => { applySettings(r); void loadFarm() }} />
             )}
           </>

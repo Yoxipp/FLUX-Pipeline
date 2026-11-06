@@ -27,6 +27,15 @@ from core.logger import get_logger
 from core.paths import ensure_dir
 from dcc.houdini.client import houdini_client
 
+# Every function takes ``client=`` (a HoudiniClient, or any object with run / state): the
+# Flows session of a chosen instance (P6a, 02 §8). None = the singleton, which follows the
+# instance chosen in FLUX (behaviour of every existing caller).
+
+
+def _with(client) -> dict:
+    """``client=`` only when one is given: the internal calls stay as they were without it."""
+    return {"client": client} if client is not None else {}
+
 log = get_logger(__name__)
 
 _GEO_NATIVE_EXTS: frozenset[str] = frozenset({".bgeo", ".bgeo.sc", ".geo", ".obj"})
@@ -61,7 +70,7 @@ def _norm_ext(extension: str) -> str:
 
 # ── Programmatic export ────────────────────────────────────────────────────────
 
-def export_geo(node_path: str, file_path: str | Path, extension: str) -> dict:
+def export_geo(node_path: str, file_path: str | Path, extension: str, *, client=None) -> dict:
     """Export geometry from a Houdini SOP node to disk.
 
     Supported extensions: .bgeo  .bgeo.sc  .geo  .obj  .abc
@@ -109,7 +118,7 @@ def export_geo(node_path: str, file_path: str | Path, extension: str) -> dict:
     else:
         return {"ok": False, "error": f"Unsupported geometry extension: {ext}"}
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         log.info("Houdini geo export → %s", out)
     else:
@@ -117,7 +126,7 @@ def export_geo(node_path: str, file_path: str | Path, extension: str) -> dict:
     return resp
 
 
-def export_scene(file_path: str | Path, extension: str = ".hip") -> dict:
+def export_scene(file_path: str | Path, extension: str = ".hip", *, client=None) -> dict:
     """Save the current Houdini scene to disk.
 
     Supported extensions: .hip  .hiplc  .hipnc
@@ -136,7 +145,7 @@ def export_scene(file_path: str | Path, extension: str = ".hip") -> dict:
         result = {{"ok": True, "path": _out}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         log.info("Houdini scene saved → %s", out)
     else:
@@ -193,7 +202,7 @@ def build_rop_output_path(
     return output_path, ver
 
 
-def set_rop_output(rop_node_path: str, output_path: str | Path) -> dict:
+def set_rop_output(rop_node_path: str, output_path: str | Path, *, client=None) -> dict:
     """Set the output path parameter on an existing Houdini ROP node.
 
     Auto-detects the correct parameter name from the node type.
@@ -223,7 +232,7 @@ def set_rop_output(rop_node_path: str, output_path: str | Path) -> dict:
         result = {{"ok": True, "parm": _parm_name, "node_type": _type, "path": {out!r}}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         parm = (resp.get("result") or {}).get("parm")
         log.info("Set ROP output parm '%s' -> %s", parm, out)
@@ -235,6 +244,8 @@ def set_rop_output(rop_node_path: str, output_path: str | Path) -> dict:
 def cook_rop(
     rop_node_path: str,
     frame_range: tuple[int, int, int] | None = None,
+    *,
+    client=None,
 ) -> dict:
     """Trigger a Houdini ROP cook.
 
@@ -259,7 +270,7 @@ def cook_rop(
             result = {{"ok": True}}
         """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         log.info("ROP cook complete: %s", rop_node_path)
     else:
@@ -274,6 +285,8 @@ def export_via_node(
     frame_range: tuple[int, int, int] | None = None,
     options: dict | None = None,
     attr_filter: dict | None = None,
+    *,
+    client=None,
 ) -> dict:
     """Export from ANY selected node: reuse it if it is a ROP, otherwise create the
     right output ROP (rop_geometry for geo/obj, usdexport for USD, rop_alembic for .abc)
@@ -441,7 +454,7 @@ def export_via_node(
                     pass
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         rop = (resp.get("result") or {}).get("rop")
         log.info("Houdini export via node %s -> %s (%s)", node_path, out, rop)
@@ -462,6 +475,8 @@ def publish_houdini_rop(
     user: str = "",
     options: dict | None = None,
     attr_filter: dict | None = None,
+    *,
+    client=None,
 ) -> dict:
     """Full Houdini publish workflow via a ROP node.
 
@@ -496,7 +511,7 @@ def publish_houdini_rop(
         base_name   = get_base_name(full_name)
         effective_ver = next_ver
 
-        exp_resp = export_scene(output_path, ext)
+        exp_resp = export_scene(output_path, ext, **_with(client))
         if not exp_resp.get("ok"):
             discard_rendered_version(dest_folder, base_name, ext, effective_ver)
             return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
@@ -506,7 +521,8 @@ def publish_houdini_rop(
         ver_str = format_version(effective_ver, DEFAULT_PADDING)
         try:
             # Log the versioned name (not the _LAST alias) so history shows each version.
-            log_publish(user or "unknown", f"{base_name}_{ver_str}{ext}", project_path.name, dest_folder=output_path.parent)
+            log_publish(user or "unknown", f"{base_name}_{ver_str}{ext}", project_path.name, dest_folder=output_path.parent,
+                        soft="houdini")
             from features.publisher.modif_log import append_log
             append_log(dest_folder, base_name, ver_str, description, user)
         except Exception as exc:
@@ -524,7 +540,7 @@ def publish_houdini_rop(
 
     # 1. Resolve ROP node path — use first selected node in Houdini if not provided
     if rop_node_path is None:
-        state = houdini_client.state()
+        state = (client or houdini_client).state()
         selected = state.get("selected_nodes", [])
         if not selected:
             return {"ok": False, "error": "No ROP node selected in Houdini"}
@@ -545,7 +561,7 @@ def publish_houdini_rop(
 
     # 4+5. Export: reuse the node if it is a ROP, else auto-create the right output ROP
     # as a child, wire it, set the path and cook — so any selected node can be exported.
-    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options, attr_filter)
+    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options, attr_filter, **_with(client))
     if not exp_resp.get("ok"):
         discard_rendered_version(dest_folder, base_name, ext, effective_ver, is_sequence=is_sequence)
         return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
@@ -567,7 +583,7 @@ def publish_houdini_rop(
         if token.startswith("$FLUX"):  # only when the output sits under the root
             rop = (exp_resp.get("result") or {}).get("rop")
             if rop:
-                set_rop_output(rop, token)
+                set_rop_output(rop, token, **_with(client))
 
     # 6. Log
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
@@ -575,7 +591,7 @@ def publish_houdini_rop(
     _log_base = get_base_name(f"{filename}{ext}")
     _log_name = f"{_log_base}_{ver_str}{ext}"
     try:
-        log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent)
+        log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent, soft="houdini")
         from features.publisher.modif_log import append_log
         # modif log stays in the shared publish folder (spans all versions/formats)
         append_log(dest_folder, base_name, ver_str, description, user)

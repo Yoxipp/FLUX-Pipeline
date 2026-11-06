@@ -57,6 +57,8 @@ def install(exe_path: str | None = None) -> dict:
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_PLUGIN_SRC, dest)
+        from dcc.bridge_secret import write_sidecar   # secret of the `run` action (__init__.json)
+        write_sidecar(dest)
         (dest.parent / "pluginInfo.json").write_text(json.dumps(_PLUGIN_INFO, indent=2), encoding="utf-8")
     except OSError as exc:
         return {"success": False, "message": str(exc), "path": None}

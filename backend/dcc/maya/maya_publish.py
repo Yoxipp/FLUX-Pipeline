@@ -117,7 +117,7 @@ def publish(
 
         # 5. Publish via publish_core
         from features.publisher.publish_core import publish_file
-        dest = publish_file(exported, project_path, description, user, project_path.name)
+        dest = publish_file(exported, project_path, description, user, project_path.name, soft="maya")
         if dest is None:
             _show_error("Publish failed. Check the Flux log for details.")
             return None

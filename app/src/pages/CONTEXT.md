@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `ActionGraph` (ancien editeur des actions YAML, route `/action-graph-legacy` via `flow_editor/LegacyEditor.tsx`, retire en P8), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `Team` (route `/team`, groupe PIPELINE sous Calendrier : `ChatWidget` du projet actif en pleine hauteur, `fill`, meme UI que la page TOOL Team), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -195,5 +195,107 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     = `ConflictDialog.tsx` (voir sa version : le document reste en brouillon local ; enregistrer par-dessus). Brouillon
     `localStorage` `flux.flow_draft.<portee>.<nom>`, propose a la reouverture. `VersionsDialog.tsx` (Fichier > Versions, tag
     de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
-  * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
-    Parametres avances, carte Actions (YAML), jusqu'a P8.
+  * L'ancien editeur des actions YAML (`/action-graph-legacy`, `ActionGraph.tsx`, `LegacyEditor.tsx`) est retire en P8
+    (avec ses appels `getActionGraph*` / `getActionCatalog` / `saveAction` / `resetAction`, ses types et la partie v1 de
+    `v1_adapter.ts`, qui garde les helpers partages). Les routes backend `/actions/*` restent (secours).
+  * P5 : `ActivationDialog.tsx` (bouton Activer de la TopBar : 0 erreur, avertissements coches, essai a blanc de `current`
+    lance depuis le dialogue ; `SlideToConfirm` si un node `!`), tags "actif vN" / "vM non activee".
+  * P6a : nodes DCC livres en sous-flows verrouilles (`spec.subflow`) : cadenas (livre) ou icone equipe (copie), double clic
+    ou Entree = entrer, fil d'Ariane dans la TopBar, U = remonter ; `DccBanner.tsx` (Deverrouiller = copie d'equipe,
+    Revenir au defaut apres `SlideToConfirm`). Les coeurs `spec.internal` ne sont ni dans Tab ni dans le Shelf.
+    `icons.ts` liste toutes les icones du registre.
+  * P6c : bouton Bridges de la TopBar -> `BridgesDialog.tsx` (bridges d'extension : erreurs, exe, etat d'installation,
+    Installer / Mettre a jour / Desinstaller sur ce poste, conflit -> "Remplacer (sauvegarde)", Creer les nodes = Team TD).
+
+## Pages TOOL (`tool_pages/`, chantier Flows P7, ADR 0066)
+
+* `links.ts` : fonctions pures (pas de runner front : verifiees a la lecture et en live) : `widgetsOf`, `initialValue`,
+  `coerce`, `runValues` (tous les champs par id, ADR 0068), `blockedWidgets` (raison de grisage depuis les `P_*`,
+  `P_FLOW_INACTIVE` grise aussi), `ago`, `seconds`. `PageRenderer` grise un bouton qu'aucun flow actif n'ecoute
+  (`GET /flows/pages/{id}/flows`) et clique par `POST /flows/pages/{id}/click` ; le panneau Publisher genere passe sa
+  `target`.
+* `PageRenderer.tsx` : rendu d'une page (dossiers `plain | tabs | collapsible`, lignes en grille a poids `w`, champs via
+  `ParamWidget`, vrais `<button>`). Clic = `POST /flows/{flow}/run {event: button_id, values}` (version active) ; etat du
+  dernier run par bouton (`GET /flows/runs?flow&event&limit=1`, rafraichi sur `run_finished` du WS) ; en cours = "Stop"
+  (annule le run) ; `remember: user` dans les donnees utilisateur (`flux.pages.remember`) ; `preview` (editeur) : boutons
+  inertes ("lancerait ..."), clic = selection. Widgets de donnees via `renderData`.
+* `DataWidgets.tsx` (ADR 0066 n°2) : `feed` (fil + saisie, Entree envoie, canaux par `group_by`, supprimer son message),
+  `table` (`columns`, `editable` : double clic = formulaire), `cards` (kanban par `group_by`, glisser entre colonnes),
+  `calendar` (mois, champ `date` / `end`, double clic sur un jour = ajouter), `members` (comptes FLUX), et une source
+  `{flow, output}` = sortie du dernier run ok (`outputs` du record de run). Donnees par `hooks/usePages.ts`
+  (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`). `write` est optimiste pour les rids
+  connus (put, del, restore) et coupe en lots de 200 ops.
+* `BoardWidget.tsx` (ADR 0066 n°1, v2 ADR 0071) : board facon Miro dans sa ligne : notes, cartes, formes (rect, arrondi,
+  ellipse, losange), texte libre, images (copiees par le backend, ratio reel), liens (fleches debut / fin, libelle, trait /
+  tirets / pointilles, accroches aux bords). Selection rectangle / Maj+clic, deplacer / dupliquer / supprimer la selection,
+  copier / coller (Ctrl+C / X / V, aussi entre boards sauf images, texte colle = note), poignees de taille, fond / bord /
+  taille de police / gras, devant / derriere, grouper, verrouiller, magnetisme (grille 8 + alignement, Alt l'ignore),
+  mini-carte, "Tout voir" (Maj+1), recherche (Ctrl+F, Entree = suivant). Pan : bouton du milieu / droit, Espace ou outil Main.
+  Undo / redo local (`board/useBoardHistory.ts`, ops inverses dans son journal, `restore` pour une suppression).
+  Rendu DOM + SVG avec culling sur grille grossiere + couche memoisee (`BoardLayer`) : un pan ne re-rend pas les objets ;
+  un glisser n'ecrit qu'au lacher. `board/model.ts` (types, palettes, geometrie, ops), `board/BoardItem.tsx` (objet, lien),
+  `board/BoardMinimap.tsx`. Vue, selection et pile d'undo par spectateur, jamais ecrites.
+  Lot B (ADR 0074) : cadres (`frame`, derriere tout, deplacer un cadre deplace ce qui est dedans, mode presentation dans
+  l'ordre de lecture, plein ecran, fleches / Echap), stylo / surligneur (trait `ink` ecrit au lacher, points simplifies) et
+  gomme (traits entiers), images collees (Ctrl+V d'une capture : `electronAPI.saveClipboardImage`) ou deposees de
+  l'explorateur (`electronAPI.pathForFile`), copiees par le backend ; cartes FLUX (`board/FluxCard.tsx` : ref seule, relue
+  dans `GET /production/<projet>` toutes les 30 s, statuts `taskStatus`, dernier publish, liens Production `openFavorite` /
+  Folder Manager `openPath`) ; modeles livres (`flowsApi.boardTemplates`, inseres comme un collage).
+  Lot C (ADR 0075) : commentaires et reactions (un enregistrement par auteur, pastilles sous l'objet, panneau auteur /
+  dates / reactions / fil de commentaires, @nom notifie), supprimer un objet emporte ses commentaires et reactions,
+  minuteur partage (`timer`, `ends_at`), export PNG / PDF (`board/exportBoard.ts` : redessine depuis les donnees,
+  PDF ecrit a la main, enregistre par `electronAPI.saveBytes`, sinon telechargement).
+  Retours du mainteneur (2026-10-30) : barre de selection et barre du stylo flottantes sur le board (plus de decalage),
+  raccourcis ecoutes sur tout le widget (Suppr marche apres un clic sur une couleur, sauf dans un champ texte), ordre en
+  4 actions (un cran / tout devant / derriere, icone carre + 1 ou 2 fleches), points du fond masquables (par poste),
+  double clic sur un objet = editer (un cadre : son nom), meme sous la capture du pointeur (`lastDown`).
+  v5 (ADR 0083) : deux verrous (`model.ts` `moveLocked` / `textLocked` ; Ctrl+L deplacement, Ctrl+Maj+L texte ;
+  `mayChange` : geometrie -> deplacement, texte -> texte, style -> les deux) ; modeles sans verrou par defaut (le YAML
+  peut en poser). Minuteur : badge flottant 24 px en haut (aussi en presentation), a 0 toast bas droite + notification
+  native comme une mention @ (seulement si on l'a vu tourner).
+  Shotboard (`board/Shotboard.tsx`) : objet `shotboard` dont la grille (ligne = sequence, colonne = shot) est lue dans
+  Production (`useBoardProduction`, `useShotPreviews` -> `POST /production/<p>/shot-previews` toutes les 60 s, media
+  choisi par `pickShotMedia` comme la Timeline) ; cases = enregistrements `shot` (`frame_at`, `frame_at2`, `text`) ;
+  image extraite par `board/frameGrab.ts` (video hors ecran, `ImageBitmap` 480 px, LRU 150, 2 a la fois) ; slider en
+  direct, ecrit au lacher ; bouton Retake -> `api.addShotRetake` (`POST /production/<p>/retake`) ; retakes de Production
+  listees ; taille de l'objet recalee sur la grille ; export (`drawShotboard`).
+* `ChatWidget.tsx` (ADR 0077) : widget officiel `chat` de la page Team = le chat d'equipe du projet (le meme que l'accueil,
+  `api/team.ts`) par canaux (general + canaux d'un lead, archives), fils, reactions (une par auteur), messages epingles
+  (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus par
+  canal (localStorage). Appels par lien : lien permanent du canal (lead) ouvert par `electronAPI.openExternal` (https
+  seulement), "Nouvelle reunion" = lien Jitsi genere ou page Meet / Teams ouverte puis lien colle, poste dans le canal,
+  "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". ADR 0080 : clic droit sur un canal (leads) = Qui voit (`AccessPicker` de `PageAccess.tsx`, champ `access`), Lien d'appel, Archiver ; cadenas sur un canal restreint ; lien d'appel du canal aussi dans le menu Nouvelle reunion. `hooks/usePresenceHeartbeat.ts`
+  (monte dans `App.tsx`) reecrit le fichier de presence de l'artiste toutes les 60 s. Presence visible (P2b) : une seule
+  lecture `GET /team/presence` toutes les 30 s pour toute l'app (`hooks/usePresence.tsx`, `PresenceProvider` dans `App.tsx`,
+  relue apres `flux:presence`), `PresenceDot` = couleur du statut quand connecte (fichier de moins de 150 s) : vert disponible,
+  jaune en reunion, orange ne pas deranger, gris plein absent ; anneau gris vide = hors ligne ; texte en info-bulle. Ronds : auteurs du chat Team et de l'accueil (`home/TeamChat.tsx`), autocompletion @nom
+  (les deux), `Members` (selecteur de son statut), auteurs du fil `feed`, commentaires du board, avatar de la barre du haut.
+  `components/shared/PresenceIndicator.tsx` dans `TitleBar` : "N en ligne", au clic tous les artistes (`everyone` du
+  provider : dossiers `USER/` + fichiers de presence ; connectes d'abord) avec rond, nom, statut, texte, et
+  son propre statut + message. `components/shared/PeoplePanel.tsx` : colonne repliable a droite du chat de l'accueil et du
+  widget `chat` (tous les artistes de `USER/`, ordre alphabetique, rond vert / gris, ouvert / ferme memorise par chat).
+  Pas encore : assignee Production, calendrier (filtre par personne), Login.
+  ADR 0081 : `/` en debut de message liste les commandes du canal (`flowsApi.teamCommands`), Entree complete, aide
+  sous la saisie, `confirm` = barre Lancer / Annuler, envoi `flowsApi.runTeamCommand` (le backend poste le message et lance
+  les flows sur ce poste) ; `/inconnu` n'est pas envoye ; une reponse FLUX affiche "pour <artiste>" (`via`).
+* `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
+  au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
+  "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
+  PIPELINE sous Activite (`Sidebar.tsx`, 2026-10-30) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
+  Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.
+  ADR 0078 / 0085 : une page restreinte (cle `access`) n'est listee qu'aux personnes / roles coches ; un Team TD voit les
+  autres sous "Other tools" repliable (`flux.tool.others_open`). `PageAccess.tsx` : choix tout le monde / roles / personnes,
+  au dialogue de creation et dans les proprietes de la page.
+* `PageBuilder.tsx` (route `/tool/:id/edit?scope=`, `new` = dialogue de creation : libelle, id propose, portee, depart
+  vide / modele `shipped/pages/` / copie d'une page) : 4 colonnes Palette (Formulaire, Decor, Donnees ; un widget de
+  donnees cree sa collection par defaut s'il n'y en a pas : un Fil marche du premier coup) | Arbre (dossiers > lignes >
+  widgets, pastille ok / erreur, monter / descendre / gauche / droite / sortir de la ligne, collections, Problemes) |
+  Proprietes (`PageProps.tsx` : id (renommer un widget qu'un flow utilise previent), "Lance" / "Lu par" en lecture (flows
+  dont l'InputsPageReader utilise le widget, Ouvrir), props par kind, champs des collections) | Apercu
+  (`PageRenderer preview`). Store generique de l'editeur de flows (undo / redo), validation en direct 300 ms, Ctrl+S,
+  Fermer = enregistrer puis quitter. Reducers purs dans `builder.ts`. Pas de glisser-deposer dans l'arbre (fleches) :
+  a ajouter si the maintainer le demande.
+* `GeneratedPublishPanel.tsx` (04 §7) : panneau Publisher d'un logiciel ajoute en extension (P6c) : `Publisher.tsx` ajoute
+  les bridges valides au `SoftwareSelector` (`extra`) et, pour eux seulement, remplace le Composer et la barre du bas
+  par ce panneau (une seule branche). Champs = interface du flow `publish_<soft>` (`GET /flows/pages/publish_panel/<soft>`),
+  Publier = `event: publish_request` (flow actif). Destination et note de publish : en P8 (ils dependent du Composer).

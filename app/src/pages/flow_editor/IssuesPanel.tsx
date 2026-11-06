@@ -1,6 +1,6 @@
 // IssuesPanel.tsx — Problems dock (03_EDITEUR §5): the issues of POST /flows/validate (the
 // backend is the reference), errors then warnings: CircleX / TriangleAlert, message,
-// reason in grey, code in a tag, node label. "Verification..." during a call; backend
+// reason in grey, code on hover, node label. "Verification..." during a call; backend
 // unreachable: "Verification indisponible". A click on a line zooms on the node (the
 // editor frames it, selects it, its border blinks once). "Corriger" applies the fix.
 
@@ -41,16 +41,17 @@ export function IssuesPanel({ issues, state, labels, canFix, onZoom, onFix, onCl
           const err = i.level === 'error'
           const Icon = err ? CircleX : TriangleAlert
           return (
-            <div key={`${i.code}:${i.node}:${i.port}:${k}`} className="flow-issue" onClick={() => onZoom(i)}>
+            <div key={`${i.code}:${i.node}:${i.port}:${k}`} className="flow-issue" onClick={() => onZoom(i)} title={i.code}>
               <Icon size={13} strokeWidth={2} color={err ? 'var(--err)' : 'var(--warn)'} style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: 'var(--ink)' }}>
-                  {i.node && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{labels[i.node] ?? i.node} </span>}
+                  {i.node && !(lang === 'en' ? i.message_en : i.message_fr).startsWith(labels[i.node] ?? i.node) && (
+                    <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{labels[i.node] ?? i.node} </span>
+                  )}
                   {lang === 'en' ? i.message_en : i.message_fr}
                 </div>
                 <div style={{ color: 'var(--ink-4)' }}>{lang === 'en' ? i.why_en : i.why_fr}</div>
               </div>
-              <span className="tag">{i.code}</span>
               {canFix(i) && (
                 <button type="button" className="flow-tool" onClick={e => { e.stopPropagation(); onFix(i) }} title={tr('Correction en un clic (annulable)', 'One click fix (undoable)')}>
                   <Wrench size={12} /> {tr('Corriger', 'Fix')}

@@ -6,15 +6,16 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench, MessagesSquare,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
 import { useActiveInstances } from '../../hooks/useActiveInstances'
-import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../../hooks/useVisibleDccs'
 import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
+import { usePageList } from '../../hooks/usePages'
 import { useI18n } from '../../i18n'
 import { DccLogo } from './DccLogo'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -142,7 +143,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
-  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const { isVisible: isDccEnabled } = useVisibleDccs()
   const [launcherMenu, setLauncherMenu] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
@@ -167,6 +168,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
+  const { list: toolPages } = usePageList(activeProject)
+  const toolVisible = !!toolPages && (toolPages.pages.some(p => !p.shadowed) || toolPages.can_edit.team || toolPages.can_edit.project)
   const [presets, setPresets] = useState<Preset[]>([])
 
   // Multi-instance (cluster C): which instance each DCC targets. The selector row
@@ -779,7 +782,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         {(productionPinned || productionExpanded) && <div className="production-nav-children" aria-label={t('nav.production.modes')}>{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>)}</div>}
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
+        {/* Team chat of the project, channels on the left (built-in, 2026-10-30, ADR 0077). */}
+        <NavItem icon={MessagesSquare} label={t('nav.team')}           active={pathname === '/team'}      indent route="/team" onClick={() => navigate('/team')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
+        {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one.
+            Under Activity in PIPELINE (2026-10-30). */}
+        {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 
       <NavGroup title="ASSETS">

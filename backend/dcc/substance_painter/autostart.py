@@ -72,6 +72,9 @@ def install(exe_path: str | None = None) -> dict:
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_PLUGIN_SRC, dest)
+        # The machine secret gating the bridge's `run` action (dcc/bridge_secret.py).
+        from dcc.bridge_secret import write_sidecar
+        write_sidecar(dest)
     except OSError as exc:
         return {"success": False, "message": str(exc), "path": None}
     _remove_legacy()
@@ -88,6 +91,9 @@ def uninstall(exe_path: str | None = None) -> dict:
     try:
         if f and f.exists():
             f.unlink()
+        if f:
+            from dcc.bridge_secret import remove_sidecar
+            remove_sidecar(f)
     except OSError as exc:
         return {"success": False, "message": str(exc)}
     _remove_legacy()

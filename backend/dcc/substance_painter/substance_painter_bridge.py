@@ -10,6 +10,14 @@ export via the substance_painter API.
 Protocol:
   {"action": "ping"}                       -> {"status": "ok", "version": "..."}
   {"action": "export", "config": {...}}    -> {"status": "ok", "files": [...]}
+  Flows verbs (P6b step 9, 2026-10-24, API per Adobe docs, TO VALIDATE LIVE):
+  {"action": "open", "path"|"mesh", "discard"}       -> {"status": "ok", "project": path}
+  {"action": "save"}                                 -> {"status": "ok", "project": path}
+  {"action": "save_as", "path", "copy"}              -> {"status": "ok", "project": path}
+  {"action": "import", "kind": "mesh", "path"}       -> {"status": "ok"}  (reload_mesh)
+  {"action": "import", "kind": "resource", "path", "usage"} -> {"status": "ok", "url": ...}
+  {"action": "run", "code", "secret"}                -> {"ok": true, "result": ..., "trace": ""}
+  `run` requires the machine secret written next to this script (<script>.json) at install.
 
 NOTE: export_project_textures' result shape is version-specific; the flattening
 below is defensive and must be verified against the installed Painter version.
@@ -333,8 +341,187 @@ def _presets() -> list[dict]:
     return sorted(out, key=lambda x: x["name"].lower())
 
 
+# ── Flows verbs (P6b step 9) ─────────────────────────────────────────────────
+
+def _secret() -> str:
+    """The machine secret copied next to this script at install (<script>.json)."""
+    try:
+        with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8") as fh:
+            return str(json.load(fh).get("secret") or "")
+    except (OSError, ValueError, NameError):
+        return ""
+
+
+def _project_path(_project) -> str:
+    try:
+        return str(_project.file_path() or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _guard_busy(_project) -> "dict | None":
+    is_busy = getattr(_project, "is_busy", None)
+    if is_busy is not None and is_busy():
+        return {"status": "error", "msg": "Painter est occupe (calcul en cours), reessaie"}
+    return None
+
+
+def _api(fn):
+    """Run fn(project module) on the main thread, errors as {"status": "error"}."""
+    if not _SP_AVAILABLE:
+        return {"status": "error", "msg": "substance_painter module not available"}
+
+    def job():
+        try:
+            import substance_painter.project as _project
+
+            return fn(_project)
+        except Exception as exc:  # noqa: BLE001
+            _diag(f"verb failed: {exc!r}")
+            return {"status": "error", "msg": str(exc)}
+
+    return _on_main_thread(job)
+
+
+def _do_open(cmd: dict) -> dict:
+    path, mesh, discard = str(cmd.get("path") or ""), str(cmd.get("mesh") or ""), bool(cmd.get("discard"))
+    if not path and not mesh:
+        return {"status": "error", "msg": "open : path (.spp) ou mesh attendu"}
+
+    def fn(_project):
+        busy = _guard_busy(_project)
+        if busy:
+            return busy
+        if _project.is_open():
+            if _project.needs_saving() and not discard:
+                return {"status": "error",
+                        "msg": "projet modifie non enregistre : enregistre-le ou coche discard_changes"}
+            _project.close()
+        if mesh:
+            _project.create(mesh_file_path=mesh)
+        else:
+            _project.open(path)
+        return {"status": "ok", "project": _project_path(_project)}
+
+    return _api(fn)
+
+
+def _do_save(cmd: dict) -> dict:
+    def fn(_project):
+        if not _project.is_open():
+            return {"status": "error", "msg": "Aucun projet ouvert dans Painter"}
+        busy = _guard_busy(_project)
+        if busy:
+            return busy
+        if not _project_path(_project):
+            return {"status": "error", "msg": "projet jamais enregistre : utilise spSaveAs"}
+        _project.save()
+        return {"status": "ok", "project": _project_path(_project)}
+
+    return _api(fn)
+
+
+def _do_save_as(cmd: dict) -> dict:
+    path, copy = str(cmd.get("path") or ""), bool(cmd.get("copy"))
+    if not path:
+        return {"status": "error", "msg": "save_as : path attendu"}
+
+    def fn(_project):
+        if not _project.is_open():
+            return {"status": "error", "msg": "Aucun projet ouvert dans Painter"}
+        busy = _guard_busy(_project)
+        if busy:
+            return busy
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        if copy:
+            _project.save_as_copy(path)
+        else:
+            _project.save_as(path)
+        return {"status": "ok", "project": path}
+
+    return _api(fn)
+
+
+def _do_import(cmd: dict) -> dict:
+    kind, path = str(cmd.get("kind") or "resource"), str(cmd.get("path") or "")
+    if not path:
+        return {"status": "error", "msg": "import : path attendu"}
+    if kind == "resource":
+        usage = str(cmd.get("usage") or "texture").upper()
+
+        def fn(_project):
+            import substance_painter.resource as _res
+
+            if not _project.is_open():
+                return {"status": "error", "msg": "Aucun projet ouvert dans Painter"}
+            if not hasattr(_res.Usage, usage):
+                return {"status": "error", "msg": f"usage inconnu : {usage.lower()}"}
+            res = _res.import_project_resource(path, getattr(_res.Usage, usage))
+            return {"status": "ok", "url": str(res.identifier().url())}
+
+        return _api(fn)
+    if kind != "mesh":
+        return {"status": "error", "msg": f"import : kind inconnu {kind} (mesh, resource)"}
+    # reload_mesh is asynchronous: started on the main thread, its callback ends the wait here.
+    done, box = threading.Event(), {}
+
+    def on_status(status):
+        box["status"] = status
+        done.set()
+
+    def start(_project):
+        if not _project.is_open():
+            return {"status": "error", "msg": "Aucun projet ouvert dans Painter"}
+        busy = _guard_busy(_project)
+        if busy:
+            return busy
+        _project.reload_mesh(path, _project.MeshReloadingSettings(), on_status)
+        return {"status": "ok"}
+
+    started = _api(start)
+    if started.get("status") != "ok":
+        return started
+    if not done.wait(600.0):
+        return {"status": "error", "msg": "rechargement du mesh : pas de reponse de Painter (10 min)"}
+    status = box.get("status")
+    if "SUCCESS" not in str(status).upper():
+        return {"status": "error", "msg": f"rechargement du mesh : {status}"}
+    return {"status": "ok"}
+
+
+def _do_run(cmd: dict) -> dict:
+    import hmac
+    import traceback
+
+    expected = _secret()
+    if not expected or not hmac.compare_digest(str(cmd.get("secret") or ""), expected):
+        return {"ok": False, "status": "error",
+                "error": "secret du bridge refuse : reinstalle le bridge Painter depuis FLUX"}
+    code = str(cmd.get("code") or "")
+
+    def job():
+        ns = {"substance_painter": _sp, "__name__": "__flux_flow__"}
+        try:
+            exec(compile(code, "<flux flow>", "exec"), ns)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "error", "error": str(exc), "trace": traceback.format_exc()}
+        result = ns.get("result")
+        try:
+            json.dumps(result)
+        except (TypeError, ValueError):
+            result = repr(result)
+        return {"ok": True, "status": "ok", "result": result, "trace": ""}
+
+    return _on_main_thread(job, timeout=float(cmd.get("timeout") or 600.0))
+
+
+_VERBS = {"open": _do_open, "save": _do_save, "save_as": _do_save_as, "import": _do_import, "run": _do_run}
+
+
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
+    if action in _VERBS:
+        return _VERBS[action](cmd)
     if action == "info":
         return _on_main_thread(_do_info, timeout=20.0)
     if action == "ping":

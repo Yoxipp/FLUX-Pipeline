@@ -2,7 +2,7 @@
 #
 #   shipped  backend/flux_flows/shipped/            read only, inside the exe
 #   team     <FLUX_ROOT>/CONFIG/extensions/flows/   + nodes/ pages/ icons/ bridges/ runs/ history.jsonl
-#   project  <project>/_flux_setup/flows/            + history.jsonl
+#   project  <project>/_flux_setup/flows/            + history.jsonl, ../pages/
 #   perso    <FLUX_ROOT>/USER/<NAME>/flows/          drafts in _drafts/ (P4)
 #
 # core is imported lazily so flux_flows stays importable without a FLUX_ROOT (tests).
@@ -87,4 +87,13 @@ def roots_for(*, user: Optional[str], project: Optional[str]) -> dict:
             roots["project"] = scope_dir("project", project=project)
     except RuntimeError:  # no FLUX_ROOT yet (first launch): shipped only
         pass
+    return roots
+
+
+def page_roots(project: Optional[str]) -> dict:
+    """{scope: folder or None} of the TOOL pages (04 §2): shipped templates, team, project."""
+    flows = roots_for(user=None, project=project)
+    roots: dict = {"shipped": shipped_dir() / "pages"}
+    for scope in ("team", "project"):   # next to flows/: CONFIG/extensions/pages, _flux_setup/pages
+        roots[scope] = Path(flows[scope]).parent / "pages" if flows[scope] is not None else None
     return roots

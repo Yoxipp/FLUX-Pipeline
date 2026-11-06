@@ -23,12 +23,18 @@ if "--uninstall-cleanup" in sys.argv:
     from features.system.uninstall import run_cleanup_cli
     sys.exit(run_cleanup_cli())
 
+# Headless Discord bot host (ADR 0076): started at Windows logon from the Startup
+# shortcut, no HTTP, no window. Exits before the port file and the app are set up.
+if "--discord-bot" in sys.argv:
+    from features.notify.bot_host import run_cli as run_discord_bot_cli
+    sys.exit(run_discord_bot_cli())
+
 from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
 from features.production import scan_cache as production_scan_cache
-from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, production, project, publish, render, review, settings, shelf, system, team_calendar, usd_assembler
+from routers import actions, activity, dcc, files, flows, folder_manager, houdini_work, logs, notify, production, project, publish, render, review, roles, settings, shelf, system, team, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -49,6 +55,17 @@ async def lifespan(app: FastAPI):
     log.info("[FLUX] Backend starting on port %d", PORT)
     saved_user = config.get("username")
     if saved_user:
+        # Renamed on another machine (aliases, ADR 0065): follow the new name.
+        from utils import user_utils
+        renamed = user_utils.follow_rename(saved_user)
+        if renamed != saved_user:
+            saved_user = renamed
+            config.set("username", saved_user)
+            try:
+                from core import paths as _paths
+                _paths.set_config_username(saved_user)
+            except (OSError, RuntimeError):
+                pass
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
     # Self-heal frozen installs whose config.json drifted from prefs.json (older
@@ -90,7 +107,40 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] DCC auto-update: %s", updated)
     except Exception as exc:  # never block startup on a reconcile hiccup
         log.warning("[FLUX] DCC auto-update skipped: %s", exc)
+    # Flows (P5, 01 §9): the only background task of the backend. Active flows, host
+    # lock between workstations, schedule / new_file / when / scene_opened / on_publish.
+    # FLUX_FLOWS_SCHEDULER=0 turns it off. Electron may kill the sidecar without the
+    # teardown below: the host lock then expires by itself (60 s).
+    try:
+        from flux_flows import scheduler as flows_scheduler
+        flows_scheduler.start()
+    except Exception as exc:  # never block startup on the Flows scheduler
+        log.warning("[FLUX] Flows scheduler skipped: %s", exc)
+    # Phone notify (ADR 0062): resend what a previous run left in the local queue. The
+    # worker thread only lives while the queue has items. FLUX_NOTIFY=0 turns it off.
+    try:
+        from features.notify import dispatch as notify_dispatch, outbox as notify_outbox
+        if notify_outbox.load():
+            notify_dispatch.kick()
+    except Exception as exc:  # never block startup on notifications
+        log.warning("[FLUX] Notify queue skipped: %s", exc)
+    # Discord bot (ADR 0073): only for the projects whose token is on THIS PC.
+    try:
+        from features.notify import discord_bot
+        discord_bot.start_all()
+    except Exception as exc:  # never block startup on the bot
+        log.warning("[FLUX] Discord bot skipped: %s", exc)
     yield
+    try:
+        from features.notify import discord_bot
+        discord_bot.stop_all()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("[FLUX] Discord bot stop skipped: %s", exc)
+    try:
+        from flux_flows import scheduler as flows_scheduler
+        await flows_scheduler.stop()
+    except Exception as exc:  # never block shutdown on the Flows scheduler
+        log.debug("[FLUX] Flows scheduler stop skipped: %s", exc)
     # Best-effort: release ZBrush if a freeze is active, so a graceful shutdown never
     # leaves it frozen. Electron hard-kills the sidecar on quit (this may not run),
     # so the app-close release also fires from the Electron side before the kill.
@@ -187,8 +237,11 @@ app.include_router(logs.router,           prefix="/logs",           tags=["Logs"
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
 app.include_router(team_calendar.router,  prefix="/calendar",       tags=["Calendar"])
+app.include_router(team.router,           prefix="/team",           tags=["Team"])
+app.include_router(notify.router,         prefix="/notify",         tags=["Notify"])
 app.include_router(render.router,         prefix="/render",         tags=["Render"])
 app.include_router(review.router,         prefix="/review",         tags=["Review"])
+app.include_router(roles.router,          prefix="/roles",          tags=["Roles"])
 app.include_router(system.router,         prefix="/system",         tags=["System"])
 
 

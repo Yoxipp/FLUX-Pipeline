@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { Menu, Plus, X } from 'lucide-react'
 import type { ProductionDepartment, ProductionState } from '../../types'
 import { moveDepartment, STATUS_TOKENS, trackingDepartments } from './tracking'
+import { ProjectSettingsDialog } from './ProjectSettingsDialog'
 
 interface Props {
+  project: string
   state: ProductionState
   mode: 'asset' | 'shot'
   setState: (patch: (prev: ProductionState) => ProductionState) => void
 }
 
-export function ProductionSettings({ state, mode, setState }: Props) {
+export function ProductionSettings({ project, state, mode, setState }: Props) {
+  const [advanced, setAdvanced] = useState(false)
   const [draft, setDraft] = useState(() => trackingDepartments(state, mode).map(d => ({ ...d, task_tokens: [...d.task_tokens], statuses: [...d.statuses], depends_on: [...d.depends_on] })))
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
@@ -31,7 +34,8 @@ export function ProductionSettings({ state, mode, setState }: Props) {
     setError(''); setSaved(true)
   }
   return <div className="production-tracking production-settings-page">
-    <div className="tracking-settings-heading"><h2>Settings · {mode === 'shot' ? 'Shots' : 'Assets'}</h2><button onClick={save}>Enregistrer</button></div>
+    <div className="tracking-settings-heading"><h2>Settings · {mode === 'shot' ? 'Shots' : 'Assets'}</h2><button onClick={() => setAdvanced(true)}>Paramètres avancés du projet</button><button onClick={save}>Enregistrer</button></div>
+    {advanced && <ProjectSettingsDialog project={project} onClose={() => setAdvanced(false)} />}
     <p>Fixe : TODO par défaut. Optionnel : vide jusqu’à la première review. Glissez les trois barres pour réordonner les colonnes.</p>
     <p>Ajouter ou supprimer un département ici ne crée ni ne supprime de dossier sur disque. Ses tâches et reviews sont conservées.</p>
     <div className="tracking-config-list"><div className="tracking-config-row tracking-config-labels"><span /><span>Département</span><span>Mode</span><span>Tokens de tâche</span><span>Statuts</span><span>Dépendances</span><span /></div>

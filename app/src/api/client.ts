@@ -4,8 +4,6 @@ import type {
   ActionFormResponse,
   CalendarItem,
   CalendarPublish,
-  ActionCatalog,
-  ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
   FollowedShot,
@@ -16,6 +14,7 @@ import type {
   HoudiniPublishResult,
   HoudiniState,
   Preset,
+  ProductionComment,
   ProductionPayload,
   ProductionState,
   PublishPayload,
@@ -26,7 +25,11 @@ import type {
   ZBrushPublishResult,
 } from '../types'
 
-const BASE_URL = 'http://127.0.0.1:8765'
+export const BASE_URL = 'http://127.0.0.1:8765'
+
+export interface UserProfile {
+  id: string; first_name: string; last_name: string; has_password: boolean
+}
 
 export interface WorkspacesInfo {
   active: string | null
@@ -160,15 +163,29 @@ export interface RenderSettings {
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   service_karma: string; service_renderman: string; envkeys: string[]
   husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
+  engine_config_dir: string   // network folder of the engine limits.config (environment screen only)
+  denoise_path: string; denoise_crossframe: boolean   // RenderMan denoise_batch on the blades
   // percent 0 = off; of = alive blades or blades free right now
   job_share: RenderShare; team_cap: RenderShare
   host_groups: Record<string, string[]>; exclude_hosts: string[]
+}
+// farm_teams / team_warning: Shares of the engine limits.config (read only, Tractor balances the teams itself)
+export interface RenderSettingsResponse {
+  settings: RenderSettings; warning: string | null; farm_teams?: string[]; team_warning?: string | null
+  farm_shares?: Record<string, RenderShareRule> | null   // husk Shares, "default" = every other project
+}
+export interface RenderEnvUnlock { phrase: string; password: string }
+export interface RenderShareRule { nominal: number | null; cap: number | null }   // 0..1 (school limits.config)
+export interface RenderEnvState {
+  engine: string; config_dir: string; folder_ok: boolean; folder_error: string | null
+  engine_shares: Record<string, Record<string, RenderShareRule>> | null   // per limit tag (husk, prman...)
 }
 // Last launch form of the artist (backend <project>/_flux_setup/render_last/<user>.json).
 export interface RenderLastForm {
   source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
   freeze: boolean; limit_job: boolean; share_percent: number; share_of: RenderShareBase
   target: 'any' | 'pick'; hosts: string[]; groups: string[]; freeze_when?: RenderFreezeWhen
+  denoise?: boolean; denoise_crossframe?: boolean
 }
 export type RenderShareBase = 'alive' | 'free'
 export type RenderFreezeWhen = 'start' | 'submit'
@@ -178,6 +195,7 @@ export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
   start_at: string; service: string; maxactive: number; freeze_when?: RenderFreezeWhen
+  denoise?: string | null   // folder of the denoised frames, when asked
 }
 export interface RenderJob {
   jid: number; title: string; user: string; projects?: string[] | string; priority?: number; maxactive?: number
@@ -205,7 +223,6 @@ export interface RenderBlade {
 export interface RenderFarm {
   blades: RenderBlade[]; active_by_project: Record<string, number>
   counts: Record<RenderBladeState | 'alive', number>; rooms: Record<string, string[]>
-  team_cap: { enabled: boolean; slots: number; used: number; targets: Record<string, number>; changed: number; errors: string[] }
   host_groups: Record<string, string[]>; exclude_hosts: string[]; host_targeting_verified: boolean
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   tractor_project: string; dry_run?: boolean
@@ -216,14 +233,19 @@ export const api = {
   getSettings: () =>
     apiCall<Settings>('GET', '/settings', undefined, 10000),   // fail fast on a wedged backend
 
-  initFirstLaunch: (workspace: string, username: string) =>
-    apiCall<{ success: boolean }>('POST', '/settings/init', { workspace, username }),
+  // Existing artist: username (+ password if it has one). New artist: first_name + last_name
+  // (the identifier is computed server side).
+  initFirstLaunch: (workspace: string, username: string, extra?: {
+    first_name?: string; last_name?: string; password?: string; remember?: boolean
+  }) =>
+    apiCall<{ success: boolean; username?: string }>('POST', '/settings/init', { workspace, username, ...extra }),
 
   updateSettings: (patch: Partial<{
     theme_bg: string; theme_surface: string; theme_fg: string; theme_accent: string
     last_project: string; dcc_path: Record<string, string>
     username: string; workspace: string; language: 'fr' | 'en'
     log_colors: Record<string, string>
+    password: string; remember: boolean   // with username: switching to a protected artist
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
 
   // Known FLUX directories on this machine; exactly one is active (activate it with
@@ -240,11 +262,42 @@ export const api = {
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
-  renameUser: (old: string, next: string) =>
-    apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next }),
+  // `project` is required to rename ANOTHER artist (lead) and to delete one (supervisor).
+  renameUser: (old: string, next: string, project?: string) =>
+    apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next, project }),
 
-  deleteUser: (name: string) =>
-    apiCall<{ success: boolean; message: string }>('DELETE', `/settings/users/${encodeURIComponent(name)}`),
+  // Rename from first / last name (ADR 0079): identifier from the initials, empty last name = first name alone.
+  previewRename: (old: string, first_name: string, last_name: string) =>
+    apiCall<{ id: string }>('POST', '/settings/users/rename-preview', { old, first_name, last_name }),
+  renameUserByName: (old: string, first_name: string, last_name: string, project?: string) =>
+    apiCall<{ success: boolean; id: string; message: string }>('PUT', '/settings/users/rename-by-name', { old, first_name, last_name, project }),
+
+  deleteUser: (name: string, project?: string) =>
+    apiCall<{ success: boolean; message: string }>(
+      'DELETE', `/settings/users/${encodeURIComponent(name)}` + (project ? `?project=${encodeURIComponent(project)}` : '')),
+
+  // Artist accounts: names + optional password
+  listUserProfiles: () =>
+    apiCall<{ profiles: UserProfile[] }>('GET', '/settings/users/profiles'),
+
+  previewUserId: (first_name: string, last_name: string) =>
+    apiCall<{ id: string }>('POST', '/settings/users/id-preview', { first_name, last_name }),
+
+  createUser: (body: { first_name: string; last_name: string; password?: string; remember?: boolean; switch?: boolean }) =>
+    apiCall<{ id: string }>('POST', '/settings/users', body),
+
+  getOwnProfile: () =>
+    apiCall<UserProfile>('GET', '/settings/user/profile'),
+
+  setOwnProfile: (first_name: string, last_name: string) =>
+    apiCall<UserProfile>('PUT', '/settings/user/profile', { first_name, last_name }),
+
+  // current required when a password is set; empty / missing `next` removes the password
+  setOwnPassword: (current: string | undefined, next: string | undefined) =>
+    apiCall<{ has_password: boolean }>('PUT', '/settings/user/password', { current, new: next }),
+
+  resetUserPassword: (name: string, project: string) =>
+    apiCall<{ success: boolean }>('POST', `/settings/users/${encodeURIComponent(name)}/reset-password`, { project }),
 
   // Per-user data blob (favorites / recents / archived …) — stored on the Flux drive
   getUserData: () =>
@@ -368,21 +421,7 @@ export const api = {
     target_name?: string
   }) => apiCall<ActionPreviewResponse>('POST', '/actions/publish/preview', payload),
 
-  // Node flow (read-only): the graph of a YAML action, rendered with React Flow.
-  // On demand only (opened from the hidden bench page); never polled.
-  getActionGraphList: () =>
-    apiCall<string[]>('GET', '/actions/graph/list'),
-
-  getActionGraph: (name: string) =>
-    apiCall<ActionGraph>('GET', `/actions/${encodeURIComponent(name)}/graph`),
-
-  // B6 node editor (ADR 0040): catalogue, team copy of an action, team nodes.
-  getActionCatalog: () =>
-    apiCall<ActionCatalog>('GET', '/actions/catalog'),
-  saveAction: (action: Record<string, unknown>) =>
-    apiCall<{ path: string }>('POST', '/actions/save', { action }),
-  resetAction: (name: string) =>
-    apiCall<{ reset: boolean }>('DELETE', `/actions/${encodeURIComponent(name)}/team`),
+  // The old YAML action editor (P4-P8) is gone; the backend /actions/* routes stay as a fallback.
   getNodeTemplate: (name: string) =>
     apiCall<{ code: string }>('GET', `/actions/nodes/template?name=${encodeURIComponent(name)}`),
   saveNode: (name: string, code: string) =>
@@ -422,7 +461,7 @@ export const api = {
     user?:        string
     port?:        number
   }) =>
-    apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
+    apiCall<{ ok: boolean; version_str: string; dest: string; warnings?: string[] }>('POST', '/dcc/maya/publish', payload),
 
   exportMayaLightUsd: (payload: {
     project_name: string
@@ -520,7 +559,7 @@ export const api = {
     description?:   string
     user?:          string
   }) =>
-    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean }>(
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean; warnings?: string[] }>(
       'POST', '/dcc/nuke/publish', payload),
 
   // Photoshop — save the active document into the FLUX layout over COM.
@@ -1030,6 +1069,14 @@ export const api = {
   getUsdAsset: (project: string, name: string) =>
     apiCall<UsdAssetInfo>('GET', `/usd/asset?${new URLSearchParams({ project, name })}`),
 
+  // Shot stage (ADR 0020) of one shot: state, version, layers.
+  getUsdShot: (project: string, seq: string, shot: string) =>
+    apiCall<{ project: string; shots: UsdShotInfo[] }>('GET', `/usd/shots?${new URLSearchParams({ project, seq, shot })}`),
+
+  generateUsdShot: (project: string, seq: string, shot: string, user: string, frozen = false) =>
+    apiCall<{ ok: boolean; changed: boolean; version: string; last: string; warnings: string[] }>(
+      'POST', '/usd/shot/generate', { project, seq, shot, user, frozen }),
+
   getUsdDepartments: () =>
     apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number>
               shot_tasks?: Record<string, UsdTaskContribution> }>(
@@ -1116,9 +1163,9 @@ export const api = {
     apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
   // Tractor farm render (ADR 0015, backend routers/render.py)
   renderSettings: (project: string) =>
-    apiCall<{ settings: RenderSettings; warning: string | null }>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
+    apiCall<RenderSettingsResponse>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
   renderSaveSettings: (project: string, patch: Partial<RenderSettings>) =>
-    apiCall<{ settings: RenderSettings; warning: string | null }>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
+    apiCall<RenderSettingsResponse>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
   renderShots: (project: string) =>
     apiCall<{ shots: RenderShot[] }>('GET', `/render/shots?project=${encodeURIComponent(project)}`),
   renderUsdRange: (project: string, path: string) =>
@@ -1131,7 +1178,16 @@ export const api = {
     freeze_when?: RenderFreezeWhen   // with start_at: freeze when the job starts or now; omitted = team default
     hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
     share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
+    priority?: number   // this job only, omitted = team default
+    denoise?: boolean; denoise_crossframe?: boolean   // RenderMan denoise_batch after the render (same job)
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
+  // Denoise of an already rendered sequence (RenderMan denoise_batch on the farm, into <folder>/denoised).
+  renderDenoise: (body: {
+    project: string; path: string; frame_start?: number; frame_end?: number; crossframe?: boolean; priority?: number
+  }) => apiCall<{
+    dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string; output: string
+    frames: [number, number]; count: number; pattern: string; warnings: string[]; priority_warning?: string | null
+  }>('POST', '/render/denoise', body, 60000),
   renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
       'GET', `/render/jobs?project=${encodeURIComponent(project)}&scope=${scope}&days=${days}`),
@@ -1154,6 +1210,17 @@ export const api = {
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
   renderJobAction: (project: string, jid: number, action: RenderJobAction) =>
     apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+  renderJobPriority: (project: string, jid: number, priority: number) =>
+    apiCall<{ jid: number; priority: number; priority_warning: string | null }>('POST',
+      `/render/jobs/${jid}/priority?project=${encodeURIComponent(project)}`, { priority }),
+  // Environment screen (school farm config, locked by "Understand" + password; backend checks both)
+  renderEnvState: (project: string, unlock: RenderEnvUnlock) =>
+    apiCall<RenderEnvState>('POST', `/render/env/state?project=${encodeURIComponent(project)}`, unlock),
+  renderEnvShares: (project: string, unlock: RenderEnvUnlock, teams: Record<string, RenderShareRule>) =>
+    apiCall<{ path: string; backup: string; shares: Record<string, Record<string, RenderShareRule>> }>('PUT',
+      `/render/env/shares?project=${encodeURIComponent(project)}`, { ...unlock, teams }),
+  renderEnvReload: (project: string, unlock: RenderEnvUnlock) =>
+    apiCall<{ reloaded: string }>('POST', `/render/env/reload?project=${encodeURIComponent(project)}`, unlock),
   // Engine dispatch trace of a job ("Trace Job"), read only, any job.
   renderJobTrace: (project: string, jid: number) =>
     apiCall<{ trace: string }>('GET', `/render/jobs/${jid}/trace?project=${encodeURIComponent(project)}`, undefined, 60000),
@@ -1267,6 +1334,10 @@ export const api = {
   keyframeStatus: () => apiCall<KeyframeStatus>('GET', '/review/keyframe/status', undefined, 8000),
   keyframeOpen: (project: string, items: Array<{ rel_path?: string; path?: string; label?: string }>, title = 'FLUX', siblings = true) =>
     apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
+
+  // Shotboard idea -> one 'retake' comment of a shot task (ADR 0083).
+  addShotRetake: (project: string, body: { seq: string; shot: string; task: string; text: string }) =>
+    apiCall<{ ok: boolean; comment: ProductionComment }>('POST', `/production/${encodeURIComponent(project)}/retake`, body),
 
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
   refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref', rev?: number | string) => {
@@ -1397,6 +1468,14 @@ export interface UsdAssetInfo {
     instances: { prim: string; component: string | null; broken: boolean }[]
   }
   used_by: string[]
+}
+export interface UsdShotInfo {
+  seq: string; shot: string; entity: string
+  state: 'none' | 'up_to_date' | 'outdated' | 'frozen'
+  versions: string[]; last_version: string | null; last: string | null; rel_last: string | null
+  departments: { department: string; task: string; files: string[] }[]
+  range: [number, number] | null; fps: number | null; warnings: string[]
+  render?: { camera: string; resolution: [number, number] }   // render layer (ADR 0060)
 }
 export interface MayaUsdTreeNode { name: string; path: string; type: 'group' | 'joint'; children: MayaUsdTreeNode[] }
 export interface MayaUsdPreview {

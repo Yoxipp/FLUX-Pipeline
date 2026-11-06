@@ -183,6 +183,10 @@ def install(exe_path: str | None = None) -> dict:
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_PLUGIN_SRC, dest)
+        # The machine secret of the bridge's `run` action: the script is exec'd (no
+        # __file__), it reads %APPDATA%/FluxPipeline/bridge_secret.txt.
+        from dcc.bridge_secret import get_secret
+        get_secret()
     except OSError as exc:
         return {"success": False, "message": str(exc), "path": None}
     log.info("Marvelous bridge script installed -> %s", dest)

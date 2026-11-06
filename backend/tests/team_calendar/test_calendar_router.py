@@ -25,7 +25,7 @@ class CalendarRouter(unittest.TestCase):
             mock.patch.object(team_calendar.store, "save", side_effect=lambda p, d: None),
             mock.patch.object(team_calendar, "_user", side_effect=lambda: self.user),
             mock.patch.object(team_calendar, "_ping",
-                              side_effect=lambda p, f, t, txt: self.pings.append((f, t, txt))),
+                              side_effect=lambda p, f, t, txt, *notify: self.pings.append((f, t, txt, *notify))),
         ]
         for p in patches:
             p.start()
@@ -37,6 +37,7 @@ class CalendarRouter(unittest.TestCase):
         item = r.json()["item"]
         self.assertEqual(item["status"], "proposed")
         self.assertEqual(self.pings[-1][:2], ("adam", "milo"))
+        self.assertEqual(self.pings[-1][3:], ("proposal", "2026-10-05", "Anim"))   # title: ADR 0072 include_text
 
         r = self.client.post(f"/calendar/P/items/{item['id']}/respond", json={"action": "accept"})
         self.assertEqual(r.status_code, 403)          # adam cannot answer for milo
@@ -47,6 +48,7 @@ class CalendarRouter(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["item"]["status"], "accepted")
         self.assertEqual(self.pings[-1][:2], ("milo", "adam"))
+        self.assertEqual(self.pings[-1][3], "postpone")
 
     def test_own_commitment_pings_nobody(self):
         r = self.client.post("/calendar/P/items", json={"title": "Rig", "start": "2026-10-05", "end": "2026-10-06"})

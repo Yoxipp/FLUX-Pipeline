@@ -1,0 +1,9 @@
+board: 1
+id: shotboard
+label: Shotboard
+label_en: Shotboard
+description: "Une ligne par sequence, un shot par colonne, rempli depuis Production. Image du shot (slider de frame, deux images possibles) et zone retake / idee par shot."
+description_en: "One row per sequence, one shot per column, filled from Production. Shot image (frame slider, two images possible) and a retake / idea area per shot."
+items:
+  - {key: "title", type: "text", x: 0, y: -70, w: 900, h: 50, z: 2, font_size: 32, bold: true, text: "Shotboard", text_en: "Shotboard"}
+  - {key: "grid", type: "shotboard", x: 0, y: 0, w: 1200, h: 400, z: 0}

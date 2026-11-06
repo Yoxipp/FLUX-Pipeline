@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from core import config as _config
 from core.constants import DCC_COLORS, DCC_PORT_RANGES, DCC_PORTS
+from core.dcc_context import instance_context
 from core.dcc_instances import scan_instances
 from core.logger import get_logger
 from core.socket_manager import socket_manager
@@ -257,52 +258,6 @@ async def set_active_instance(req: ActiveInstanceRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "dcc": req.dcc, "port": req.port, "pid": req.pid}
-
-
-_MAYA_CONTEXT_EXPR = ("'\\n'.join([__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True) or '']"
-                      " + (__import__('maya.cmds', fromlist=['cmds']).ls(sl=True) or [])[:50])")
-
-
-def instance_context(dcc: str, port: int) -> dict:
-    """{"scene", "selection"} of one running instance (best effort, empty when unknown):
-    Maya selected objects, Houdini selected nodes (2026-09-26: with two Maya /
-    Houdini open, the Publisher shows what each one would publish)."""
-    try:
-        if dcc == "Maya":
-            from dcc.maya.maya_connection import send_command_direct
-
-            res = send_command_direct(_MAYA_CONTEXT_EXPR, timeout=2.0, port=port)
-            lines = [ln.strip() for ln in (res or "").strip("\x00").splitlines()]
-            scene = lines[0] if lines else ""
-            return {"scene": scene, "selection": [ln for ln in lines[1:] if ln]}
-        if dcc == "Houdini":
-            from dcc.houdini.client import HoudiniClient
-
-            state = HoudiniClient(port=port)._get("/state")
-            return {"scene": str(state.get("hip_file") or ""),
-                    "selection": [str(n) for n in (state.get("selected_nodes") or [])][:50]}
-    except Exception:                       # noqa: BLE001 - a label is best effort
-        pass
-    return {"scene": "", "selection": []}
-
-
-def _instance_scene(dcc: str, port: int) -> str:
-    """Open scene of one running instance ('' when unknown)."""
-    try:
-        if dcc == "Maya":
-            from dcc.maya.maya_connection import send_command_direct
-
-            res = send_command_direct(
-                "__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True)",
-                timeout=2.0, port=port)
-            return (res or "").strip().strip("\x00").strip()
-        if dcc == "Houdini":
-            from dcc.houdini.client import HoudiniClient
-
-            return str(HoudiniClient(port=port)._get("/state").get("hip_file") or "")
-    except Exception:                       # noqa: BLE001 - a label is best effort
-        return ""
-    return ""
 
 
 @router.get("/instances/{dcc}")
@@ -567,7 +522,12 @@ async def install_all_bridges_endpoint() -> dict:
     from features.launcher.bridges import install_all_bridges
 
     def _do() -> list[dict]:
-        return install_all_bridges(get_installed_dccs(), _AUTOSTART_MODULES, ensure_library)
+        # Flows P6c: the extension bridges (CONFIG/extensions/bridges/) install with the others.
+        from flux_flows.bridges.installer import install_all_entries
+
+        ext_installed, ext_modules = install_all_entries()
+        return install_all_bridges({**get_installed_dccs(), **ext_installed},
+                                   {**_AUTOSTART_MODULES, **ext_modules}, ensure_library)
 
     loop = asyncio.get_running_loop()
     results = await loop.run_in_executor(None, _do)
@@ -931,6 +891,35 @@ async def houdini_export_scene(req: HoudiniSceneExportRequest) -> dict:
     return result
 
 
+async def _houdini_flow_publish(req: HoudiniPublishRequest, user: str) -> tuple[dict | None, str]:
+    """Publish through the flow publish_houdini (P8), same contract as _maya_flow_publish:
+    (v1 response, "") when published, (None, warning) on a failure before the core, 409 on a
+    refusal, 503 on a failure after the core (never a second publish)."""
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.publish_runner import run_publish
+
+    values = {
+        "name": req.filename, "node": req.rop_node_path or "", "format": req.extension,
+        "description": req.description, "sequence": req.is_sequence, "frame_padding": req.frame_padding,
+        "frame_range": " ".join(str(v) for v in req.frame_range) if req.frame_range else "",
+        "options": req.export_options or {}, "attr_filter": req.attr_filter or {},
+    }
+    out = await run_publish("houdini", project=req.project_name, values=values, user=user)
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=f"Publish Houdini (flow) échoué : {out.message}")
+    version = out.outputs.get("version")
+    res: dict = {"ok": True, "path": str(out.outputs.get("path") or ""), "version": version,
+                 "version_str": format_version(int(version)) if version else "",
+                 "rop_node": out.outputs.get("rop_node") or req.rop_node_path or "", "is_sequence": req.is_sequence}
+    if out.outputs.get("warnings"):
+        res["warnings"] = [str(w) for w in out.outputs["warnings"]]
+    return res, ""
+
+
 @router.post("/houdini/publish")
 async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     """Houdini ROP publish workflow.
@@ -952,6 +941,17 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     frame_range = tuple(req.frame_range) if req.frame_range and len(req.frame_range) == 3 else None  # type: ignore[arg-type]
 
     loop = asyncio.get_running_loop()
+
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_houdini, same response shape.
+    # A run that fails before the core falls back to the paths below, with a warning.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "houdini"):
+        flow_res, fallback = await _houdini_flow_publish(req, user)
+        if flow_res is not None:
+            return flow_res
+        warnings.append(fallback)
 
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape — only the logic underneath changes.
@@ -978,7 +978,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
         )
         if result is None:
             raise HTTPException(status_code=503, detail="Publish failed")
-        return result
+        return {**result, "warnings": warnings} if warnings else result
 
     result = await loop.run_in_executor(
         None,
@@ -999,7 +999,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
 
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
-    return result
+    return {**result, "warnings": warnings} if warnings else result
 
 
 class HoudiniLightExportRequest(BaseModel):
@@ -1251,10 +1251,11 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     Resolves the absolute path from project_name + rel_path, then sends
     import_file() to Maya. Supports .obj .fbx .ma .mb .abc (Alembic cache) and USD
     (binary crate is transcoded to ASCII .usda so Maya 2024's mayaUsd can read it).
+    The logic lives in dcc/maya/maya_hub.py (shared with the Flows node mayImport).
     """
     from pathlib import Path as _PLib
     from core.paths import get_project_path
-    from dcc.maya.maya_connection import send_command_direct
+    from dcc.maya.maya_hub import MayaHubError, import_into_maya
 
     ext = _PLib(req.rel_path).suffix.lower()
     if ext not in _MAYA_IMPORT_EXTS:
@@ -1268,104 +1269,16 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {file_path}")
     _refuse_legacy(project_path, file_path)
-    proxy_mode = req.mode == "proxy"
-    if proxy_mode and ext not in _USD_IMPORT_EXTS:
+    if req.mode == "proxy" and ext not in _USD_IMPORT_EXTS:
         raise HTTPException(status_code=400, detail="Le mode proxy USD ne s'applique qu'a un fichier USD")
-
-    import json as _json
-    import os as _os
-    import shutil as _shutil
-    import tempfile as _tempfile
-
-    _backend_root = str(_PLib(__file__).resolve().parent.parent)
-    # Maya writes a JSON result envelope here so the hub knows if the import actually
-    # succeeded (Maya runs in another process; a plain call always looked like success).
-    result_dir = _tempfile.mkdtemp(prefix="flux_maya_import_")
-    result_path = result_dir.replace("\\", "/") + "/_flux_import_result.json"
-
-    # Maya 2024's mayaUsd cannot read recent crates nor accented paths: flatten USD to a
-    # temp ASCII .usda (in result_dir, cleaned up with it). Other formats pass through.
-    if proxy_mode:
-        # The stage itself (no flattening): mayaUsd reads the sublayers and variants. An
-        # accented folder goes through its Windows short name (mayaUsd fails on accents).
-        fp_fwd = _ascii_path(file_path)
-        if fp_fwd is None:
-            _shutil.rmtree(result_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=(
-                "Chemin avec accents sans nom court Windows : ouvre plutot l'import aplati"))
-    elif ext in _USD_IMPORT_EXTS:
-        fp_fwd = _maya_usd_source(file_path, result_dir)
-    else:
-        fp_fwd = str(file_path).replace("\\", "/")
-
-    # Every path travels as base64(UTF-8) and is decoded inside Maya. Maya's commandPort
-    # decodes the incoming bytes with the system locale (cp1252 on a French Windows), so a
-    # raw accented path (e.g. "OneDrive - Example School") gets mojibaked and
-    # Maya reads a corrupt path → "Error reading file". base64 is pure ASCII, so it survives
-    # any decode; we rebuild the real UTF-8 string on the Maya side. Same rationale as the
-    # export options below.
-    import base64 as _b64
-
-    def _enc(_s: str) -> str:
-        return _b64.b64encode(_s.encode("utf-8")).decode("ascii")
-
-    from features.importer.import_tracking import source_stamp
-
-    tag = _json.dumps({"project": req.project_name, "source": req.rel_path.replace("\\", "/"),
-                       "stamp": source_stamp(file_path), "mode": "proxy" if proxy_mode else "import"})
-    cmd = (
-        f"import sys, base64 as _b64; "
-        f"sys.path.insert(0, _b64.b64decode('{_enc(_backend_root)}').decode('utf-8')); "
-        f"sys.modules.pop('dcc.maya.maya_import', None); "
-        f"sys.modules.pop('dcc.maya.maya_update', None); "
-        f"from dcc.maya.maya_import import run_import; "
-        f"run_import(_b64.b64decode('{_enc(fp_fwd)}').decode('utf-8'), "
-        f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'), "
-        f"mode={'proxy' if proxy_mode else 'import'!r}, "
-        f"tag_json=_b64.b64decode('{_enc(tag)}').decode('utf-8'))"
-    )
 
     target_port = await _maya_target(req.port)
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0, port=target_port))
-        if result is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Maya ne répond pas. Assure-toi que Maya est ouvert et le commandPort actif.",
-            )
-
-        # Read the envelope; mirror Maya's logs into the hub logger (Flux console) and
-        # keep error lines for the failure detail.
-        ok = False
-        maya_errors: list[str] = []
-        if _os.path.exists(result_path):
-            try:
-                with open(result_path, encoding="utf-8") as _fh:
-                    envelope = _json.load(_fh)
-            except (OSError, ValueError):
-                envelope = None
-            if envelope:
-                ok = bool(envelope.get("ok"))
-                for rec in envelope.get("logs", []):
-                    lvl = str(rec.get("level", "INFO")).upper()
-                    text = f"[Maya] {rec.get('msg', '')}"
-                    if lvl in ("ERROR", "CRITICAL"):
-                        log.error(text)
-                        maya_errors.append(str(rec.get("msg", "")))
-                    elif lvl == "WARNING":
-                        log.warning(text)
-                    else:
-                        log.info(text)
-
-        if not ok:
-            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
-            log.error("Import Maya échoué : %s%s", fp_fwd, reason)
-            raise HTTPException(status_code=500, detail=f"Import Maya échoué : {_PLib(fp_fwd).name}{reason}")
-
-        return {"ok": True, "file": fp_fwd}
-    finally:
-        await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
+        return await loop.run_in_executor(None, lambda: import_into_maya(
+            file_path, port=target_port, project_name=req.project_name, rel_path=req.rel_path, mode=req.mode))
+    except MayaHubError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from None
 
 
 class MayaUpdateImportsRequest(BaseModel):
@@ -1376,51 +1289,17 @@ class MayaUpdateImportsRequest(BaseModel):
 async def maya_update_imports(req: MayaUpdateImportsRequest) -> dict:
     """Bring the FLUX imports of the Maya scene to their LAST (X4): each tagged import whose
     published file changed is re-imported in place (same parent and transform); vNNN
-    imports stay frozen. Called by the shelf button "MAJ" of the Maya that asks."""
-    import json as _json
-    import shutil as _shutil
-    import tempfile as _tempfile
-
-    from core.paths import get_project_path
-    from features.importer.import_tracking import plan_updates, summary
+    imports stay frozen. Called by the shelf button "MAJ" of the Maya that asks.
+    The logic lives in dcc/maya/maya_hub.py (shared with the Flows node mayUpdateRef)."""
+    from dcc.maya.maya_hub import MayaHubError, update_imports
 
     port = await _maya_target(req.port)
     loop = asyncio.get_running_loop()
-    listed = await loop.run_in_executor(None, lambda: _maya_call_json(port, "run_list"))
-    if listed is None:
-        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
-    items = listed.get("items", [])
-    projects = {p: get_project_path(p) for p in {str(i.get("project") or "") for i in items} if p}
-    plan = plan_updates(items, {k: v for k, v in projects.items() if v.exists()})
-    done, failed = 0, []
-    for entry in plan:
-        if entry["status"] != "update":
-            continue
-        project_path = projects[entry["project"]]
-        file_path = project_path / entry["source"]
-        tmp = _tempfile.mkdtemp(prefix="flux_maya_update_src_")
-        try:
-            if entry["mode"] == "proxy":
-                fp = str(file_path).replace("\\", "/")
-            elif file_path.suffix.lower() in _USD_IMPORT_EXTS:
-                fp = await loop.run_in_executor(None, lambda: _maya_usd_source(file_path, tmp))
-            else:
-                fp = str(file_path).replace("\\", "/")
-            tag = _json.dumps({"project": entry["project"], "source": entry["source"],
-                               "stamp": entry["stamp"], "mode": entry["mode"] or "import"})
-            res = await loop.run_in_executor(
-                None, lambda: _maya_call_json(port, "run_replace", entry["node"], fp, tag, timeout=120.0))
-        finally:
-            await loop.run_in_executor(None, lambda: _shutil.rmtree(tmp, ignore_errors=True))
-        if res and res.get("ok"):
-            done += 1
-            entry["status"] = "updated"
-        else:
-            failed.append(entry["node"].rsplit("|", 1)[-1])
-            log.warning("[Maya] MAJ import %s echouee : %s", entry["node"], (res or {}).get("error"))
-    message = summary(plan, done, failed)
-    log.info("[Maya] %s", message)
-    return {"ok": not failed, "message": message, "items": plan}
+    try:
+        out = await loop.run_in_executor(None, lambda: update_imports(port, call=_maya_call_json))
+    except MayaHubError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from None
+    return {"ok": out["ok"], "message": out["message"], "items": out["items"]}
 
 
 @router.get("/maya/anim-range")
@@ -1730,6 +1609,38 @@ async def maya_export_usd_look(req: MayaLookExportRequest) -> dict:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(work_dir, ignore_errors=True))
 
 
+async def _maya_flow_publish(req: MayaPublishRequest, ext: str, user: str,
+                             version_str: str) -> tuple[dict | None, str]:
+    """Publish through the flow publish_maya (P8). (v1 response, "") when the flow published,
+    (None, warning) when it failed before its core (the route publishes by v1). A refusal is
+    a 409 with the team's message, a failure after the core a 503: never a second publish."""
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.publish_runner import run_publish
+
+    target_port = await _maya_target(req.port)
+    is_anim = bool(ext in MAYA_ANIM_EXTS and req.frame_range and len(req.frame_range) >= 2)
+    values = {
+        "name": req.filename, "format": ext, "scope": "scene" if req.scope == "scene" else "selection",
+        "description": req.description,
+        # Text "start end step": the step stays a float (n°12); empty when not animated, like v1.
+        "frame_range": " ".join(str(v) for v in req.frame_range) if is_anim else "",
+        "options": req.export_options or {}, "port": target_port,
+    }
+    out = await run_publish("maya", project=req.project_name, values=values, user=user)
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=f"Publish Maya (flow) échoué : {out.message}")
+    version = out.outputs.get("version")
+    res: dict = {"ok": True, "version_str": format_version(int(version)) if version else version_str,
+                 "dest": str(out.outputs.get("path") or "")}
+    if out.outputs.get("warnings"):
+        res["warnings"] = [str(w) for w in out.outputs["warnings"]]
+    return res, ""
+
+
 @router.post("/maya/publish")
 async def maya_publish(req: MayaPublishRequest) -> dict:
     """Maya publish workflow.
@@ -1771,6 +1682,17 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     else:
         version_str = "001"
 
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_maya, same response shape.
+    # A run that fails before the core falls back to the path below, with a warning.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "maya"):
+        flow_res, fallback = await _maya_flow_publish(req, ext, user, version_str)
+        if flow_res is not None:
+            return flow_res
+        warnings.append(fallback)
+
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner drives the SAME
     # run_publish_export over the commandPort and reuses copy_publish, so both
@@ -1802,7 +1724,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         )
         if dest is None:
             raise HTTPException(status_code=503, detail="Publish Maya (moteur) échoué")
-        return {"ok": True, "version_str": version_str, "dest": str(dest)}
+        return {"ok": True, "version_str": version_str, "dest": str(dest), **({"warnings": warnings} if warnings else {})}
 
     # Build temp export path
     tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
@@ -1902,12 +1824,13 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         from pathlib import Path as _Path
         pub_result = await loop.run_in_executor(
             None,
-            lambda: publish_file(_Path(tmp_path), project_path, req.description, user, req.project_name),
+            lambda: publish_file(_Path(tmp_path), project_path, req.description, user, req.project_name, soft="maya"),
         )
         if pub_result is None:
             raise HTTPException(status_code=500, detail="publish_core a échoué")
 
-        return {"ok": True, "version_str": version_str, "dest": str(pub_result)}
+        return {"ok": True, "version_str": version_str, "dest": str(pub_result),
+                **({"warnings": warnings} if warnings else {})}
     finally:
         await loop.run_in_executor(None, lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
 
@@ -1944,6 +1867,28 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_zbrush, same response shape.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "zbrush"):
+        got, fallback = await _soft_flow_publish("zbrush", req.project_name, {
+            "name": req.filename, "format": req.extension, "options": req.export_options or {},
+            "description": req.description or "",
+        }, user, lambda msg: f"Publish ZBrush (flow) échoué : {msg}")
+        if got is not None:
+            from features.folder_manager.naming_validator import format_version
+
+            path, version = str(got.get("path") or ""), got.get("version")
+            if req.keep_local and req.local_dir and path:
+                _zbrush_keep_local(path, req.local_dir)
+            res: dict = {"ok": True, "path": path, "version": version,
+                         "version_str": format_version(int(version)) if version else ""}
+            if _flow_warnings(got):
+                res["warnings"] = _flow_warnings(got)
+            return res
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -1962,7 +1907,23 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
 
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
-    return result
+    return _with_warnings(result, warnings)
+
+
+def _zbrush_keep_local(dest_path: str, local: str) -> None:
+    """keep_local of a ZBrush publish by flow: the copy publish_zbrush makes in v1."""
+    import shutil
+    from pathlib import Path as _Path
+
+    dest, local_dir = _Path(dest_path), _Path(local)
+
+    if not local_dir.is_dir():
+        return
+    try:
+        shutil.copy2(dest, local_dir / dest.name)
+        log.info("Keep-local copy: %s", local_dir / dest.name)
+    except OSError as exc:
+        log.warning("Keep-local copy failed: %s", exc)
 
 
 @router.post("/zbrush/cancel")
@@ -2052,14 +2013,70 @@ class NukePublishRequest(BaseModel):
     user:          str | None = None
 
 
+async def _soft_flow_publish(soft: str, project: str, values: dict, user: str,
+                             error) -> tuple[dict | None, str]:
+    """Publish through the flow publish_<soft> (P8, ADR 0070), for the softs without a v1
+    engine (Nuke, Painter, Designer, Mari, Marvelous, ZBrush). (outputs of the flow, "") when
+    the core published, (None, warning) when the run failed before its core (the route then
+    publishes by v1). A refusal is a 409 with the team's message, a failure after the core a
+    503 with error(message): never a second publish. None values are left to the flow."""
+    from flux_flows.publish_runner import run_publish
+
+    out = await run_publish(soft, project=project, user=user,
+                            values={k: v for k, v in values.items() if v is not None})
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=error(out.message))
+    return out.outputs, ""
+
+
+def _flow_files(outputs: dict) -> list[str]:
+    return [str(p) for p in outputs.get("files") or []]
+
+
+def _flow_warnings(outputs: dict) -> list[str]:
+    return [str(w) for w in outputs.get("warnings") or []]
+
+
+def _with_warnings(result: dict, warnings: list[str]) -> dict:
+    """The v1 result, with the fallback warning of a v2 project in front of its own."""
+    if not warnings:
+        return result
+    return {**result, "warnings": [*warnings, *(result.get("warnings") or [])]}
+
+
 @router.post("/nuke/publish")
 async def nuke_publish_write(req: NukePublishRequest) -> dict:
     """Publish from Nuke like Houdini: build a Write on the selected node with the
     requested options, render it into the FLUX layout (Write outputs direct-to-dest)."""
     from core import config
     from dcc.nuke.nuke_publish import publish_from_nuke
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_nuke, same response shape.
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "nuke"):
+        got, fallback = await _soft_flow_publish("nuke", req.project_name, {
+            "name": req.filename, "node": req.node_name or "", "format": req.extension,
+            "options": req.export_options or {}, "sequence": req.is_sequence,
+            "frame_range": " ".join(str(v) for v in req.frame_range) if req.frame_range else "",
+            "colorspace": req.colorspace or "", "description": req.description or "",
+        }, user, lambda msg: f"Publish Nuke (flow) échoué : {msg}")
+        if got is not None:
+            version = got.get("version")
+            res: dict = {"ok": True, "path": str(got.get("path") or ""), "version": version,
+                         "version_str": format_version(int(version)) if version else "",
+                         "is_sequence": req.is_sequence}
+            if _flow_warnings(got):
+                res["warnings"] = _flow_warnings(got)
+            return res
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2071,7 +2088,7 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Nuke publish failed"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 # ── Photoshop endpoints (V6 B6) ──────────────────────────────────────────────
@@ -2173,8 +2190,26 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     """Export Substance Painter maps and ingest them into FLUX (opt .tx conform)."""
     from core import config
     from dcc.substance_painter.substance_export import publish_painter
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_painter, same response shape.
+    # The fields publish_painter takes beyond the flow inputs go in options (core: extra).
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "painter"):
+        got, fallback = await _soft_flow_publish("painter", req.project_name, {
+            "class": req.class_token, "task": req.task_token, "name": req.name_token,
+            "instance": req.instance, "preset": req.preset, "format": req.file_format,
+            "bit_depth": req.bit_depth, "size": req.size, "maps": req.maps,
+            "conform_tx": req.conform_tx, "description": req.description or "",
+            "options": {"texture_sets": req.texture_sets, "padding": req.padding, "dilation": req.dilation,
+                        "map_params": req.map_params, "channels": req.channels, "tx_only": req.tx_only},
+        }, user, lambda msg: _bridge_error(msg, "Substance publish failed", _substance_autostart, "Painter"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "tx": [str(p) for p in got.get("tx") or []] or None,
+                    "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2189,7 +2224,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Substance publish failed", _substance_autostart, "Painter"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 @router.get("/texture/formats")
@@ -2288,8 +2323,24 @@ async def mari_publish(req: MariPublishRequest) -> dict:
     """Export Mari channels and ingest them into FLUX (opt .tx conform)."""
     from core import config
     from dcc.mari.mari_export import publish_mari
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_mari, same response shape
+    # (without "timings", a log line of v1). channel_params / tx_only go in options (core: extra).
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "mari"):
+        got, fallback = await _soft_flow_publish("mari", req.project_name, {
+            "class": req.class_token, "task": req.task_token, "name": req.name_token,
+            "instance": req.instance, "format": req.file_format, "channels": req.channels,
+            "conform_tx": req.conform_tx, "description": req.description or "",
+            "options": {"channel_params": req.channel_params, "tx_only": req.tx_only},
+        }, user, lambda msg: _mari_error(msg, "Mari publish failed"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "tx": [str(p) for p in got.get("tx") or []] or None,
+                    "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2301,7 +2352,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_mari_error(result.get("error"), "Mari publish failed"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 # ── File-based DCC publish (Substance Designer, Marvelous) — Level 1 (V6 B3/B4) ─
@@ -2332,7 +2383,7 @@ def _ingest_file(req: "FilePublishRequest", soft: str) -> dict:
     if not project_path.exists():
         return {"ok": False, "error": f"Projet introuvable : {req.project_name}"}
     dest = publish_file(source, project_path, req.description or "", user,
-                        req.project_name, req.target_name)
+                        req.project_name, req.target_name, soft=soft.lower())
     if dest is None:
         return {"ok": False, "error": f"Publish {soft} échoué (nom FLUX invalide ?)"}
     return {"ok": True, "path": str(dest)}
@@ -2411,8 +2462,25 @@ async def designer_bridge_publish(req: DesignerBridgePublishRequest) -> dict:
     """Export Designer graph maps / .sbsar / .sbs through the bridge and publish them."""
     from core import config
     from dcc.substance_designer.designer_export import publish_designer
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_designer, same response shape.
+    # graphs / tx_only have no flow input: they go in options (core: extra).
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "designer"):
+        got, fallback = await _soft_flow_publish("designer", req.project_name, {
+            "class": req.class_token, "task": req.task_token, "name": req.name_token,
+            "instance": req.instance, "format": req.file_format, "size": req.size,
+            "bit_depth": req.bit_depth, "maps": req.maps, "sbsar": req.sbsar, "sbs": req.sbs,
+            "conform_tx": req.conform_tx, "description": req.description or "",
+            "options": {"graphs": req.graphs, "tx_only": req.tx_only},
+        }, user, lambda msg: _bridge_error(msg, "Designer publish failed", _designer_autostart, "Designer"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "tx": [str(p) for p in got.get("tx") or []] or None,
+                    "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2426,7 +2494,7 @@ async def designer_bridge_publish(req: DesignerBridgePublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Designer publish failed", _designer_autostart, "Designer"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 class MarvelousBridgePublishRequest(BaseModel):
@@ -2457,8 +2525,20 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
     """Export the open Marvelous project through the bridge and publish it."""
     from core import config
     from dcc.marvelous.marvelous_export import publish_marvelous
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_marvelous, same response shape.
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "marvelous"):
+        got, fallback = await _soft_flow_publish("marvelous", req.project_name, {
+            "name": req.target_name, "format": req.file_format, "options": req.options,
+            "with_zprj": req.with_zprj, "description": req.description or "",
+        }, user, lambda msg: _bridge_error(msg, "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2470,7 +2550,7 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 class MarvelousImportRequest(BaseModel):

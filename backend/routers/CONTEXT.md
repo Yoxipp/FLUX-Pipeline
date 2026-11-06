@@ -15,6 +15,13 @@ Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyfr
 (single-flight), resultat garde 1 s, ETag + 304 ; `main.py` vide ce cache apres toute requete non-GET hors
 `/activity`, `/logs`, `/calendar`. Le calcul tourne dans `core/executors.HEAVY` (pool borne, separe des feeds).
 `GET /publish/queue` : copies de publish actives / en attente (`features/publisher/copy_limits.py`).
+Publish par flow (P8, ADR 0070) : `POST /dcc/maya/publish` et `/dcc/houdini/publish` passent par `_maya_flow_publish` /
+`_houdini_flow_publish` -> `flux_flows.publish_runner`
+quand le projet est en `publish_engine: v2` (`flux_flows/switch.py`), meme forme de reponse ; repli v1 si le run echoue
+avant son coeur (`warnings` dans la reponse), refus = 409 (message de l'equipe), echec apres le coeur = 503, jamais v1.
+Houdini : `rop_node` vient de la sortie du flow. Nuke, `/substance/publish` (Painter), `/designer/bridge/publish`,
+`/mari/publish`, `/marvelous/bridge/publish`, `/zbrush/publish` : meme contrat par `_soft_flow_publish` (P8 etape 6) ;
+Photoshop et les ingests de fichier `/designer/publish`, `/marvelous/publish` restent v1.
 
 ## flows.py (2026-10-22, Flows P1)
 
@@ -28,6 +35,21 @@ P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'
 (`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
 un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
 erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
+P7 (pages TOOL, ADR 0066) : `GET /pages` -> `{pages, templates, can_edit}`, `POST /pages/validate`, `GET /pages/{id}`
+(`scope` absent = project > team, `scope=shipped` = un modele), `PUT /pages/{id} {scope, page, base_rev, force}` et
+`DELETE /pages/{id}` (Team TD), `GET /pages/{id}/history`. Statiques (avant `/{name}`) ; WS `page_changed` apres une ecriture.
+Liens (ADR 0068, le flow choisit sa page) : `GET /pages/{id}/ports` (ports et defauts d'un InputsPageReader),
+`GET /pages/{id}/flows` (`listeners` : flows actifs qu'un clic lance, `uses` : flows qui lisent la page),
+`POST /pages/{id}/click {button, values}` (tout le monde ; chaque flow actif qui ecoute ce bouton tourne, 409 si aucun).
+`GET /pages/links` ne liste plus que les widgets de donnees `source.flow`. La validation d'un flow recoit `page_lookup`
+(`E_PAGE_NOT_FOUND`, `W_PAGE_LINK_BROKEN`). Le panneau Publisher genere rend aussi sa `target` (flow, evenement).
+Donnees (etape 3) : `GET /pages/{id}/data/{collection}?etag=` -> `{records, etag}` ou `{unchanged}`, `POST .../data/{collection} {ops}`
+(tous, ou Team TD si `write: team_td` ; WS `page_data`), `POST .../media {path}` (copie d'un fichier local), `GET .../media/{name}` (affichage).
+P5 : `GET /host` (detenteur du verrou, surveillants de ce poste), `POST /events/scene_opened {soft, scene, port?, pid?}`
+(script cote logiciel), `GET /{name}/activation` (3 voyants : erreurs, avertissements `acked`, `dry_run`) ; `activate
+{scope, acked}` exige 0 erreur, avertissements lus et essai a blanc reussi sur `current` (409 `{gate}` sinon), note le dernier
+creneau `Schedule` ; `run {dry_run, version?}` ecrit `dry_run_ok` dans `state.json` a la fin d'un essai `ok` de `current` ;
+WS `host`, `activation`, `flow_changed` (save, increment, revert). `dcc.py` : `instance_context` vit dans `core/dcc_context.py`.
 P4 (editeur) : `POST /nodes {name, code}` (Team TD) ecrit `CONFIG/extensions/nodes/<name>.py` (marqueur `@flow_node` requis,
 fichier garde meme s'il ne charge pas, `error` = erreur de chargement de ce fichier) ; `GET /{name}/versions` rend aussi
 `user` par version et `history` (lignes `history.jsonl` du flow, recentes d'abord).

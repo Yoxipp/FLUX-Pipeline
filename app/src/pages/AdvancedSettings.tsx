@@ -31,6 +31,8 @@ const SWITCH_LABELS: Record<string, { label: string; help: string }> = {
   publish_max_parallel:    { label: 'Publishs simultanés sur ce poste', help: 'Les suivants attendent leur tour. Défaut 10.' },
   publish_max_mbps:        { label: 'Débit max par publish (Mo/s)', help: '0 = pas de limite. À régler après mesure.' },
   portable_paths:          { label: 'Chemins portables $FLUX', help: 'Les chemins donnes a Houdini sont ecrits en $FLUX/... (scenes portables).' },
+  flows_hooks:             { label: 'Flows apres publish', help: 'Un publish reussi peut lancer les flows actifs OnPublish. Non = aucun flow apres publish.' },
+  flows_scheduler:         { label: 'Flows actifs sur ce poste', help: 'Horaires, nouveaux fichiers, conditions, scenes ouvertes. Pris en compte au prochain lancement de FLUX.' },
 }
 const SOURCE_LABEL: Record<string, string> = { page: 'regle ici', lancement: 'variable au lancement', defaut: 'defaut' }
 
@@ -186,7 +188,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: 'var(--ink)' }}>Flows (graph YAML)</div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
-            Editeur de flows. Le publish tourne encore sur les actions v1 jusqu'a P8 : seul l'ancien editeur les modifie.
+            Editeur de flows. Publish par les flows : Parametres avances du projet, Publish en v2 (ADR 0070).
           </div>
         </div>
         <Btn sm ghost disabled={!flowRights?.td} title={flowRights?.td ? undefined : 'Coche TD dans ton profil'} onClick={() => {
@@ -196,15 +198,6 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
         }}>
           <ExternalLink size={11} strokeWidth={2} /> Ouvrir le graph
         </Btn>
-        {/* P4: the old v1 action editor, the only UI that edits the real publish until P8
-            (which removes it). Kept out of the new editor's bar on purpose. */}
-        <span
-          onClick={() => navigate('/action-graph-legacy')}
-          title="Ancien editeur des actions v1 (publish reel), retire en P8"
-          style={{ fontSize: 10.5, color: 'var(--ink-4)', cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' }}
-        >
-          Ancien editeur
-        </span>
       </div>
 
       <SecTitle>Publish (ce poste)</SecTitle>

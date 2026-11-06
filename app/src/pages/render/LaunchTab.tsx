@@ -1,22 +1,23 @@
 // LaunchTab.tsx: submit a shot or a published USD to Tractor.
-// Default view = what / frames / renderer / Launch. "Where and how much" (farm share, machines)
-// and "When" are folded with a one-line summary; team-wide settings live in the Advanced tab.
+// Default view = what / frames / renderer / Launch. "Where" (machines) and "When" are folded with a
+// one-line summary; team-wide settings live in the Advanced tab. How much of the farm a team gets is
+// the engine's Shares (limits.config), not a FLUX setting.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, ChevronRight, Circle, Layers, Monitor, Play, Snowflake } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, Play, Snowflake } from 'lucide-react'
 import { api } from '../../api/client'
 import type {
   RenderFarm, RenderFreezeWhen, RenderLastForm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult,
 } from '../../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
+import { DenoiseForm } from './DenoiseForm'
 import { MachinePicker } from './MachinePicker'
 import {
-  Check, Row, ShareBaseInfo, Toggle, btn, capFromPercent, card, disabledIf, errMsg, hint, input, lbl, openFolder, sel, useTr, warnText,
+  Check, Row, Toggle, btn, card, disabledIf, errMsg, hint, input, lbl, openFolder, sel, useTr, warnText,
 } from './renderUi'
 
 type Source = 'shot' | 'usd'
-const SHARE_PRESETS = [10, 25, 50]
 
 function Fold({ title, summary, open, onToggle, children }: {
   title: string; summary: string; open: boolean; onToggle: () => void; children: React.ReactNode
@@ -43,16 +44,20 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [usdPath, setUsdPath] = useState('')
   const [frameStart, setFrameStart] = useState('')
   const [frameEnd, setFrameEnd] = useState('')
-  const [renderer, setRenderer] = useState<'karma' | 'renderman'>(settings?.renderer ?? 'karma')
+  const [renderer, setRenderer] = useState<'karma' | 'renderman' | ''>(settings?.renderer ?? '')
   const [freeze, setFreeze] = useState(settings?.freeze_by_default ?? true)
   const [freezeWhen, setFreezeWhen] = useState<RenderFreezeWhen>(settings?.freeze_when ?? 'start')
   const [startAt, setStartAt] = useState('')   // "YYYY-MM-DDTHH:MM", empty = now
+  const [priority, setPriority] = useState(settings?.priority ?? 1)   // this job only (team default first)
+  const [denoise, setDenoise] = useState(false)   // RenderMan denoise_batch after the render
+  const [denoiseCross, setDenoiseCross] = useState(settings?.denoise_crossframe ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<RenderSubmitResult | null>(null)
 
   // where and how much
   const [whereOpen, setWhereOpen] = useState(false)
   const [whenOpen, setWhenOpen] = useState(false)
+  const [denoiseOpen, setDenoiseOpen] = useState(false)
   const [limitJob, setLimitJob] = useState(false)   // off = the team cap manages it (2026-10-23)
   const [sharePct, setSharePct] = useState(25)
   const [shareOf, setShareOf] = useState<RenderShareBase>('free')
@@ -88,6 +93,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
       if (r.frame_start == null) toast.message(tr('Pas de plage dans ce USD : la saisir', 'No frame range in this USD: type it'))
     } catch (e) { toast.error(errMsg(e)) }
   }
+  // USD library of the project (assemblies and components with a LAST), proposed before browsing.
+  const [libItems, setLibItems] = useState<{ label: string; path: string }[]>([])
+  useEffect(() => {
+    if (source !== 'usd' || libItems.length) return
+    let live = true
+    api.getUsdLibrary(project).then(lib => {
+      if (!live) return
+      const sets = lib.assemblies.map(a => ({ label: `${tr('Set', 'Set')} · ${a.name}`, path: a.file }))
+      const comps = lib.components.filter(c => c.last).map(c => ({ label: `${tr('Asset', 'Asset')} · ${c.name}`, path: c.last! }))
+      setLibItems([...sets, ...comps].sort((a, b) => a.label.localeCompare(b.label)))
+    }).catch(() => { /* no library: browse only */ })
+    return () => { live = false }
+  }, [project, source]) // eslint-disable-line react-hooks/exhaustive-deps
   const browseUsd = async () => {
     const p = await window.electronAPI?.openFile?.([{ name: 'USD', extensions: ['usd', 'usda', 'usdc'] }])
     if (p) { setUsdPath(p); void detectUsdRange(p) }
@@ -99,22 +117,9 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     else { setFrameStart(''); setFrameEnd('') }
   }
 
-  // ── share preview (same rule as the backend) ──
-  const counts = farm?.counts
-  const pool = (of: RenderShareBase) => (counts ? counts[of] : 0)
-  const share = limitJob ? { percent: sharePct, of: shareOf } : { percent: 0, of: shareOf }
-  const jobCap = capFromPercent(share.percent, pool(share.of))
-  const teamCap = settings ? capFromPercent(settings.team_cap.percent, pool(settings.team_cap.of)) : 0
-  function teamCapSummary() {
-    return teamCap ? `${tr('equipe', 'team')} · ${teamCap}` : tr('sans limite', 'no limit')
-  }
-  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('machines libres', 'free machines') : tr('machines allumees', 'machines on'))
-  const shareSummary = share.percent
-    ? `${share.percent} % ${ofLabel(share.of)} · ${jobCap}`
-    : teamCapSummary()
   const teamGroups = settings?.host_groups ?? {}
   const pickedCount = new Set([...hosts, ...groups.flatMap(g => teamGroups[g] ?? [])]).size
-  const whereSummary = `${targetMode === 'any' ? tr('Toute la farm', 'Whole farm') : `${pickedCount} PC`}  ·  ${shareSummary}`
+  const whereSummary = targetMode === 'any' ? tr('Toute la farm', 'Whole farm') : `${pickedCount} PC`
 
   // ── when ──
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -152,6 +157,8 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     if (typeof l.freeze === 'boolean') setFreeze(l.freeze)
     if (l.freeze_when === 'start' || l.freeze_when === 'submit') setFreezeWhen(l.freeze_when)
     if (typeof l.limit_job === 'boolean') setLimitJob(l.limit_job)
+    if (typeof l.denoise === 'boolean') setDenoise(l.denoise)
+    if (typeof l.denoise_crossframe === 'boolean') setDenoiseCross(l.denoise_crossframe)
     if (typeof l.share_percent === 'number' && l.share_percent > 0) setSharePct(l.share_percent)
     if (l.share_of) setShareOf(l.share_of)
     if (l.target) setTargetMode(l.target)
@@ -168,25 +175,27 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     if (!restored.current) return
     const [, shot] = shotKey.split('/')
     const form: RenderLastForm = {
-      source, seq, shot: shot ?? '', usd_path: usdPath, renderer, freeze, limit_job: limitJob,
+      source, seq, shot: shot ?? '', usd_path: usdPath, renderer: renderer as 'karma' | 'renderman', freeze, limit_job: limitJob,
       share_percent: sharePct, share_of: shareOf, target: targetMode, hosts, groups, freeze_when: freezeWhen,
+      denoise, denoise_crossframe: denoiseCross,
     }
     const t = window.setTimeout(() => { api.renderSaveLast(project, form).catch(() => { /* not critical */ }) }, 800)
     return () => window.clearTimeout(t)
-  }, [project, source, seq, shotKey, usdPath, renderer, freeze, freezeWhen, limitJob, sharePct, shareOf, targetMode, hosts, groups])
+  }, [project, source, seq, shotKey, usdPath, renderer, freeze, freezeWhen, limitJob, sharePct, shareOf, targetMode, hosts, groups,
+    denoise, denoiseCross])
 
   const targetEmpty = targetMode === 'pick' && pickedCount === 0
-  const canSubmit = !submitting && !targetEmpty && (source === 'shot' ? !!shotKey : !!usdPath.trim())
+  const canSubmit = !submitting && !targetEmpty && !!renderer && (source === 'shot' ? !!shotKey : !!usdPath.trim())
   const submit = async () => {
     if (!canSubmit) return
-    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer, freeze }
+    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer: renderer as 'karma' | 'renderman', freeze, priority }
+    if (denoise && renderer === 'renderman') { body.denoise = true; body.denoise_crossframe = denoiseCross }
     if (source === 'shot') { const [seq, shot] = shotKey.split('/'); body.seq = seq; body.shot = shot }
     else body.usd_path = usdPath.trim()
     if (frameStart !== '') body.frame_start = Number(frameStart)
     if (frameEnd !== '') body.frame_end = Number(frameEnd)
     if (startAt) { body.start_at = startAt; body.freeze_when = freezeWhen }
-    body.share_percent = limitJob ? sharePct : 0
-    body.share_of = shareOf
+    body.share_percent = 0   // never a FLUX cap per job: the engine's Shares share the farm
     if (targetMode === 'pick') { body.hosts = hosts; body.groups = groups }
     setSubmitting(true)
     try {
@@ -235,6 +244,18 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </div>
       ) : (
         <Row label={tr('Fichier USD', 'USD file')}>
+          {libItems.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ ...hint, marginBottom: 3 }}>{tr('Bibliotheque USD du projet, ou parcourir plus bas', 'Project USD library, or browse below')}</div>
+              <Select value={libItems.some(i => i.path === usdPath) ? usdPath : undefined}
+                onValueChange={p => { setUsdPath(p); void detectUsdRange(p) }}>
+                <SelectTrigger style={sel} title={tr('Bibliotheque USD du projet', 'Project USD library')} />
+                <SelectContent>
+                  {libItems.map(i => <SelectItem key={i.path} value={i.path}>{i.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6 }}>
             <input style={input} value={usdPath} placeholder="\\serveur\...\shot.usd" onChange={e => setUsdPath(e.target.value)}
               onBlur={() => void detectUsdRange(usdPath)} />
@@ -252,48 +273,22 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </Row>
         <Row label={tr('Moteur', 'Renderer')}>
           <Select value={renderer} onValueChange={v => setRenderer(v as 'karma' | 'renderman')}>
-            <SelectTrigger style={sel} />
+            <SelectTrigger style={sel}>{!renderer && <span style={{ color: 'var(--ink-3)' }}>{tr('Choisir', 'Pick')}</span>}</SelectTrigger>
             <SelectContent>
               <SelectItem value="karma">Karma</SelectItem>
               <SelectItem value="renderman">RenderMan</SelectItem>
             </SelectContent>
           </Select>
         </Row>
+        <Row label={tr('Priorite', 'Priority')}
+          help={tr('Defaut 1, >1 = prend une part de la farm aux autres groupes', 'Default 1, >1 = takes farm share from other groups')}>
+          <input type="number" min={1} max={10000} style={input} value={priority}
+            onChange={e => setPriority(Math.max(1, Math.min(10000, Math.round(Number(e.target.value) || 1))))} />
+        </Row>
       </div>
 
-      <Fold title={tr('Ou et combien', 'Where and how much')} summary={whereSummary} open={whereOpen} onToggle={() => setWhereOpen(o => !o)}>
-        <Row label={tr('Part de la farm', 'Farm share')}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <Check label={tr('Limiter ce job', 'Limit this job')} checked={limitJob} onChange={setLimitJob} />
-            {counts && (
-              <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-                <span title={tr('Machines allumees', 'Machines on')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Monitor size={11} />{counts.alive}</span>
-                <span title={tr('Machines libres', 'Free machines')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ok)' }}><Circle size={8} fill="currentColor" />{counts.free}</span>
-                <span title={tr('Maximum en parallele pour ce job', 'Max at once for this job')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ink-2)' }}>
-                  <Layers size={11} />{limitJob ? jobCap : teamCap ? `${teamCap} (${tr('equipe', 'team')})` : '∞'}
-                </span>
-              </span>
-            )}
-          </div>
-          {limitJob && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 6 }}>
-              <Toggle value={SHARE_PRESETS.includes(sharePct) ? String(sharePct) : 'other'}
-                onChange={id => {
-                  if (id === 'other') { if (SHARE_PRESETS.includes(sharePct)) setSharePct(33) }
-                  else setSharePct(Number(id))
-                }}
-                options={[...SHARE_PRESETS.map(p => ({ id: String(p), label: `${p} %` })), { id: 'other', label: tr('Autre', 'Other') }]} />
-              {!SHARE_PRESETS.includes(sharePct) && (
-                <input type="number" min={1} max={100} style={{ ...input, width: 70 }} value={sharePct}
-                  onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
-              )}
-              <Toggle value={shareOf} onChange={id => setShareOf(id as RenderShareBase)}
-                options={[{ id: 'free', label: tr('Machines libres', 'Free machines') }, { id: 'alive', label: tr('Machines allumees', 'Machines on') }]} />
-              <ShareBaseInfo />
-            </div>
-          )}
-        </Row>
-
+      {/* How much of the farm: the engine's Shares (limits.config) decide, not FLUX (2026-10-23). */}
+      <Fold title={tr('Ou', 'Where')} summary={whereSummary} open={whereOpen} onToggle={() => setWhereOpen(o => !o)}>
         <Row label={tr('Machines', 'Machines')}>
           <Toggle value={targetMode} onChange={id => setTargetMode(id as 'any' | 'pick')}
             options={[{ id: 'any', label: tr('Toute la farm', 'Whole farm') }, { id: 'pick', label: tr('Choisir les PC', 'Pick PCs') }]} />
@@ -361,6 +356,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </div>
       </Fold>
 
+      {renderer === 'renderman' && (
+        <Fold title="Denoise" summary={denoise ? tr(`Apres le rendu${denoiseCross ? ' · crossframe' : ''}`, `After the render${denoiseCross ? ' · crossframe' : ''}`) : tr('Non', 'No')}
+          open={denoiseOpen} onToggle={() => setDenoiseOpen(o => !o)}>
+          <Row label={tr('Apres ce rendu', 'After this render')}
+            help={tr('Vers vNNN/denoised, AOV de denoise requis', 'Into vNNN/denoised, denoise AOVs required')}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <Check label={tr('Denoiser apres', 'Denoise after')} checked={denoise} onChange={setDenoise} />
+              {denoise && <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={denoiseCross} onChange={setDenoiseCross} />}
+            </div>
+          </Row>
+        </Fold>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button type="button" style={{ ...btn(true), ...disabledIf(!canSubmit) }} onClick={() => void submit()}>
           <Play size={11} strokeWidth={2} />{submitting ? tr('Envoi...', 'Sending...') : tr('Lancer', 'Launch')}
@@ -375,10 +383,13 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
             {result.maxactive ? tr(`${result.maxactive} morceaux en parallele max`, `${result.maxactive} chunks at once max`) : tr('Sans limite', 'No limit')}
             {result.service ? ` ; service : ${result.service}` : ''}
           </div>
+          {result.denoise && <div style={hint}>{tr(`Denoise apres le rendu : ${result.denoise}`, `Denoise after the render: ${result.denoise}`)}</div>}
           {result.warnings.map((w, i) => <div key={i} style={warnText}>{w}</div>)}
           {result.priority_warning && <div style={warnText}>{result.priority_warning}</div>}
         </div>
       )}
+
+      <DenoiseForm project={project} settings={settings} onSubmitted={onSubmitted} />
     </div>
   )
 }

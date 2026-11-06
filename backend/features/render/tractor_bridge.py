@@ -20,9 +20,9 @@ from features.render import job_builder
 # Job menu of the Dashboard (2026-10-23): retry / skip errors, restart, archive / restore, lock, shuffle, trace.
 JOB_ACTIONS = ("kill", "retry", "pause", "resume", "skip_errors", "restart", "archive", "restore",
                "lock", "unlock", "shuffle_top")
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace") + JOB_ACTIONS
-_JID_VERBS = ("tasks", "log", "maxactive", "trace") + JOB_ACTIONS
-DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace", "priority",
+         "reload_limits") + JOB_ACTIONS
+_JID_VERBS = ("tasks", "log", "maxactive", "trace", "priority") + JOB_ACTIONS
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
 _SIMULATION_MSG = "Mode simulation : aucune action sur la farm"
@@ -46,7 +46,7 @@ def _check_configured(settings: dict) -> tuple:
     python = str(settings.get("bridge_python") or "").strip()
     script = str(settings.get("bridge_script") or "").strip()
     if not python or not script or not Path(python).is_file() or not Path(script).is_file():
-        raise BridgeError("Pont Tractor non configure (reglages avances : python et script du pont)")
+        raise BridgeError("Pont Tractor non configure (python du pont : reglages avances ou environnement du studio)")
     return python, script
 
 
@@ -69,7 +69,8 @@ def _run(verb: str, settings: dict, user: str, timeout: int, args: dict) -> dict
     python, script = _check_configured(settings)
 
     request = {"verb": verb, "engine": settings.get("engine") or "", "user": user or "",
-               "login": settings.get("engine_user") or DEFAULT_LOGIN}
+               # Empty engine_user (studio environment): the bridge logs in as the FLUX user name.
+               "login": settings.get("engine_user") or ""}
     request.update(args)
     kwargs = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     try:
@@ -181,7 +182,7 @@ def _normalize(job: dict) -> dict:
     meta = _metadata(job.get("metadata"))
     out = dict(job)
     out["metadata"] = meta
-    # Every school job is owned by the shared Windows login: the FLUX user lives in the metadata.
+    # Every job is owned by the shared Windows login: the FLUX user lives in the metadata.
     out["flux_user"] = str(meta.get("user") or "")
     out["state"] = job_state(job)
     out["percent"] = job_percent(job)
@@ -229,7 +230,7 @@ def blades(settings: dict, user: str) -> dict:
     return call("blades", settings, user)
 
 
-def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
+def _action(verb: str, settings: dict, user: str, jid: int, **args) -> dict:
     if settings.get("dry_run") is True:
         raise BridgeError(_SIMULATION_MSG)
     if user in ANONYMOUS_USERS:
@@ -241,7 +242,7 @@ def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
              if isinstance(j, dict) and j.get("jid") == jid]
     if not found or not user or _normalize(found[0])["flux_user"] != user:
         raise BridgeError("Action refusee : ce job n'a pas ete lance par vous depuis FLUX")
-    return call(verb, settings, user, jid=jid)
+    return call(verb, settings, user, jid=jid, **args)
 
 
 def job_action(verb: str, settings: dict, user: str, jid: int) -> dict:
@@ -272,6 +273,22 @@ def trace(settings: dict, user: str, jid: int) -> dict:
     if _reads_off(settings):
         return {"trace": "", "dry_run": True}
     return call("trace", settings, user, jid=jid)
+
+
+def set_priority(settings: dict, user: str, jid: int, value: int) -> dict:
+    """Priority of one FLUX job of this user (tq chpri). Higher = dispatched first, within the team's Share."""
+    if not _is_int(value) or not 1 <= value <= 10000:
+        raise BridgeError("Tractor : priorite entre 1 et 10000")
+    return _action("priority", settings, user, jid, value=value)
+
+
+def reload_limits(settings: dict, user: str) -> dict:
+    """The engine rereads limits.config. Only from the locked environment screen (router)."""
+    if settings.get("dry_run") is True:
+        raise BridgeError(_SIMULATION_MSG)
+    if user in ANONYMOUS_USERS:
+        raise BridgeError("Action refusee : connecte-toi a FLUX (utilisateur)")
+    return call("reload_limits", settings, user)
 
 
 def set_maxactive(settings: dict, user: str, jid: int, value: int) -> dict:

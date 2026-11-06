@@ -52,6 +52,7 @@
   --fam-flux:     oklch(66% 0.085 195);
   --fam-data:     oklch(66% 0.085 165);
   --fam-action:   oklch(66% 0.085 100);
+  --fam-dispatcher: oklch(66% 0.085 50);
   --fam-subflow:  var(--ink-2);
   --fam-bridge:   var(--ink-3);
 

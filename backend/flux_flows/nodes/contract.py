@@ -69,6 +69,11 @@ class NodeContext:
         return self._run.interface
 
     @property
+    def payload(self) -> Dict[str, Any]:
+        """Payload of the event that started the run (empty for a manual run)."""
+        return getattr(self._run, "payload", None) or {}
+
+    @property
     def interface_types(self) -> Dict[str, str]:
         """Type of each interface input (str, path, dir...)."""
         return {i.id: i.type for i in self._run.flow.interface.inputs}
@@ -96,9 +101,20 @@ class NodeContext:
     def set_variable(self, name: str, value: Any) -> Any:
         return self._run.set_variable(name, value)
 
+    def add_cleanup(self, fn) -> None:
+        """*fn()* runs at the end of the run, whatever its outcome (a headless session closes)."""
+        self._run.add_cleanup(fn)
+
     # -- subflows (subflow.flow_call / flow_output) ------------------------------
-    async def call_flow(self, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._run.call_flow(self.node_id, name, version, values)
+    async def call_flow(self, name: str, version: Any, values: Dict[str, Any], flow: Any = None) -> Dict[str, Any]:
+        """Run flow *name* inline (or the given *flow*: a DCC subflow node)."""
+        return await self._run.call_flow(self.node_id, name, version, values, flow=flow)
 
     def set_output(self, ident: str, value: Any) -> None:
         self._run.set_output(ident, value)
+
+    # -- dispatcher (ADR 0067) ------------------------------------------------------
+    def dispatch_batch(self) -> Optional[Dict[str, Any]]:
+        """The job of the innermost ForEach in mode dispatch ({"tasks": [...], title?, priority?}),
+        else None. dispatcher.submit adds its tasks there; the engine sends it at ForEachEnd."""
+        return self._run.dispatch_batch()

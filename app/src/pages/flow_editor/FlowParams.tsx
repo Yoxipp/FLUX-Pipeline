@@ -3,9 +3,12 @@
 // payload; outputs returned by a sub-flow) and variables (read with GetVariable / ${name},
 // written by SetVariable). Each edit = one undo entry (typing coalesced per field).
 // Ids are checked by the backend validation (model.py FIELD_ID_RE); here only typed.
+// R1 retake 9: the interface reflects the graph. Each input lists the FlowInput nodes that
+// read it (click = select) or offers to place one; a FlowInput whose id is not declared is
+// listed with "Add to the interface". Same for the outputs and FlowOutput.
 
 import type { ReactNode } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { LogIn, LogOut, Plus, Trash2 } from 'lucide-react'
 import { ParamWidget } from '../../components/shared/ParamWidget'
 import { Row, kindOf, storedValue } from './ParamsPane'
 import { INTERFACE_TYPES, type FlowDoc, type FlowInterface, type FlowVariable, type InterfaceInput, type InterfaceOutput } from './types'
@@ -50,14 +53,73 @@ function Item({ id, type, types, disabled, onId, onType, onRemove, children }: {
   )
 }
 
+const FLOW_INPUT = 'data.flow_input'
+const FLOW_OUTPUT = 'subflow.flow_output'
+
+// Node ids of a type, by the value of their `id` param.
+function nodesById(doc: FlowDoc, type: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [nid, n] of Object.entries(doc.nodes ?? {})) {
+    if (n.type !== type) continue
+    const key = String(n.params?.id ?? '')
+    ;(out[key] ??= []).push(nid)
+  }
+  return out
+}
+
+// Under an interface item: the nodes that use it (click = select), or a button to place one.
+function Usage({ nodes, none, place, onSelect, onPlace, disabled }: {
+  nodes: string[]; none: string; place: string; disabled: boolean
+  onSelect: (id: string) => void; onPlace: () => void
+}) {
+  const { tr } = useTr()
+  if (nodes.length) {
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', fontSize: 11, color: 'var(--ink-3)' }}>
+        {tr('lu par', 'used by')}
+        {nodes.map(id => <button key={id} type="button" className="tag" style={{ cursor: 'pointer' }} onClick={() => onSelect(id)}>{id}</button>)}
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--ink-4)' }}>
+      <span style={{ flex: 1 }}>{none}</span>
+      <button type="button" className="flow-tool" disabled={disabled} onClick={onPlace} style={{ width: 'auto', padding: '0 6px', fontSize: 11 }}>{place}</button>
+    </div>
+  )
+}
+
+// Nodes whose id is not declared in the interface, with "Add to the interface".
+function Orphans({ ids, label, onSelect, onAdd, disabled }: {
+  ids: [string, string[]][]; label: string; disabled: boolean
+  onSelect: (id: string) => void; onAdd: (id: string) => void
+}) {
+  const { tr } = useTr()
+  if (!ids.length) return null
+  return (
+    <div style={{ marginTop: 6, padding: '4px 6px', borderRadius: 4, background: 'color-mix(in oklch, var(--warn) 10%, transparent)', fontSize: 11 }}>
+      <div style={{ color: 'var(--warn)', marginBottom: 2 }}>{label}</div>
+      {ids.map(([key, nodes]) => (
+        <div key={key || '(vide)'} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {nodes.map(id => <button key={id} type="button" className="tag" style={{ cursor: 'pointer' }} onClick={() => onSelect(id)}>{id}</button>)}
+          <span style={{ fontFamily: 'var(--mono)', flex: 1 }}>{key || tr('(id vide)', '(empty id)')}</span>
+          {key && <button type="button" className="flow-tool" disabled={disabled} onClick={() => onAdd(key)} style={{ width: 'auto', padding: '0 6px', fontSize: 11 }}>{tr('Ajouter a l\'interface', 'Add to the interface')}</button>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const freeId = (taken: string[], base: string) => {
   for (let i = 1; ; i++) if (!taken.includes(`${base}${i}`)) return `${base}${i}`
 }
 
-export function FlowParams({ doc, editable, onFields }: {
+export function FlowParams({ doc, editable, onFields, onPlaceNode, onSelectNode }: {
   doc: FlowDoc | null
   editable: boolean
   onFields: (patch: Partial<FlowDoc>, key: string) => void
+  onPlaceNode?: (type: string, params: Record<string, unknown>) => void   // R1: place a FlowInput / FlowOutput
+  onSelectNode?: (id: string) => void
 }) {
   const { tr } = useTr()
   if (!doc) return <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('Aucun flow ouvert', 'No flow open')}</div>
@@ -78,6 +140,14 @@ export function FlowParams({ doc, editable, onFields }: {
   }
   const setOutput = (i: number, patch: Partial<InterfaceOutput>, key: string) =>
     setIface({ ...iface, outputs: iface.outputs.map((x, k) => k === i ? { ...x, ...patch } : x) }, key)
+  const readers = nodesById(doc, FLOW_INPUT)
+  const writers = nodesById(doc, FLOW_OUTPUT)
+  const inIds = new Set(iface.inputs.map(x => x.id))
+  const outIds = new Set(iface.outputs.map(x => x.id))
+  const orphanIn = Object.entries(readers).filter(([k]) => !inIds.has(k))
+  const orphanOut = Object.entries(writers).filter(([k]) => !outIds.has(k))
+  const select = (id: string) => onSelectNode?.(id)
+  const place = (type: string, id: string) => onPlaceNode?.(type, { id })
   const setVar = (i: number, patch: Partial<FlowVariable>, key: string) => {
     const next = vars.map((x, k) => k === i ? { ...x, ...patch, ...(patch.type ? { default: undefined } : {}) } : x)
     onFields({ variables: next.length ? next : undefined }, key)
@@ -99,6 +169,19 @@ export function FlowParams({ doc, editable, onFields }: {
                      onChange={v => onFields({ run_policy: v as FlowDoc['run_policy'] }, 'flow:run_policy')} />
       </Row>
 
+      <div style={{ marginTop: 12, padding: '6px 8px', borderRadius: 5, background: 'var(--paper-2)', fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <LogIn size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>{tr('Entrees : ce que l\'on remplit avant de lancer le flow (formulaire du Run, page TOOL, FlowCall qui l\'appelle). Un node FlowInput les lit dans le graphe.',
+                    'Inputs: what is filled in before the flow starts (Run form, TOOL page, calling FlowCall). A FlowInput node reads them in the graph.')}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginTop: 4 }}>
+          <LogOut size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>{tr('Sorties : ce que le flow rend au FlowCall qui l\'appelle. Un node FlowOutput les remplit.',
+                    'Outputs: what the flow gives back to the calling FlowCall. A FlowOutput node fills them.')}</span>
+        </div>
+      </div>
+
       <Section title={tr('Entrees (interface)', 'Inputs (interface)')} disabled={off}
                onAdd={() => setIface({ ...iface, inputs: [...iface.inputs, { id: freeId(iface.inputs.map(x => x.id), 'input'), type: 'str' }] }, 'iface:add')}>
         {iface.inputs.length === 0 && <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('Aucune : le Run ne demande rien.', 'None: Run asks for nothing.')}</div>}
@@ -119,8 +202,13 @@ export function FlowParams({ doc, editable, onFields }: {
                            value={inp.default} disabled={off} placeholder={tr('Defaut', 'Default')}
                            onChange={v => setInput(i, { default: storedValue(inp.type, v) }, `iface:in:${i}:default`)} />
             </div>
+            <Usage nodes={readers[inp.id] ?? []} disabled={off || !onPlaceNode} onSelect={select} onPlace={() => place(FLOW_INPUT, inp.id)}
+                   none={tr('Aucun FlowInput ne la lit.', 'No FlowInput reads it.')} place={tr('Poser FlowInput', 'Place FlowInput')} />
           </Item>
         ))}
+        <Orphans ids={orphanIn} disabled={off} onSelect={select}
+                 label={tr('FlowInput dont l\'entree n\'est pas declaree :', 'FlowInput whose input is not declared:')}
+                 onAdd={id => setIface({ ...iface, inputs: [...iface.inputs, { id, type: 'str' }] }, `iface:adopt:${id}`)} />
       </Section>
 
       <Section title={tr('Sorties (sous-flow)', 'Outputs (sub-flow)')} disabled={off}
@@ -132,8 +220,13 @@ export function FlowParams({ doc, editable, onFields }: {
                 onRemove={() => setIface({ ...iface, outputs: iface.outputs.filter((_, k) => k !== i) }, `iface:out:${i}:rm`)}>
             <input value={out.label ?? ''} disabled={off} placeholder={tr('Libelle', 'Label')} style={small}
                    onChange={e => setOutput(i, { label: e.target.value || undefined }, `iface:out:${i}:label`)} />
+            <Usage nodes={writers[out.id] ?? []} disabled={off || !onPlaceNode} onSelect={select} onPlace={() => place(FLOW_OUTPUT, out.id)}
+                   none={tr('Aucun FlowOutput ne la remplit.', 'No FlowOutput fills it.')} place={tr('Poser FlowOutput', 'Place FlowOutput')} />
           </Item>
         ))}
+        <Orphans ids={orphanOut} disabled={off} onSelect={select}
+                 label={tr('FlowOutput dont la sortie n\'est pas declaree :', 'FlowOutput whose output is not declared:')}
+                 onAdd={id => setIface({ ...iface, outputs: [...iface.outputs, { id, type: 'any' }] }, `iface:adoptout:${id}`)} />
       </Section>
 
       <Section title={tr('Variables', 'Variables')} disabled={off}

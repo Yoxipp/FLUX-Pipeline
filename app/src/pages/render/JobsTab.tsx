@@ -69,6 +69,20 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
     } catch (e) { toast.error(errMsg(e)) }
   }
 
+  // Priority of one of my FLUX jobs (tq chpri): higher = dispatched first, within the team's farm share.
+  const changePriority = async (j: RenderJob) => {
+    const raw = window.prompt(tr(`Priorite de "${j.title}" (1 = comme tout le monde, plus haut = avant)`,
+      `Priority of "${j.title}" (1 = like everyone, higher = first)`), String(j.priority ?? 1))
+    if (raw === null) return
+    const value = Math.round(Number(raw))
+    if (!Number.isInteger(value) || value < 1 || value > 10000) { toast.error(tr('Priorite entre 1 et 10000', 'Priority between 1 and 10000')); return }
+    try {
+      const r = await api.renderJobPriority(project, j.jid, value)
+      toast.success(tr(`Priorite ${value}`, `Priority ${value}`), { description: r.priority_warning ?? undefined })
+      reload()
+    } catch (e) { toast.error(errMsg(e)) }
+  }
+
   // Pinned jobs stay on top (this viewer only, like the Dashboard's pin).
   const [pinned, setPinned] = useState<number[]>(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
@@ -88,6 +102,7 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
   const pick = (j: RenderJob, choice: JobMenuChoice) => {
     if (choice === 'trace') void showTrace(j.jid)
     else if (choice === 'pin' || choice === 'unpin') setPin(j.jid, choice === 'pin')
+    else if (choice === 'priority') void changePriority(j)
     else void jobAction(j, choice)
   }
   const shownJobs = useMemo(() => [

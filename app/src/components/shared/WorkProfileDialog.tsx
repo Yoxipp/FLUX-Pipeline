@@ -10,7 +10,7 @@ import { useWorkProfile } from '../../WorkProfileContext'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { SOFTWARE } from '../../lib/dccs'
 import {
-  BUILTIN_PROFILES, NOTIFY_OPTIONS, PUBLISHER_SOFTS, START_PAGES, joinDepartments, splitDepartments,
+  BUILTIN_PROFILES, NOTIFY_OPTIONS, PUBLISHER_SOFTS, START_PAGES, joinDepartments, joinSoftwares, splitDepartments, splitSoftwares,
   type ProfileRef, type WorkPrefs, type WorkProfile,
 } from '../../lib/workProfiles'
 import { DEFAULT_DEPARTMENTS } from '../../pages/Production/tracking'
@@ -27,6 +27,7 @@ const PREF_LABELS: Record<keyof WorkPrefs, string> = {
   launcher: 'Launcher',
   publisherSoft: 'Logiciel du Publisher',
   productionDepartments: 'Production · colonnes de Show',
+  softwares: 'Logiciels affichés',
   notifyMention: 'Mentions',
   notifyFollowed: 'Tâches suivies',
   notifyPublish: 'Publishs du projet',
@@ -51,6 +52,21 @@ function DepartmentChips({ value, onChange }: { value: string; onChange: (v: str
     <div className="work-profile-seg"><button role="checkbox" aria-checked={!picked.length} data-on={!picked.length || undefined} onClick={() => onChange('')}>Toutes</button></div>
     {DEPARTMENT_GROUPS.map(g => <div key={g.scope} className="work-profile-seg"><span className="work-profile-seg-label">{g.label}</span>{g.names.map(chip)}</div>)}
     {extra.length > 0 && <div className="work-profile-seg"><span className="work-profile-seg-label">Projet</span>{extra.map(chip)}</div>}
+  </div>
+}
+
+// Only the software enabled in Settings > Logiciels can be picked; a stored key that is
+// disabled there stays in the value (another machine or user may enable it).
+function SoftwareChips({ value, onChange, isEnabled }: { value: string; onChange: (v: string) => void; isEnabled: (key: string) => boolean }) {
+  const picked = splitSoftwares(value)
+  const offered = SOFTWARE.filter(s => isEnabled(s.key))
+  const all = !picked.some(k => offered.some(s => s.key === k))
+  const toggle = (key: string) => onChange(joinSoftwares(picked.includes(key) ? picked.filter(k => k !== key) : [...picked, key]))
+  return <div className="work-profile-departments">
+    <div className="work-profile-seg">
+      <button role="checkbox" aria-checked={all} data-on={all || undefined} onClick={() => onChange('')}>Tous</button>
+      {offered.map(s => <button key={s.key} role="checkbox" aria-checked={picked.includes(s.key)} data-on={picked.includes(s.key) || undefined} onClick={() => toggle(s.key)}>{s.name}</button>)}
+    </div>
   </div>
 }
 
@@ -99,7 +115,7 @@ export function WorkProfileDialog() {
         </div>
         <p className="work-profile-intro">
           Un profil pré-règle votre vue Production (colonnes de Show) et vos notifications d'activité, ainsi que la page
-          d'accueil, le Launcher et le Publisher. Tout reste modifiable à la main : Production &gt; Show, Activity &gt; Notifications.
+          d'accueil, les logiciels affichés et le Publisher. Tout reste modifiable à la main : Production &gt; Show, Activity &gt; Notifications.
           Le profil suit votre utilisateur sur tous les postes.
         </p>
         <div className="work-profile-body">
@@ -121,6 +137,10 @@ export function WorkProfileDialog() {
                 {START_PAGES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
               </select>
             </label>
+            <div className="work-profile-field">{PREF_LABELS.softwares}{dot('softwares')}
+              <SoftwareChips value={prefs.softwares} onChange={v => setPref('softwares', v)} isEnabled={isDccEnabled} />
+              <small>Launcher, barre d'état, Publisher et Shelf. Limité aux logiciels activés dans Settings &gt; Logiciels.</small>
+            </div>
             <label>{PREF_LABELS.publisherSoft}{dot('publisherSoft')}
               <select value={prefs.publisherSoft} onChange={e => setPref('publisherSoft', e.target.value)}>
                 <option value="">Par défaut (Maya)</option>

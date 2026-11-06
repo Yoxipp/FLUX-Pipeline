@@ -271,7 +271,10 @@ JSON_PRODUCTION: str = "production.json"    # setup dir - Production Tab store
 JSON_RENDER: str     = "render.json"        # setup dir - team render (Tractor) settings, ADR 0015
 JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
 JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
+JSON_ROLES: str      = "roles.json"         # setup dir - artists' roles on the project, ADR 0064
+JSON_COLLAB: str     = "collab.json"        # setup dir - phone notify relays (Discord webhook, ntfy), ADR 0062
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
+JSON_STUDIO: str     = "studio.json"        # FLUX_ROOT/CONFIG - the studio's own settings, ADR 0063
 
 # Per-user settings
 JSON_USER_SETTINGS: str = "User.json"      # USER/<name>/UserSettings/User.json
@@ -293,7 +296,10 @@ FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UP
 THEME_DEFAULT_BG:      str = "#14141f"
 THEME_DEFAULT_SURFACE: str = "#18182a"
 THEME_DEFAULT_FG:      str = "#d6d6d6"
-THEME_DEFAULT_ACCENT:  str = "#f57c1f"
+# Preset key read by the front (app/src/lib/accentPresets.ts): a "#rrggbb" value is a custom color.
+THEME_DEFAULT_ACCENT:  str = "orange"
+# Old default, stored as a hex by earlier versions: read back as the orange preset.
+THEME_LEGACY_DEFAULT_ACCENT: str = "#f57c1f"
 
 # Kept as aliases for any external code referencing old names
 THEME_DEFAULT_PRIMARY:   str = THEME_DEFAULT_SURFACE
@@ -346,7 +352,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.10.000"
+APP_VERSION: str = "0.11.001"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

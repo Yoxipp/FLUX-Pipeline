@@ -4,13 +4,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Layers, Plus, Trash2, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
+import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse } from '../../api/client'
+import { EnvPanel } from './EnvPanel'
+import { StudioEnvPanel } from './StudioEnvPanel'
 import { MachinePicker } from './MachinePicker'
-import {
-  Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
-} from './renderUi'
+import { Banner, Check, Row, Section, Toggle, btn, disabledIf, errMsg, hint, input, lbl, useTr, warnText } from './renderUi'
 
 type Key = keyof RenderSettings
 
@@ -18,9 +18,10 @@ function changedKeys(a: RenderSettings, b: RenderSettings): Key[] {
   return (Object.keys(b) as Key[]).filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 }
 
-export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
-  project: string; settings: RenderSettings; warning: string | null; farm: RenderFarm | null
-  onSaved: (r: { settings: RenderSettings; warning: string | null }) => void
+export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSaved }: {
+  project: string; settings: RenderSettings & { value_sources?: Record<string, string> }; warning: string | null; farm: RenderFarm | null
+  farmTeams: string[]   // Shares of the engine limits.config: the only team names the farm knows
+  onSaved: (r: RenderSettingsResponse) => void
 }) {
   const { tr } = useTr()
   const [draft, setDraft] = useState<RenderSettings>(settings)
@@ -46,8 +47,9 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
 
   const changed = useMemo(() => changedKeys(settings, draft), [settings, draft])
   const set = <K extends Key>(k: K, v: RenderSettings[K]) => setDraft(d => ({ ...d, [k]: v }))
-  const counts = farm?.counts
   const blades = farm?.blades ?? []
+  // Value the studio environment provides (backend value_sources): shown as the placeholder of an empty field.
+  const envHint = (k: Key) => (settings.value_sources?.[k] === 'studio' ? String(settings[k] ?? '') : '')
 
   const save = async () => {
     if (!changed.length) return
@@ -73,30 +75,12 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
     setCodesDraft(next.join(', '))
     set('retry_exit_codes', next)
   }
-  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
+  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'denoise_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
     label: string, placeholder?: string) => (
     <Row label={label}>
       <input style={input} value={draft[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)} />
     </Row>
   )
-  const shareField = (k: 'team_cap', label: string, help: string) => {
-    const s: RenderShare = draft[k]
-    const n = capFromPercent(s.percent, counts ? counts[s.of] : 0)
-    return (
-      <Row label={label} help={help}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="number" min={0} max={100} style={{ ...input, width: 70 }} value={s.percent}
-            onChange={e => set(k, { ...s, percent: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} />
-          <span style={hint}>%</span>
-          <Toggle value={s.of} onChange={id => set(k, { ...s, of: id as RenderShareBase })}
-            options={[{ id: 'alive', label: tr('Machines allumees', 'Machines on') }, { id: 'free', label: tr('Machines libres', 'Free machines') }]} />
-          <ShareBaseInfo />
-          <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{s.percent ? <><Layers size={11} />{n}</> : tr('off', 'off')}</span>
-        </div>
-      </Row>
-    )
-  }
-
   const groups = draft.host_groups
   const addGroup = () => {
     const name = newGroup.trim()
@@ -121,7 +105,19 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
       <Section title={tr('Equipe et part de la farm', 'Team and farm share')}>
         <Row label={tr('Equipe sur la farm', 'Team on the farm')}>
           <input style={input} value={draft.tractor_project} onChange={e => set('tractor_project', e.target.value)} />
-          {knownProjects.length > 0 && (
+          {farmTeams.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
+              <span style={hint}>{tr('Equipes de la farm :', 'Farm teams:')}</span>
+              {farmTeams.map(name => (
+                <button key={name} type="button" title={tr('Part de la farm reglee par le studio (limits.config)', 'Farm share set by the studio (limits.config)')}
+                  style={{ ...btn(), background: draft.tractor_project === name ? 'var(--accent-soft)' : 'var(--paper-2)' }}
+                  onClick={() => set('tractor_project', name)}>{name}</button>
+              ))}
+              {draft.tractor_project && !farmTeams.includes(draft.tractor_project) && (
+                <span style={warnText}>{tr('Inconnue de la farm : part par defaut (limitee)', 'Unknown to the farm: default share (limited)')}</span>
+              )}
+            </div>
+          ) : knownProjects.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
               {knownProjects.map(p => (
                 <button key={p.name} type="button" title={tr(`${p.jobs} job(s) en 90 jours`, `${p.jobs} job(s) in 90 days`)}
@@ -136,7 +132,8 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
           {num('chunk_size', tr('Images par tache', 'Frames per task'))}
         </div>
         {warning && <div style={warnText}>{warning}</div>}
-        {shareField('team_cap', tr("Plafond de l'equipe", 'Team cap'), tr('Tous les jobs FLUX de l\'equipe. 0 = aucun.', "All the team's FLUX jobs. 0 = none."))}
+        <div style={hint}>{tr("Part de la farm : reglee par le studio pour chaque equipe (limits.config), Tractor equilibre lui-meme.",
+          "Farm share: set by the studio per team (limits.config), Tractor balances by itself.")}</div>
       </Section>
 
       <Section title={tr('Groupes de PC', 'PC groups')}>
@@ -190,6 +187,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
               <Row label={tr('Moteur par defaut', 'Default renderer')}>
                 <Toggle value={draft.renderer} onChange={id => set('renderer', id as RenderSettings['renderer'])}
                   options={[{ id: 'karma', label: 'Karma' }, { id: 'renderman', label: 'RenderMan' }]} />
+                {!draft.renderer && <div style={hint}>{tr('Aucun : a choisir au lancement', 'None: pick at launch')}</div>}
               </Row>
               <Row label={tr('Gel par defaut', 'Freeze by default')}>
                 <Check label={tr('Geler la version', 'Freeze the version')} checked={draft.freeze_by_default} onChange={v => set('freeze_by_default', v)} />
@@ -198,9 +196,13 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
                 <Toggle value={draft.freeze_when} onChange={id => set('freeze_when', id as RenderFreezeWhen)}
                   options={[{ id: 'start', label: tr('Au demarrage', 'At start') }, { id: 'submit', label: tr('Au lancement', 'At submit') }]} />
               </Row>
-              {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), 'C:/Program Files/Side Effects Software/Houdini 20.5.445')}
-              {txt('service_karma', 'Service Karma', 'PixarRender')}
-              {txt('service_renderman', 'Service RenderMan', 'PixarRender')}
+              {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), envHint('houdini_path'))}
+              {txt('denoise_path', tr('denoise_batch des blades (RenderMan)', 'Blades denoise_batch (RenderMan)'), envHint('denoise_path'))}
+              <Row label={tr('Denoise par defaut', 'Default denoise')}>
+                <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={draft.denoise_crossframe} onChange={v => set('denoise_crossframe', v)} />
+              </Row>
+              {txt('service_karma', 'Service Karma', envHint('service_karma'))}
+              {txt('service_renderman', 'Service RenderMan', envHint('service_renderman'))}
               <Row label={tr('Envkeys (separes par des virgules)', 'Envkeys (comma separated)')}>
                 <input style={input} value={draft.envkeys.join(', ')}
                   onChange={e => set('envkeys', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
@@ -234,7 +236,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
               </Row>
               {txt('husk_path', 'Husk')}
               {txt('engine', 'Engine (host:port)', 'TRACTOR_ENGINE')}
-              {txt('engine_user', tr('Login moteur', 'Engine login'), 'root')}
+              {txt('engine_user', tr('Login moteur', 'Engine login'), envHint('engine_user'))}
               {txt('bridge_python', 'Bridge Python')}
               {txt('bridge_script', 'Bridge script')}
             </div>
@@ -243,6 +245,10 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
           </div>
         )}
       </div>
+
+      <StudioEnvPanel project={project} onChanged={() => { void api.renderSettings(project).then(onSaved).catch(() => undefined) }} />
+
+      <EnvPanel project={project} configDir={settings.engine_config_dir} onDirSaved={onSaved} />
 
       {/* Sticky over the scroll container's 16 px bottom padding (Render.tsx), else content shows under it. */}
       <div style={{ position: 'sticky', bottom: -16, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center',

@@ -88,6 +88,9 @@ Compile `app/src/` en bundle statique `dist/`. `base: './'` dans `vite.config.ts
 
 `scripts/backend.spec` : entree `backend/main.py`, `datas=[("resources", "resources")]`, `collect_submodules`
 uvicorn/fastapi/pydantic (imports dynamiques), `collect_all("pxr")` (usd-core importe en lazy), exclut PySide6/PyQt5/tkinter.
+`collect_submodules("flux_flows.nodes")` / `features.dispatcher` : le spec met `backend/` dans `sys.path` avant
+(sinon liste vide sans erreur, exe sans aucun node Flows : `ModuleNotFoundError flux_flows.nodes.event`, HTTP 500
+sur `/flows/catalog`). Le build s'arrete si ces listes sont vides.
 `app_datas` liste les fichiers non Python lus a cote du code (`Path(__file__)`) : YAML `flux_actions/config/*.yml`,
 `schema.json` des recettes USD, sources des plugins DCC copies dans les logiciels. Tout nouveau fichier de ce type
 doit y etre ajoute (sinon FileNotFoundError -> HTTP 500 en build seulement ; test `tests/system/test_frozen_bundle.py`).
@@ -121,6 +124,12 @@ et ses paquets, les logiciels, les projets / FLUX_ROOT, le code perso des script
 * Toutes les deps UI sont en `devDependencies` : Vite les bundle ; sinon electron-builder embarquerait `node_modules/`.
 * En prod, `python_bridge.ts` spawn `process.resourcesPath/backend/flux_backend.exe` avec `FLUX_PORT=8765`, puis lit le
   jeton API sur `GET /auth/token` (S1) et le passe au renderer.
+
+## Retour arriere du publish
+
+Un publish qui casse apres P8 (projet en v2, publish par les flows) : procedure dans
+[PUBLISH_ROLLBACK.md](PUBLISH_ROLLBACK.md) (repasser le projet en v1, bridges, `FLUX_LEGACY_PUBLISH`, revert par
+logiciel, installeur d'avant P8). Garder l'installeur actuel de cote avant un build qui change le publish.
 
 ## Erreurs connues
 

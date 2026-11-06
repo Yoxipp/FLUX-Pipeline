@@ -1,0 +1,31 @@
+board: 1
+id: storyboard
+label: Storyboard
+label_en: Storyboard
+description: "Six cadres de plan dans l'ordre de lecture (mode presentation = plan par plan)."
+description_en: "Six shot frames in reading order (presentation mode = shot by shot)."
+items:
+  - {key: "title", type: "text", x: 0, y: -80, w: 900, h: 50, z: 2, font_size: 32, bold: true, text: "Storyboard", text_en: "Storyboard"}
+  - {key: "p1", type: "frame", x: 0, y: 0, w: 340, h: 340, z: -10, color: "white", text: "Plan 1", text_en: "Shot 1"}
+  - {key: "p1_img", type: "shape", shape: "rect", x: 20, y: 40, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p1_txt", type: "text", x: 20, y: 236, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "p2", type: "frame", x: 380, y: 0, w: 340, h: 340, z: -10, color: "white", text: "Plan 2", text_en: "Shot 2"}
+  - {key: "p2_img", type: "shape", shape: "rect", x: 400, y: 40, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p2_txt", type: "text", x: 400, y: 236, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "p3", type: "frame", x: 760, y: 0, w: 340, h: 340, z: -10, color: "white", text: "Plan 3", text_en: "Shot 3"}
+  - {key: "p3_img", type: "shape", shape: "rect", x: 780, y: 40, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p3_txt", type: "text", x: 780, y: 236, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "p4", type: "frame", x: 0, y: 380, w: 340, h: 340, z: -10, color: "white", text: "Plan 4", text_en: "Shot 4"}
+  - {key: "p4_img", type: "shape", shape: "rect", x: 20, y: 420, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p4_txt", type: "text", x: 20, y: 616, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "p5", type: "frame", x: 380, y: 380, w: 340, h: 340, z: -10, color: "white", text: "Plan 5", text_en: "Shot 5"}
+  - {key: "p5_img", type: "shape", shape: "rect", x: 400, y: 420, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p5_txt", type: "text", x: 400, y: 616, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "p6", type: "frame", x: 760, y: 380, w: 340, h: 340, z: -10, color: "white", text: "Plan 6", text_en: "Shot 6"}
+  - {key: "p6_img", type: "shape", shape: "rect", x: 780, y: 420, w: 300, h: 180, z: 0, color: "grey", stroke: "grey", text: "Image", text_en: "Picture"}
+  - {key: "p6_txt", type: "text", x: 780, y: 616, w: 300, h: 84, z: 1, font_size: 13, text: "Action :\nDialogue :\nCamera :", text_en: "Action:\nDialogue:\nCamera:"}
+  - {key: "l1", type: "link", from: "p1_img", to: "p2_img", arrow_end: true, dash: "dotted", stroke: "grey"}
+  - {key: "l2", type: "link", from: "p2_img", to: "p3_img", arrow_end: true, dash: "dotted", stroke: "grey"}
+  - {key: "l3", type: "link", from: "p3_img", to: "p4_img", arrow_end: true, dash: "dotted", stroke: "grey"}
+  - {key: "l4", type: "link", from: "p4_img", to: "p5_img", arrow_end: true, dash: "dotted", stroke: "grey"}
+  - {key: "l5", type: "link", from: "p5_img", to: "p6_img", arrow_end: true, dash: "dotted", stroke: "grey"}

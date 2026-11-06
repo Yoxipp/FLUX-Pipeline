@@ -34,6 +34,8 @@ from flux_flows.types import can_connect
 ERROR, WARNING = "error", "warning"
 MIN_EVERY_S = 5          # hard minimum of a scan (01 §8, E_PARAM_INVALID below)
 FAST_EVERY_S = 10        # W_SCAN_TOO_FAST below
+MIN_SCENE_EVERY_S = 2    # event.scene_opened polls a local DCC
+SCHEDULE, SCENE_OPENED = "event.schedule", "event.scene_opened"
 MAX_SUBFLOW_DEPTH = 8
 
 FOREACH_BEGIN, FOREACH_END = "operator.foreach_begin", "operator.foreach_end"
@@ -43,7 +45,8 @@ BLOCKS = {FOREACH_BEGIN: FOREACH_END, FOR_BEGIN: FOR_END, WHILE_BEGIN: WHILE_END
 ENDS = {end: begin for begin, end in BLOCKS.items()}
 FLOW_CALL = "subflow.flow_call"
 LEGACY = "flux.legacy_command"
-DYNAMIC = (FLOW_CALL, LEGACY)         # ports declared in params.ports (+ any name for FlowCall)
+PAGE_NODE = "event.page_inputs"
+DYNAMIC = (FLOW_CALL, LEGACY, PAGE_NODE)   # ports declared in params.ports (+ any name for FlowCall)
 LOOP_RISKY = ("action.delete", "action.move")
 INSTANCE_RE = re.compile(r"^session\.[a-z0-9]+_instance$")
 _LIST_RE = re.compile(r"^list\[(.+)\]$")
@@ -84,6 +87,8 @@ class Env:
     flow_loader: Optional[Callable[[str], Optional[Flow]]] = None   # name -> Flow (FlowCall cycles)
     tested: Optional[Iterable[str]] = None         # node ids the dry run of this version simulated
     shipped_changed: bool = False                  # team copy older than the shipped flow
+    page_links: Optional[List[Dict[str, Any]]] = None   # links of the TOOL pages to this flow (P7, page_links)
+    page_lookup: Optional[Callable[[str], Any]] = None   # page id -> Page or None (Page node, ADR 0068)
 
 
 def default_env(project: Optional[str] = None, **extra: Any) -> Env:
@@ -129,6 +134,9 @@ _WHY = {
     "W_ISOLATED_NODE": ("aucun effet", "no effect"),
     "W_LICENCE": ("ADR 0007 : FLUX ne prend aucune licence lui-meme", "ADR 0007: FLUX itself takes no licence"),
     "W_SHIPPED_CHANGED": ("reprise de l'ADR 0039", "from ADR 0039"),
+    "W_PORT_HIDDEN": ("valeur ignoree dans ce mode", "value ignored in this mode"),
+    "W_PAGE_LINK_BROKEN": ("la page n'est pas ouverte a ce moment-la", "the page is not open at that moment"),
+    "E_PAGE_NOT_FOUND": ("aucun clic ne peut lancer ce flow", "no click can start this flow"),
 }
 
 
@@ -249,6 +257,11 @@ def _literal(node: Node, name: str) -> Any:
     return None if value == "" else value
 
 
+def _in_choices(value: Any, choices: Iterable[Any]) -> bool:
+    """A literal against the choices of its param (exact value, the editor offers them in a menu)."""
+    return any(value == c and type(value) is type(c) for c in choices)
+
+
 def _templated(value: Any) -> bool:
     return isinstance(value, str) and any(c in value for c in "{$")
 
@@ -292,6 +305,12 @@ def _check_links(net: _Net, issues: List[Issue]) -> None:
             else:
                 fr, en = f"{net.name(dst)} n'a pas d'entree `{dport}`", f"{net.name(dst)} has no input `{dport}`"
             issues.append(_issue("E_LINK_INVALID", dst, fr, en, port=dport, fix=remove, link=link))
+            continue
+        if dport in ins and not ins[dport].wirable:
+            issues.append(_issue("E_LINK_INVALID", dst,
+                                 f"`{dport}` de {net.name(dst)} est une constante : saisis sa valeur, pas de lien",
+                                 f"`{dport}` of {net.name(dst)} is a constant: type its value, no link",
+                                 port=dport, fix=remove, link=link))
             continue
         src_type = outs.get(sport, "any")
         dst_type = ins[dport].type if dport in ins else "any"
@@ -365,12 +384,36 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
                                      f"{net.name(nid)} : `{pname}` attend {port.type}, recu {value!r}",
                                      f"{net.name(nid)}: `{pname}` expects {port.type}, got {value!r}", port=pname))
                 continue
+            if port.choices and not _templated(value) and not _in_choices(value, port.choices):
+                shown = ", ".join(str(c) for c in port.choices)
+                issues.append(_issue("E_PARAM_INVALID", nid,
+                                     f"{net.name(nid)} : `{pname}` vaut {value!r}, attendu : {shown}",
+                                     f"{net.name(nid)}: `{pname}` is {value!r}, expected: {shown}", port=pname))
+                continue
+            if port.reserved and not _templated(value) and _in_choices(value, port.reserved):
+                issues.append(_issue("E_PARAM_INVALID", nid,
+                                     f"{net.name(nid)} : `{pname}` = {value!r} n'est pas encore disponible, choisis "
+                                     f"une autre option du menu",
+                                     f"{net.name(nid)}: `{pname}` = {value!r} is not available yet, pick another "
+                                     f"option of the menu", port=pname))
+                continue
             if port.type == "pattern" and isinstance(value, str) and not _templated(value):
                 bad = patterns.check_pattern(value)
                 if bad:
                     issues.append(_issue("E_PARAM_INVALID", nid, f"{net.name(nid)} : motif `{pname}` : {bad}",
                                          f"{net.name(nid)}: pattern `{pname}` is malformed", port=pname))
         _check_node_rules(net, nid, node, issues)
+        # A link into a port hidden by the node's mode (R1 retake 2): kept, but said.
+        for port in ports.values():
+            if port.when and (nid, port.name) in net.data_in and not registry.port_visible(spec, port, node.params):
+                param = port.when[0]
+                shown = node.params.get(param) or next((q.default for q in spec.params if q.name == param), "")
+                issues.append(_issue(
+                    "W_PORT_HIDDEN", nid,
+                    f"{net.name(nid)} : `{port.name}` ne sert pas quand {param} = {shown} : retire le lien ou "
+                    f"change `{param}`",
+                    f"{net.name(nid)}: `{port.name}` is not used when {param} = {shown}: remove the link or "
+                    f"change `{param}`", port=port.name))
         # Required inputs and params.
         for port in ports.values():
             if not port.required or port.type == "exec" or (nid, port.name) in net.data_in:
@@ -407,25 +450,35 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
 def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> None:
     params = node.params
     every = params.get("every_s")
+    # scene_opened polls a local DCC, not the share: 2 s minimum, no network warning (01 §9).
+    local_poll = node.type == SCENE_OPENED
+    minimum = MIN_SCENE_EVERY_S if local_poll else MIN_EVERY_S
     if isinstance(every, (int, float)) and not isinstance(every, bool):
-        if every < MIN_EVERY_S:
-            issues.append(_issue("E_PARAM_INVALID", nid, f"Frequence minimale : {MIN_EVERY_S} secondes",
-                                 f"Minimum frequency: {MIN_EVERY_S} seconds", port="every_s"))
-        elif every < FAST_EVERY_S:
+        if every < minimum:
+            issues.append(_issue("E_PARAM_INVALID", nid, f"Frequence minimale : {minimum} secondes",
+                                 f"Minimum frequency: {minimum} seconds", port="every_s"))
+        elif every < FAST_EVERY_S and not local_poll:
             issues.append(_issue("W_SCAN_TOO_FAST", nid, f"Scan toutes les {every:g} s : charge reseau",
                                  f"Scan every {every:g} s: network load", port="every_s",
                                  fix=_fix("set_param", node=nid, param="every_s", value=30)))
-    if node.type == "data.value" and str(params.get("type") or "str") not in VALUE_TYPES:
-        issues.append(_issue("E_PARAM_INVALID", nid, f"Type inconnu `{params.get('type')}` ({', '.join(VALUE_TYPES)})",
-                             f"Unknown type `{params.get('type')}` ({', '.join(VALUE_TYPES)})", port="type"))
+    # data.value ``type`` is checked by its choices (VALUE_TYPES), in _check_nodes.
+    if node.type == SCHEDULE:
+        from flux_flows import scheduler
+
+        for pname in ("days", "time"):   # missed: checked by its choices
+            problem = scheduler.schedule_param_error(pname, params.get(pname))
+            if problem:
+                issues.append(_issue("E_PARAM_INVALID", nid, problem[0], problem[1], port=pname))
     if node.type == FOR_BEGIN and (nid, "step") not in net.data_in and params.get("step") in (0, 0.0, "0"):
         issues.append(_issue("E_PARAM_INVALID", nid, "step ne peut pas valoir 0", "step cannot be 0", port="step"))
     if node.type == "data.flow_input":
         ident = str(params.get("id") or "")
         if ident and ident not in net.iface_types:
             issues.append(_issue("E_PARAM_INVALID", nid,
-                                 f"Le parametre `{ident}` n'est pas dans l'interface du flow",
-                                 f"Parameter `{ident}` is not in the flow interface", port="id"))
+                                 f"L'entree `{ident}` n'est pas dans l'interface du flow : ajoute-la (panneau du "
+                                 f"flow, rien de selectionne) ou choisis une entree existante",
+                                 f"Input `{ident}` is not in the flow interface: add it (flow panel, nothing "
+                                 f"selected) or pick an existing input", port="id"))
     if node.type in ("data.get_variable", "data.set_variable"):
         name = str(params.get("name") or "")
         if name and name not in net.var_types:
@@ -434,8 +487,11 @@ def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> N
     if node.type == "subflow.flow_output":
         ident = str(params.get("id") or "")
         if ident and ident not in {o.id for o in net.flow.interface.outputs}:
-            issues.append(_issue("E_PARAM_INVALID", nid, f"La sortie `{ident}` n'est pas dans interface.outputs",
-                                 f"Output `{ident}` is not in interface.outputs", port="id"))
+            issues.append(_issue("E_PARAM_INVALID", nid,
+                                 f"La sortie `{ident}` n'est pas dans l'interface du flow : ajoute-la (panneau du "
+                                 f"flow, Sorties) ou choisis une sortie existante",
+                                 f"Output `{ident}` is not in the flow interface: add it (flow panel, Outputs) or "
+                                 f"pick an existing output", port="id"))
 
 
 def _absolute(text: str) -> bool:
@@ -644,7 +700,8 @@ def _check_flow_structure(net: _Net, issues: List[Issue], sound: Dict[str, Tuple
 
     for (dst, dport), link in net.data_in.items():
         src, _ = _split(link.from_)
-        if not net.runs_in_chain(src):
+        if not net.runs_in_chain(src) or net.nodes[src].type == PAGE_NODE:
+            # ADR 0068: an InputsPageReader that did not start the run gives the page defaults.
             continue
         for reader in sorted(chain_readers(dst, {dst})):
             if reader == src or reader not in reached:
@@ -766,6 +823,27 @@ def _check_destructive(flow: Flow, issues: List[Issue], env: Env) -> None:
 
 # -- entry points --------------------------------------------------------------------
 
+def _check_pages(flow: Flow, issues: List[Issue], env: Env) -> None:
+    """Page nodes (ADR 0068): the page exists, and every linked button or field is still in it."""
+    from flux_flows import page_inputs
+
+    for nid, node in page_inputs.page_nodes(flow):
+        page_id = str(node.params.get("page") or "")
+        if not page_id:
+            continue      # E_REQUIRED_EMPTY
+        page = env.page_lookup(page_id)
+        if page is None:
+            issues.append(_issue("E_PAGE_NOT_FOUND", nid, f"Page {nid} : la page TOOL `{page_id}` n'existe pas",
+                                 f"Page {nid}: the TOOL page `{page_id}` does not exist", port="page"))
+            continue
+        for port, _reason in page_inputs.broken_links(flow, nid, page):
+            issues.append(_issue("W_PAGE_LINK_BROKEN", nid,
+                                 f"Page {nid} : `{port}` n'est plus dans la page {page.label or page_id} : "
+                                 "rafraichis les ports (selectionne le node) et refais le lien",
+                                 f"Page {nid}: `{port}` is no longer in the page {page.label or page_id}: "
+                                 "refresh the ports (select the node) and link again", port=port))
+
+
 def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
     """Every issue of *flow*, errors first, then by node."""
     env = env or Env()
@@ -773,7 +851,7 @@ def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
     issues: List[Issue] = []
     for item in v1_limit_issues(flow):
         issues.append(_issue("E_PARAM_INVALID", item["node"], _cap(item["message"]),
-                             "Farm mode does not exist yet (V2)", port="mode"))
+                             "Farm mode no longer exists: use the Dispatcher nodes (Submit, RenderShot)", port="mode"))
     top = _Net(flow, flow.nodes, flow.links)
     _check_links(top, issues)
     _check_nodes(top, issues, env)
@@ -791,6 +869,17 @@ def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
             for issue in sub:
                 issue.message_fr, issue.message_en = f"[{nid}] {issue.message_fr}", f"[{nid}] {issue.message_en}"
             issues += sub
+    if env.page_lookup is not None:
+        _check_pages(flow, issues, env)
+    if env.page_links:
+        from flux_flows import page_links
+
+        for broken in page_links.broken_by(flow, env.page_links):
+            issues.append(_issue("W_PAGE_LINK_BROKEN", None,
+                                 f"Ce changement casse la page {broken['page_label']} ({broken['label']} : "
+                                 f"{broken['reason_fr']})",
+                                 f"This change breaks the page {broken['page_label']} ({broken['label']}: "
+                                 f"{broken['reason_en']})"))
     if env.shipped_changed:
         issues.append(_issue("W_SHIPPED_CHANGED", None, "Le flow livre a change depuis ta copie",
                              "The shipped flow changed since your copy"))

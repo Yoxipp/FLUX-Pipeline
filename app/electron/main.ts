@@ -1,6 +1,6 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen, session, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, screen, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import http from 'http'
@@ -10,6 +10,8 @@ import {
 } from './python_bridge'
 import { promptUpdateAtLaunch } from './updater'
 import { displayVersion } from './version'
+import { DEV_ORIGIN } from './csp'
+import { installWebContentsGuards, mayReceiveToken, withDevCsp } from './security'
 import { spawn } from 'child_process'
 
 // The terminal that launched FLUX can go away (window closed, concurrently stopped)
@@ -128,7 +130,7 @@ async function createWindow(): Promise<void> {
   // Load the renderer. In dev the Vite server may not be up yet, so retry the
   // URL until it answers instead of blocking startup on a fixed port wait.
   if (!app.isPackaged) {
-    const url = 'http://localhost:5173'
+    const url = DEV_ORIGIN
     const deadline = Date.now() + 30_000
     const tryLoad = () => {
       win?.loadURL(url).catch(() => {
@@ -165,18 +167,20 @@ async function createWindow(): Promise<void> {
 // page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
 const DETACHABLE_ROUTES = new Set([
   '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
-  // Opened from Parametres avances: Flows editor, and the old YAML action editor until P8.
-  '/action-graph', '/action-graph-legacy',
+  // Opened from Parametres avances: Flows editor (the old YAML action editor was removed in P8).
+  '/action-graph',
   // Tractor farm page, opened from the launcher like a software (single window).
   '/render',
+  // TOOL pages (Flows P7): the tab, with ?page=<id> as a deep link.
+  '/tool',
 ])
 
 // Routes that only ever get one window: a second request focuses the existing one.
-const SINGLE_WINDOW_ROUTES = new Set(['/render', '/action-graph', '/action-graph-legacy'])
+const SINGLE_WINDOW_ROUTES = new Set(['/render', '/action-graph'])
 const singleWindows = new Map<string, BrowserWindow>()
 
 // Routes that need room (node editors): bigger window and minimum size.
-const LARGE_ROUTES = new Set(['/action-graph', '/action-graph-legacy'])
+const LARGE_ROUTES = new Set(['/action-graph'])
 
 // `route` may carry a query for a deep link (/action-graph?flow=publish): only its
 // path is checked against the lists, the whole route goes into the hash.
@@ -199,13 +203,21 @@ function createDetachedWindow(route: string): void {
   }
   const large = LARGE_ROUTES.has(routePath)
   const cursor = screen.getCursorScreenPoint()
+  const area = screen.getDisplayNearestPoint(cursor).workArea
+  const width = Math.min(large ? 1440 : 1100, area.width)
+  const height = Math.min(large ? 900 : 760, area.height)
+  // Windows opened from a launcher (Tractor) are centered on the screen; a page
+  // dragged out opens under the cursor. Both stay inside the work area.
+  const centered = routePath === '/render'
+  const wantX = centered ? area.x + (area.width - width) / 2 : cursor.x - 120
+  const wantY = centered ? area.y + (area.height - height) / 2 : cursor.y - 16
   const child = new BrowserWindow({
-    width:           large ? 1440 : 1100,
-    height:          large ? 900 : 760,
+    width,
+    height,
     minWidth:        large ? 960 : 640,
     minHeight:       large ? 600 : 480,
-    x:               Math.max(0, cursor.x - 120),
-    y:               Math.max(0, cursor.y - 16),
+    x:               Math.round(Math.min(Math.max(area.x, wantX), area.x + area.width - width)),
+    y:               Math.round(Math.min(Math.max(area.y, wantY), area.y + area.height - height)),
     backgroundColor: '#0f0f0f',
     icon:            ICON,
     frame:           false,
@@ -221,7 +233,7 @@ function createDetachedWindow(route: string): void {
     child.on('closed', () => { if (singleWindows.get(routePath) === child) singleWindows.delete(routePath) })
   }
   if (!app.isPackaged) {
-    child.loadURL(`http://localhost:5173/?detached=1#${route}`).catch((err) =>
+    child.loadURL(`${DEV_ORIGIN}/?detached=1#${route}`).catch((err) =>
       console.error('[Electron] detached loadURL failed:', err))
   } else {
     child.loadFile(path.join(__dirname, '../dist/index.html'), { query: { detached: '1' }, hash: route })
@@ -314,6 +326,57 @@ ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
 })
 
+// Team page call links (ADR 0077): opened in the system browser, https only (no file:,
+// javascript: or custom protocol from a link typed in the shared chat).
+ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+  if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url) || url.length > 500) return false
+  await shell.openExternal(url)
+  return true
+})
+
+// Team voice channel (P5, 2026-10-31): open the Discord APP, not the browser. Only a
+// discord.com/channels/<guild>/<channel> link is turned into discord://; when no app handles
+// discord:// on this machine, the https link opens in the browser. Returns 'app' | 'web' | false.
+ipcMain.handle('shell:openDiscord', async (_event, url: string) => {
+  const m = typeof url === 'string' ? /^https:\/\/discord\.com\/channels\/(\d{1,25})\/(\d{1,25})$/.exec(url) : null
+  if (!m) return false
+  if (app.getApplicationNameForProtocol('discord://')) {
+    await shell.openExternal(`discord://-/channels/${m[1]}/${m[2]}`)
+    return 'app'
+  }
+  await shell.openExternal(url)
+  return 'web'
+})
+
+// Board paste (ADR 0074): the clipboard image written as a temp PNG, its path returned, so the
+// backend copies a file and the bytes never go through the API (ADR 0005). Older pastes go.
+const PASTE_PREFIX = 'flux_board_paste_'
+ipcMain.handle('clipboard:saveImage', () => {
+  const image = clipboard.readImage()
+  if (image.isEmpty()) return null
+  const dir = app.getPath('temp')
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith(PASTE_PREFIX)) continue
+      const full = path.join(dir, name)
+      if (Date.now() - fs.statSync(full).mtimeMs > 3600_000) fs.rmSync(full, { force: true })
+    }
+  } catch { /* cleanup is best effort */ }
+  const file = path.join(dir, `${PASTE_PREFIX}${Date.now()}.png`)
+  fs.writeFileSync(file, image.toPNG())
+  return file
+})
+
+// Board export (ADR 0075): bytes made by the page (PNG / PDF), written where the user picks.
+// IPC, not the HTTP API (ADR 0005). Returns the path, null when cancelled.
+ipcMain.handle('file:saveBytes', async (_event, opts: { defaultName: string; filters?: { name: string; extensions: string[] }[]; data: Uint8Array }) => {
+  if (!win) return null
+  const result = await dialog.showSaveDialog(win, { defaultPath: opts.defaultName, filters: opts.filters })
+  if (result.canceled || !result.filePath) return null
+  fs.writeFileSync(result.filePath, Buffer.from(opts.data))
+  return result.filePath
+})
+
 // Settings > "Desinstaller FLUX": start the NSIS uninstaller that sits next to FLUX.exe
 // ("Uninstall FLUX.exe") and quit so it can delete the app. The uninstaller itself
 // removes what FLUX added to the DCCs (scripts/installer.nsh, customUnInstall), so the
@@ -375,6 +438,10 @@ app.whenReady().then(async () => {
   // Windows: group under the FLUX identity so the taskbar shows our icon.
   if (process.platform === 'win32') app.setAppUserModelId('com.flux.pipeline')
 
+  // Security R2: navigation / window.open guards on every webContents (main, detached,
+  // splash), registered before any window exists. See security.ts.
+  installWebContentsGuards()
+
   // Newer installer in <FLUX_ROOT>/FLUX_UPDATE: offer the update before anything
   // starts (the splash is always-on-top and would hide the prompt). Accepted: the
   // installer is running, quit without starting the backend.
@@ -390,17 +457,31 @@ app.whenReady().then(async () => {
   // it (fetch, img/video src, WebSocket). Added here, below the renderer, so it
   // never triggers a CORS preflight. A 403 drops the cached token so the next
   // request refetches it (backend restarted with a new token).
+  // Security R2: only requests issued by the app's own page get the token
+  // (mayReceiveToken); a foreign page or frame reaches the backend without it.
   const backendFilter = { urls: [
     'http://127.0.0.1:8765/*', 'ws://127.0.0.1:8765/*',
     'http://localhost:8765/*', 'ws://localhost:8765/*',
   ] }
   session.defaultSession.webRequest.onBeforeSendHeaders(backendFilter, (details, callback) => {
+    if (!mayReceiveToken(details)) {
+      callback({ requestHeaders: details.requestHeaders })
+      return
+    }
     getApiToken().then((token) => {
       if (token) details.requestHeaders['X-Flux-Token'] = token
       callback({ requestHeaders: details.requestHeaders })
     })
   })
-  session.defaultSession.webRequest.onHeadersReceived(backendFilter, (details, callback) => {
+  // A session keeps ONE onHeadersReceived listener: the dev CSP for the Vite document
+  // (R2, see csp.ts) shares it with the backend 403 watch through a merged filter.
+  const headersFilter = { urls: app.isPackaged ? backendFilter.urls : [...backendFilter.urls, `${DEV_ORIGIN}/*`] }
+  session.defaultSession.webRequest.onHeadersReceived(headersFilter, (details, callback) => {
+    const cspHeaders = withDevCsp(details)
+    if (cspHeaders) {
+      callback({ responseHeaders: cspHeaders })
+      return
+    }
     if (details.statusCode === 403) invalidateApiToken()
     callback({})
   })

@@ -7,6 +7,11 @@ the FLUX backend can ping Mari and trigger a channel export.
 Protocol:
   {"action": "ping"}                                    -> {"status": "ok", "version": "..."}
   {"action": "export", "export_path": "...", "file_format": "tif"} -> {"status": "ok", "files": [...]}
+  Flows verbs (P6b step 9, 2026-10-24, API per the Mari docs, TO VALIDATE LIVE):
+  {"action": "open", "path" (project name or .mra) | "mesh", "discard"} -> {"status": "ok", "project"}
+  {"action": "save"} / {"action": "save_as", "path": ".mra"}           -> {"status": "ok", "project"}
+  {"action": "import", "kind": "image"|"object"|"version", "path"}      -> {"status": "ok"}
+  {"action": "run", "code", "secret"}   -> {"ok": true, "result": ..., "trace": ""} (machine secret)
 
 FLUX Export node (2026-09-26): a pass-through custom node the bridge registers in
 Mari (node palette category FLUX, and menu FLUX > FLUX Export). The artist plugs it
@@ -29,10 +34,14 @@ import threading
 
 try:
     import mari
-    _MARI_AVAILABLE = True
+    # Any package named "mari" imports (backend/tests/mari during run_tests.py): only
+    # Mari's own API counts, or the bridge binds the real port and FLUX shows Mari open.
+    _MARI_AVAILABLE = hasattr(mari, "app")
 except Exception:  # noqa: BLE001 - importable from the backend for a syntax check
     mari = None
     _MARI_AVAILABLE = False
+if not _MARI_AVAILABLE:
+    mari = None
 
 HOST = "127.0.0.1"
 # Base of Mari's assigned range (DCC_PORT_RANGES["Mari"]); env override for
@@ -714,8 +723,171 @@ def _do_export_nodes(geo, export_path: str, wanted: set, formats: dict, sizes: d
     return {"status": "ok", "files": files, "errors": errors, "mode": "nodes"}
 
 
+# ── Flows verbs (P6b step 9) ─────────────────────────────────────────────────
+
+def _secret() -> str:
+    """The machine secret: <script>.json written next to this script at install, else
+    %APPDATA%/FluxPipeline/bridge_secret.txt (a bridge started by exec() has no __file__)."""
+    try:
+        with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8") as fh:
+            value = str(json.load(fh).get("secret") or "")
+            if value:
+                return value
+    except (OSError, ValueError, NameError):
+        pass
+    appdata = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+    try:
+        with open(os.path.join(appdata, "FluxPipeline", "bridge_secret.txt"), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _run_code(cmd: dict, namespace: dict, soft: str) -> dict:
+    """`run`: free Python in the soft, refused without the machine secret."""
+    import hmac
+    import traceback
+
+    expected = _secret()
+    if not expected or not hmac.compare_digest(str(cmd.get("secret") or ""), expected):
+        return {"ok": False, "status": "error",
+                "error": "secret du bridge refuse : reinstalle le bridge %s depuis FLUX" % soft}
+    code = str(cmd.get("code") or "")
+
+    def job():
+        ns = dict(namespace, __name__="__flux_flow__")
+        try:
+            exec(compile(code, "<flux flow>", "exec"), ns)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "error", "error": str(exc), "trace": traceback.format_exc()}
+        result = ns.get("result")
+        try:
+            json.dumps(result)
+        except (TypeError, ValueError):
+            result = repr(result)
+        return {"ok": True, "status": "ok", "result": result, "trace": ""}
+
+    return _on_main_thread(job, timeout=float(cmd.get("timeout") or 600.0))
+
+
+def _verb(fn, timeout: float = 600.0) -> dict:
+    """fn() on the main thread, errors as {"status": "error"}."""
+    def job():
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            _diag("verb failed: %r" % (exc,))
+            return {"status": "error", "msg": str(exc)}
+
+    return _on_main_thread(job, timeout=timeout)
+
+
+def _project():
+    return mari.projects.current()
+
+
+def _is_modified(proj) -> bool:
+    """Unknown (no isModified in this Mari) counts as modified: never lose work silently."""
+    fn = getattr(proj, "isModified", None)
+    return True if fn is None else bool(fn())
+
+
+def _do_open(cmd: dict) -> dict:
+    path, mesh, discard = str(cmd.get("path") or ""), str(cmd.get("mesh") or ""), bool(cmd.get("discard"))
+    if not path and not mesh:
+        return {"status": "error", "msg": "open : path (nom de projet ou .mra) ou mesh attendu"}
+
+    def fn():
+        proj = _project()
+        if proj is not None:
+            if _is_modified(proj) and not discard:
+                return {"status": "error",
+                        "msg": "projet modifie non enregistre : enregistre-le ou coche discard_changes"}
+            mari.projects.close()
+        if mesh:
+            name = os.path.splitext(os.path.basename(mesh))[0]
+            mari.projects.create(name, mesh, [], [])
+        elif path.lower().endswith(".mra"):
+            info = mari.projects.extract(path)
+            mari.projects.open(info.uuid() if hasattr(info, "uuid") else info.name())
+        else:
+            mari.projects.open(path)
+        proj = _project()
+        return {"status": "ok", "project": proj.name() if proj is not None else ""}
+
+    return _verb(fn, timeout=1800.0)
+
+
+def _do_save(cmd: dict) -> dict:
+    def fn():
+        proj = _project()
+        if proj is None:
+            return {"status": "error", "msg": "Aucun projet ouvert dans Mari"}
+        proj.save(force_save=True)
+        return {"status": "ok", "project": proj.name()}
+
+    return _verb(fn, timeout=1800.0)
+
+
+def _do_save_as(cmd: dict) -> dict:
+    """Mari keeps its projects in its own cache: the file of a project is its .mra archive.
+    The project is saved, closed (archive works on a closed project), archived, reopened."""
+    path = str(cmd.get("path") or "")
+    if not path.lower().endswith(".mra"):
+        return {"status": "error", "msg": "save_as : un fichier .mra attendu (archive Mari)"}
+
+    def fn():
+        proj = _project()
+        if proj is None:
+            return {"status": "error", "msg": "Aucun projet ouvert dans Mari"}
+        name = proj.name()
+        key = proj.uuid() if hasattr(proj, "uuid") else name
+        proj.save(force_save=True)
+        mari.projects.close()
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            mari.projects.archive(name, path)
+        finally:
+            mari.projects.open(key)
+        return {"status": "ok", "project": path}
+
+    return _verb(fn, timeout=4 * 3600.0)
+
+
+def _do_import(cmd: dict) -> dict:
+    kind, path = str(cmd.get("kind") or "image"), str(cmd.get("path") or "")
+    if not path:
+        return {"status": "error", "msg": "import : path attendu"}
+
+    def fn():
+        if _project() is None:
+            return {"status": "error", "msg": "Aucun projet ouvert dans Mari"}
+        if kind == "image":
+            mari.images.load(path)
+        elif kind == "object":
+            mari.geo.load(path)
+        elif kind == "version":
+            geo = mari.geo.current()
+            if geo is None:
+                return {"status": "error", "msg": "aucun objet courant dans Mari"}
+            geo.addVersion(path, os.path.splitext(os.path.basename(path))[0])
+        else:
+            return {"status": "error", "msg": "import : kind inconnu %s (image, object, version)" % kind}
+        return {"status": "ok"}
+
+    return _verb(fn, timeout=1800.0)
+
+
+_VERBS = {"open": _do_open, "save": _do_save, "save_as": _do_save_as, "import": _do_import,
+          "run": lambda cmd: _run_code(cmd, {"mari": mari}, "Mari")}
+
+
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
+    if action in _VERBS:
+        if not _MARI_AVAILABLE:
+            return {"status": "error", "msg": "mari module not available"}
+        return _VERBS[action](cmd)
     if action == "ping":
         # No Mari API call here: this runs on a socket thread (the version is read once,
         # on the main thread, when the bridge starts).

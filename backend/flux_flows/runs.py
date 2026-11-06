@@ -84,6 +84,19 @@ def preview(value: Any, limit: int = PREVIEW_CHARS) -> str:
     return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
 
 
+MAX_OUTPUT_BYTES = 64 * 1024
+
+
+def output_value(value: Any) -> Any:
+    """A flow output kept in the record (P7: shown by a page widget): the JSON value itself
+    when it is small, else its preview text."""
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return preview(value)
+    return json.loads(text) if len(text) <= MAX_OUTPUT_BYTES else preview(value)
+
+
 def clip_value(value: Any) -> str:
     """Link value kept in the record: 1 KB at most."""
     return preview(value, MAX_VALUE_BYTES)
@@ -168,9 +181,15 @@ def purge(folder: Optional[Path], flow: str, *, keep_real: int = KEEP_REAL, keep
     return removed
 
 
+def trigger_matches(record: Dict[str, Any], event: str) -> bool:
+    trigger = record.get("trigger") or {}
+    return event in (trigger.get("event"), trigger.get("button"), trigger.get("page_button"))
+
+
 def list_runs(folders: Iterable[Optional[Path]], *, flow: Optional[str] = None, status: Optional[str] = None,
-              mode: Optional[str] = None, scope: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    """Run summaries, newest first."""
+              mode: Optional[str] = None, scope: Optional[str] = None, event: Optional[str] = None,
+              limit: int = 50) -> List[Dict[str, Any]]:
+    """Run summaries, newest first. *event*: the start node id or the page button_id (P7)."""
     paths: List[Path] = []
     for folder in folders:
         if folder is None or not Path(folder).is_dir():
@@ -185,7 +204,7 @@ def list_runs(folders: Iterable[Optional[Path]], *, flow: Optional[str] = None, 
         if data is None:
             continue
         if (status and data.get("status") != status) or (mode and data.get("mode") != mode) \
-                or (scope and data.get("scope") != scope):
+                or (scope and data.get("scope") != scope) or (event and not trigger_matches(data, event)):
             continue
         out.append(summary(data))
         if len(out) >= limit:

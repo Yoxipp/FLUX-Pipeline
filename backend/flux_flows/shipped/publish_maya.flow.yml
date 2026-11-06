@@ -1,0 +1,53 @@
+flux_flow: 2
+name: publish_maya
+label: "Publish Maya"
+description: "Flow de publish Maya (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish, flux.refuse_publish) -> mayPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher le lance quand le projet est en publish v2 (Parametres avances du projet, ADR 0070) ; sinon Run a la main."
+run_policy: queue
+interface:
+  inputs:
+    - {id: name, type: str, label: "Nom FLUX (tokens, sans version)", default: ""}
+    - {id: format, type: select, label: "Format", default: ".ma", options: [".ma", ".mb", ".abc", ".fbx", ".obj", ".usd"]}
+    - {id: scope, type: select, label: "Scene ou selection", default: "scene", options: ["scene", "selection"]}
+    - {id: description, type: str, label: "Description", default: ""}
+    - {id: frame_range, type: str, label: "Plage (caches, anim)", default: ""}
+    - {id: options, type: dict, label: "Options d'export du Publisher"}
+    - {id: port, type: int, label: "Port Maya vise (0 = instance active)", default: 0}
+  outputs:
+    - {id: path, type: path, label: "Fichier LAST publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+nodes:
+  ev: {type: event.publish_request, pos: [0, 160], params: {soft: maya}}
+  inst: {type: session.may_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
+  in_name: {type: data.flow_input, pos: [320, 400], params: {id: name}}
+  in_format: {type: data.flow_input, pos: [320, 520], params: {id: format}}
+  in_description: {type: data.flow_input, pos: [320, 760], params: {id: description}}
+  in_frame_range: {type: data.flow_input, pos: [320, 880], params: {id: frame_range}}
+  in_options: {type: data.flow_input, pos: [320, 1000], params: {id: options}}
+  in_port: {type: data.flow_input, pos: [320, 1120], params: {id: port}}
+  pub: {type: dcc.may_publish, pos: [640, 160], params: {scope: "${scope}"}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+links:
+  - {from: ev.then, to: inst.exec}
+  - {from: inst.then, to: pub.exec}
+  - {from: inst.session, to: pub.session}
+  - {from: in_name.value, to: pub.name}
+  - {from: in_format.value, to: pub.format}
+  - {from: in_description.value, to: pub.description}
+  - {from: in_frame_range.value, to: pub.frame_range}
+  - {from: in_options.value, to: pub.options}
+  - {from: in_port.value, to: pub.port}
+  - {from: pub.then, to: out_path.exec}
+  - {from: pub.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: pub.version, to: out_version.value}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: pub.files, to: out_files.value}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: pub.warnings, to: out_warnings.value}
+notes:
+  - {id: k1, pos: [0, 1280], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et mayPublish (If + RefusePublish : le message est montre tel quel dans le Publisher).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

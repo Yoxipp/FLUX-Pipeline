@@ -1,0 +1,32 @@
+board: 1
+id: planning
+label: Planning
+label_en: Planning
+description: "Grille semaines x equipes, a remplir de notes."
+description_en: "Weeks x teams grid, to fill with notes."
+items:
+  - {key: "title", type: "text", x: 0, y: -80, w: 900, h: 50, z: 2, font_size: 32, bold: true, text: "Planning", text_en: "Planning"}
+  - {key: "w1", type: "shape", shape: "round", x: 180, y: 0, w: 200, h: 44, z: 0, color: "blue", stroke: "none", bold: true, text: "Semaine 1", text_en: "Week 1"}
+  - {key: "w2", type: "shape", shape: "round", x: 400, y: 0, w: 200, h: 44, z: 0, color: "blue", stroke: "none", bold: true, text: "Semaine 2", text_en: "Week 2"}
+  - {key: "w3", type: "shape", shape: "round", x: 620, y: 0, w: 200, h: 44, z: 0, color: "blue", stroke: "none", bold: true, text: "Semaine 3", text_en: "Week 3"}
+  - {key: "w4", type: "shape", shape: "round", x: 840, y: 0, w: 200, h: 44, z: 0, color: "blue", stroke: "none", bold: true, text: "Semaine 4", text_en: "Week 4"}
+  - {key: "model", type: "shape", shape: "round", x: 0, y: 60, w: 160, h: 120, z: 0, color: "purple", stroke: "none", bold: true, text: "Modeling", text_en: "Modeling"}
+  - {key: "model_1", type: "shape", shape: "rect", x: 180, y: 60, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "model_2", type: "shape", shape: "rect", x: 400, y: 60, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "model_3", type: "shape", shape: "rect", x: 620, y: 60, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "model_4", type: "shape", shape: "rect", x: 840, y: 60, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "rig", type: "shape", shape: "round", x: 0, y: 200, w: 160, h: 120, z: 0, color: "purple", stroke: "none", bold: true, text: "Rigging", text_en: "Rigging"}
+  - {key: "rig_1", type: "shape", shape: "rect", x: 180, y: 200, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "rig_2", type: "shape", shape: "rect", x: 400, y: 200, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "rig_3", type: "shape", shape: "rect", x: 620, y: 200, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "rig_4", type: "shape", shape: "rect", x: 840, y: 200, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "anim", type: "shape", shape: "round", x: 0, y: 340, w: 160, h: 120, z: 0, color: "purple", stroke: "none", bold: true, text: "Animation", text_en: "Animation"}
+  - {key: "anim_1", type: "shape", shape: "rect", x: 180, y: 340, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "anim_2", type: "shape", shape: "rect", x: 400, y: 340, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "anim_3", type: "shape", shape: "rect", x: 620, y: 340, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "anim_4", type: "shape", shape: "rect", x: 840, y: 340, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "light", type: "shape", shape: "round", x: 0, y: 480, w: 160, h: 120, z: 0, color: "purple", stroke: "none", bold: true, text: "Lighting", text_en: "Lighting"}
+  - {key: "light_1", type: "shape", shape: "rect", x: 180, y: 480, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "light_2", type: "shape", shape: "rect", x: 400, y: 480, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "light_3", type: "shape", shape: "rect", x: 620, y: 480, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}
+  - {key: "light_4", type: "shape", shape: "rect", x: 840, y: 480, w: 200, h: 120, z: -1, color: "white", stroke: "grey", text: "", text_en: ""}

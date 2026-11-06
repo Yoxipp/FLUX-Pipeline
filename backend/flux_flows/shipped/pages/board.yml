@@ -1,0 +1,11 @@
+page: 1
+id: board
+label: Board
+icon: "layout-dashboard"
+scope: shipped
+description: "Board partage facon Miro : notes, cartes, images et liens. Les donnees sont rangees par projet."
+data:
+  - {id: wall, label: Board, kind: board}
+layout:
+  - row:
+      - {id: board, kind: board, label: Board, source: {data: wall}, height: 640}

@@ -13,9 +13,10 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ClipboardList, Check, Pencil, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { ClipboardList, Check, KeyRound, Lock, Pencil, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '../../api/client'
+import { api, type UserProfile } from '../../api/client'
+import { EMPTY_NEW_ARTIST, NewArtistFields, newArtistError, newArtistPayload, type NewArtistValue } from '../FirstLaunch'
 import { Btn, SecTitle } from '../../components/shared/ui'
 import { ExpandPicker } from '../../components/shared/ExpandPicker'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
@@ -28,6 +29,8 @@ import { TemplateEditor } from '../TemplateEditor'
 import { DocTab } from './DocTab'
 import { AdvancedConfirm, UninstallConfirm } from './SettingsDialogs'
 import { UserSettings } from './UserSettings'
+import { ProjectRoles } from './ProjectRoles'
+import { NotifyProjectSettings } from './NotifySettings'
 
 type Tab = 'user' | 'project' | 'advanced' | 'doc'
 type Sub = 'settings' | 'disk' | 'templates'
@@ -117,6 +120,8 @@ function ProjectTab({ currentUser }: { currentUser: string }) {
         <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>Colonnes, statuts et dépendances du suivi : Production &gt; Settings.</span>
         <Btn sm ghost onClick={() => navigate('/production')}>Production</Btn>
       </div>
+      <ProjectRoles project={project} />
+      <NotifyProjectSettings project={project} />
       <SecTitle>Artistes du pipe</SecTitle>
       <NewArtist />
       <OtherUsers currentUser={currentUser} />
@@ -137,64 +142,121 @@ function AdvancedTab() {
   )
 }
 
-// Create an artist: the backend creates a user on first switch to it, so this switches
-// to the new name and reloads (same call the TitleBar popover uses).
+// Create an artist from first + last name (identifier computed by the backend, optional
+// password), switch to it and reload.
 function NewArtist() {
-  const [name, setName] = useState('')
+  const [value, setValue] = useState<NewArtistValue>(EMPTY_NEW_ARTIST)
   const [busy, setBusy] = useState(false)
   const create = async () => {
-    const target = name.trim().toUpperCase()
-    if (!target) return
+    const err = newArtistError(value)
+    if (err) { toast.error(err); return }
     setBusy(true)
-    try { await api.updateSettings({ username: target }); window.location.reload() }
+    try { await api.createUser({ ...newArtistPayload(value), switch: true }); window.location.reload() }
     catch (e) { toast.error(e instanceof Error ? e.message : String(e)); setBusy(false) }
   }
+  const ready = !!value.first.trim() && !!value.last.trim()
   return (
-    <div className="card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-      <UserPlus size={14} strokeWidth={1.75} color="var(--ink-3)" />
-      <input value={name} onChange={e => setName(e.target.value.toUpperCase())} placeholder="NOUVEL ARTISTE"
-        onKeyDown={e => { if (e.key === 'Enter') void create() }}
-        style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule-2)', borderRadius: 5, textTransform: 'uppercase' }} />
-      <Btn sm ghost disabled={busy || !name.trim()} title="Crée l'artiste et bascule dessus" onClick={() => void create()}>Créer et basculer</Btn>
+    <div className="card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <UserPlus size={14} strokeWidth={1.75} color="var(--ink-3)" style={{ marginTop: 6 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <NewArtistFields compact value={value} onChange={setValue} onSubmit={() => void create()} />
+      </div>
+      <Btn sm ghost disabled={busy || !ready} title="Crée l'artiste et bascule dessus" onClick={() => void create()}>Créer et basculer</Btn>
+    </div>
+  )
+}
+
+// First / last name of an artist being renamed, with the identifier it would get (server
+// side: initials of the last name, ADR 0079; no last name = the first name alone).
+function RenameFields({ user, first, last, onChange, onSubmit, onCancel }: {
+  user: string; first: string; last: string
+  onChange: (first: string, last: string) => void; onSubmit: () => void; onCancel: () => void
+}) {
+  const [preview, setPreview] = useState<string | null>(null)
+  useEffect(() => {
+    if (!first.trim()) { setPreview(null); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.previewRename(user, first.trim(), last.trim())
+        .then(r => { if (alive) setPreview(r.id) })
+        .catch(() => { if (alive) setPreview(null) })
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [user, first, last])
+  const input: React.CSSProperties = {
+    flex: 1, minWidth: 0, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)',
+    color: 'var(--ink)', border: '1px solid var(--rule-3)', borderRadius: 5,
+  }
+  const key = (e: React.KeyboardEvent) => { if (e.key === 'Enter') onSubmit(); if (e.key === 'Escape') onCancel() }
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input autoFocus value={first} placeholder="Prénom" onChange={e => onChange(e.target.value, last)} onKeyDown={key} style={input} />
+        <input value={last} placeholder="Nom (facultatif)" onChange={e => onChange(first, e.target.value)} onKeyDown={key} style={input} />
+      </div>
+      <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+        {preview ? `${user} → ${preview}${preview === user ? ' (identifiant inchangé)' : ''}` : 'Identifiant : (prénom requis)'}
+      </span>
     </div>
   )
 }
 
 // Rename / delete OTHER artists (old accounts). One's own user is in the User tab.
+// Rename = first / last name for a lead or supervisor; delete = supervisor.
 function OtherUsers({ currentUser }: { currentUser: string }) {
-  const [users, setUsers] = useState<string[]>([])
+  const { project } = useProject()
+  const [profiles, setProfiles] = useState<UserProfile[]>([])
   const [renaming, setRenaming] = useState<string | null>(null)
-  const [value, setValue] = useState('')
+  const [names, setNames] = useState({ first: '', last: '' })
   const [confirm, setConfirm] = useState<string | null>(null)
-  const refresh = () => api.listUsers().then(d => setUsers(d.users.filter(u => u.toUpperCase() !== currentUser.toUpperCase()))).catch(() => setUsers([]))
+  const [confirmReset, setConfirmReset] = useState<string | null>(null)
+  const refresh = () => api.listUserProfiles()
+    .then(d => setProfiles(d.profiles.filter(p => p.id.toUpperCase() !== currentUser.toUpperCase())))
+    .catch(() => setProfiles([]))
   useEffect(() => { void refresh() }, [currentUser])   // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (call: () => Promise<{ message: string }>) => {
-    try { toast.success((await call()).message); setRenaming(null); setConfirm(null); await refresh() }
-    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+    try { toast.success((await call()).message); setRenaming(null); setConfirm(null); setConfirmReset(null); await refresh() }
+    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }   // 403 messages explain the needed role
   }
-  if (!users.length) return <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun autre utilisateur.</div>
+  const proj = project || undefined
+  if (!profiles.length) return <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun autre utilisateur.</div>
   return (
     <div className="card" style={{ padding: '4px 12px' }}>
-      {users.map(u => (
-        <div key={u} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderBottom: '1px solid var(--rule)' }}>
+      {profiles.map(p => { const u = p.id; const full = `${p.first_name} ${p.last_name}`.trim(); return (
+        <div key={u}style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderBottom: '1px solid var(--rule)' }}>
           {renaming === u
-            ? <input autoFocus value={value} onChange={e => setValue(e.target.value.toUpperCase())}
-                onKeyDown={e => { if (e.key === 'Enter') void run(() => api.renameUser(u, value.trim())); if (e.key === 'Escape') setRenaming(null) }}
-                style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule-3)', borderRadius: 5 }} />
-            : <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>{u}</span>}
+            ? <RenameFields user={u} first={names.first} last={names.last} onChange={(first, last) => setNames({ first, last })}
+                onSubmit={() => void run(() => api.renameUserByName(u, names.first.trim(), names.last.trim(), proj))}
+                onCancel={() => setRenaming(null)} />
+            : <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {full ? `${full} (${u})` : u}
+                {p.has_password && <Lock size={10} strokeWidth={1.75} color="var(--ink-4)" />}
+              </span>}
           {renaming === u ? <>
-            <Btn sm ghost title="Valider" onClick={() => void run(() => api.renameUser(u, value.trim()))}><Check size={11} /></Btn>
+            <Btn sm ghost title="Valider" disabled={!names.first.trim()}
+              onClick={() => void run(() => api.renameUserByName(u, names.first.trim(), names.last.trim(), proj))}><Check size={11} /></Btn>
             <Btn sm ghost title="Annuler" onClick={() => setRenaming(null)}><X size={11} /></Btn>
           </> : confirm === u ? <>
             <span style={{ fontSize: 11, color: 'var(--err)' }}>Supprimer {u} et ses données ?</span>
-            <Btn sm ghost title="Confirmer" onClick={() => void run(() => api.deleteUser(u))} style={{ color: 'var(--err)' }}><Check size={11} /></Btn>
+            <Btn sm ghost title="Confirmer" onClick={() => void run(() => api.deleteUser(u, proj))} style={{ color: 'var(--err)' }}><Check size={11} /></Btn>
             <Btn sm ghost title="Annuler" onClick={() => setConfirm(null)}><X size={11} /></Btn>
+          </> : confirmReset === u ? <>
+            <span style={{ fontSize: 11, color: 'var(--err)' }}>Réinitialiser le mot de passe de {u} ?</span>
+            <Btn sm ghost title="Confirmer"
+              onClick={() => void run(async () => { await api.resetUserPassword(u, proj ?? ''); return { message: `Mot de passe de ${u} réinitialisé` } })}
+              style={{ color: 'var(--err)' }}><Check size={11} /></Btn>
+            <Btn sm ghost title="Annuler" onClick={() => setConfirmReset(null)}><X size={11} /></Btn>
           </> : <>
-            <Btn sm ghost title="Renommer" onClick={() => { setRenaming(u); setValue(u); setConfirm(null) }}><Pencil size={11} /></Btn>
-            <Btn sm ghost title="Supprimer" onClick={() => { setConfirm(u); setRenaming(null) }}><Trash2 size={11} /></Btn>
+            {p.has_password && <Btn sm ghost title="Réinitialiser le mot de passe" onClick={() => { setConfirmReset(u); setRenaming(null); setConfirm(null) }}><KeyRound size={11} /></Btn>}
+            <Btn sm ghost title="Renommer (prénom et nom)" onClick={() => {
+              setRenaming(u); setConfirm(null); setConfirmReset(null)
+              // Artists without a profile: their identifier is their first name.
+              setNames({ first: p.first_name || u.charAt(0) + u.slice(1).toLowerCase(), last: p.last_name })
+            }}><Pencil size={11} /></Btn>
+            <Btn sm ghost title="Supprimer" onClick={() => { setConfirm(u); setRenaming(null); setConfirmReset(null) }}><Trash2 size={11} /></Btn>
           </>}
         </div>
-      ))}
+      )})}
     </div>
   )
 }

@@ -31,11 +31,20 @@ PORT_REF_RE = re.compile(r"^([a-z][a-z0-9_]{0,30})\.([a-z][a-z0-9_]*)$")
 
 # Static routes of /flows: a flow cannot take one of these names.
 RESERVED_NAMES = frozenset(
-    "catalog runs host nodes pages validate migrate preview events ws rights".split()
+    "catalog runs host nodes pages validate migrate preview events ws rights bridges".split()
 )
 # Flow variable / interface ids that would shadow $FLUX or a context key.
 RESERVED_VARS = frozenset("flux project asset shot seq user date time".split())
-INTERFACE_TYPES = frozenset("bool int float str path dir pattern list[str] select".split())
+# dict (P8 n°4): the Publisher form options of publish_<soft>; no page widget (pages.KIND_FOR_TYPE).
+INTERFACE_TYPES = frozenset("bool int float str path dir pattern list[str] select dict".split())
+# P6a: a DCC node shipped as a locked subflow (node_type) takes a session and DCC nodes
+# from its caller; these inputs are linked, never typed in a page form.
+LINK_ONLY_TYPES = frozenset({"dcc_node", "list[dcc_node]", "publish"})
+SESSION_TYPE_RE = re.compile(r"^session\[([a-z][a-z0-9_]*|\*)\]$")
+
+
+def interface_type_ok(kind: str) -> bool:
+    return kind in INTERFACE_TYPES or kind in LINK_ONLY_TYPES or bool(SESSION_TYPE_RE.match(kind))
 SUBNET_TYPE = "subnet"
 
 MAX_BYTES = 1024 * 1024
@@ -72,8 +81,9 @@ class InterfaceInput(_Strict):
 
     @model_validator(mode="after")
     def _check(self) -> "InterfaceInput":
-        if self.type not in INTERFACE_TYPES:
-            raise ValueError(f"type '{self.type}' inconnu (attendu : {', '.join(sorted(INTERFACE_TYPES))})")
+        if not interface_type_ok(self.type):
+            raise ValueError(f"type '{self.type}' inconnu (attendu : {', '.join(sorted(INTERFACE_TYPES))}, "
+                             "ou session[<logiciel>], dcc_node, publish pour un node DCC)")
         if (self.options is not None) != (self.type == "select"):
             raise ValueError("'options' va avec le type select, et seulement lui")
         return self
@@ -289,15 +299,15 @@ def iter_nodes(flow: Flow) -> Iterator[Tuple[str, Node]]:
 def v1_limit_issues(flow: Flow) -> List[Dict[str, str]]:
     """Values the schema stores for V2 but V1 refuses (01 §2 "Reserve V2").
 
-    ForEach ``mode`` is kept and ignored; an Instance in ``farm`` mode is an
-    error. Consumed by the validation (P4).
+    An Instance in ``farm`` mode is an error (ADR 0067: removed, Dispatcher nodes instead).
+    Consumed by the validation (P4).
     """
     issues = []
     for node_id, node in iter_nodes(flow):
         if node.type.startswith("session.") and node.type.endswith("_instance") \
                 and node.params.get("mode") == "farm":
             issues.append({"code": "E_PARAM_INVALID", "node": node_id,
-                           "message": "le mode farm n'existe pas encore (V2)"})
+                           "message": "le mode farm n'existe plus : utilise les nodes Dispatcher (Submit, RenderShot)"})
     return issues
 
 

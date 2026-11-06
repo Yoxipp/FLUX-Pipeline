@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core import paths
+from features.render import studio_env
 from features.render import team_settings as ts
 
 
@@ -16,9 +17,10 @@ class TeamSettingsTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.file = Path(self._tmp.name) / "render.json"
-        p = patch.object(paths, "get_project_render_path", lambda name: self.file)
-        p.start()
-        self.addCleanup(p.stop)
+        for p in (patch.object(paths, "get_project_render_path", lambda name: self.file),
+                  patch.object(studio_env, "environment_file", lambda: None)):  # hermetic: no studio environment
+            p.start()
+            self.addCleanup(p.stop)
 
     def test_defaults_on_missing_file(self):
         self.assertEqual(ts.read_settings("proj"), ts.DEFAULTS)
@@ -63,7 +65,7 @@ class TeamSettingsTests(unittest.TestCase):
         got = ts.read_settings("proj")
         self.assertEqual(got["priority"], 1)
         self.assertEqual(got["chunk_size"], 8)
-        self.assertEqual(got["renderer"], "renderman")  # default since 2026-10-23
+        self.assertEqual(got["renderer"], "")  # invalid value: neutral default (none)
         self.assertNotIn("extra", got)
         self.assertEqual(got["schedule"]["start"], "18:00")
         self.assertEqual(got["schedule"]["end"], "07:30")

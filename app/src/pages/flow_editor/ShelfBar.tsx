@@ -3,7 +3,7 @@
 // created at the drop point (dataTransfer application/x-flux-node = type id), click = centre
 // of the view. "Catalogue" opens the drawer of every node (NodePalette).
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Library } from 'lucide-react'
 import { FAMILIES, FAMILY_INFO } from './families'
 import { iconFor } from './icons'
@@ -20,14 +20,17 @@ export function shelfItems(catalog: CatalogEntry[] | null, fam: Family): Catalog
   return (ranked.length ? ranked : list).slice(0, SHELF_MAX)
 }
 
-export function ShelfBar({ catalog, paletteOpen, onPick, onTogglePalette }: {
+export function ShelfBar({ catalog, paletteOpen, onPick, onTogglePalette, flowKey, startFamily = 'flux' }: {
   catalog: CatalogEntry[] | null
   paletteOpen: boolean
   onPick: (e: CatalogEntry) => void
   onTogglePalette: () => void
+  flowKey?: string             // the open flow: the tab is reset when it changes
+  startFamily?: Family         // R1 audit F4: Evenements for a flow that only has its start
 }) {
   const { tr, lang } = useTr()
-  const [fam, setFam] = useState<Family>('flux')
+  const [fam, setFam] = useState<Family>(startFamily)
+  useEffect(() => { setFam(startFamily) }, [flowKey])  // eslint-disable-line react-hooks/exhaustive-deps
   const items = shelfItems(catalog, fam)
   return (
     <div style={{ flexShrink: 0, borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>

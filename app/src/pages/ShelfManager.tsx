@@ -7,7 +7,7 @@ import { ConnectionPill } from '../components/shared/ConnectionPill'
 import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
-import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../hooks/useVisibleDccs'
 import { SOFTWARE } from '../lib/dccs'
 import { useTr } from '../i18n'
 import { StaleFilesDialog, type StaleItem } from './shelf_manager/StaleFilesDialog'
@@ -52,9 +52,9 @@ type LogEntry = { type: 'ok' | 'err' | 'info'; msg: string }
 
 export function ShelfManager() {
   const { tr } = useTr()
-  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const { isVisible: isDccEnabled } = useVisibleDccs()
   const [dcc, setDcc] = useState('Houdini')
-  // Same software list as the launcher: the ones enabled in Settings > Logiciels.
+  // Same software list as the launcher: Settings > Logiciels narrowed by the work profile.
   const dccEnabled = useCallback((name: string) => {
     const key = SOFTWARE.find(x => x.name === name)?.key
     return !key || isDccEnabled(key)
