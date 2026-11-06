@@ -24,9 +24,10 @@ import hou
 
 FLUX_PORT = 48884
 
-# Benign client-side disconnects (FLUX cancels / closes the socket before we
-# finish writing). WinError 10053 surfaces as ConnectionAbortedError. Swallow
-# these with a single line — they are not server faults, so never a stack trace.
+# Benign client-side disconnects: the FLUX status probe gives up on a busy main thread
+# before we finish writing. WinError 10053 surfaces as ConnectionAbortedError. Swallowed
+# silently: not a server fault, and a line in the Houdini console every few seconds is
+# pure noise for the artist (2026-11-06).
 _CLIENT_ABORT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
 
 _request_queue: "queue.Queue[tuple]" = queue.Queue()
@@ -64,9 +65,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        except _CLIENT_ABORT as exc:
-            # FLUX hung up before the response was flushed — expected on cancel.
-            print(f"[FLUX] client disconnected during response ({type(exc).__name__})")
+        except _CLIENT_ABORT:
+            pass
 
     def _dispatch(self, kind: str, payload=None, timeout: float = 8.0) -> dict:
         req_id = str(uuid.uuid4())

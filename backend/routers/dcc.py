@@ -92,6 +92,11 @@ class LaunchRequest(BaseModel):
     exe_path: str | None = None
 
 
+# Seconds between two status pushes. Each one reaches the DCC bridges: on a busy Houdini
+# a probe queues work on the main thread, so it must stay rare (2026-11-06, was 2 s).
+_STATUS_PUSH_S = 5
+
+
 async def _probe_all_dccs() -> dict:
     """Discover every DCC's running instances in parallel. Returns status dict.
 
@@ -2991,13 +2996,13 @@ async def houdini_importer_open_hub() -> dict:
 
 @router.websocket("/ws/status")
 async def dcc_status_websocket(websocket: WebSocket):
-    """Push DCC status every 2 seconds via WebSocket (probes run in parallel)."""
+    """Push DCC status every few seconds via WebSocket (probes run in parallel)."""
     await websocket.accept()
     try:
         while True:
             status = await _probe_all_dccs()
             await websocket.send_json(status)
-            await asyncio.sleep(2)
+            await asyncio.sleep(_STATUS_PUSH_S)
     except (WebSocketDisconnect, RuntimeError):
         pass
 
