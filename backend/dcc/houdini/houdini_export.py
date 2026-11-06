@@ -427,23 +427,34 @@ def export_via_node(
                     except Exception:
                         pass
 
-            if hasattr(_rop, 'render'):
-                if _fr:
-                    _rop.render(frame_range=_fr)
-                else:
-                    _rop.render()
-            else:
-                # SOP-level ROPs such as usdexport have no render(): drive trange + Execute.
-                if _rop.parm('trange') is not None:
+            try:
+                if hasattr(_rop, 'render'):
                     if _fr:
-                        _rop.parm('trange').set(1)
-                        _ft = _rop.parmTuple('f')
-                        if _ft is not None:
-                            _ft.deleteAllKeyframes()
-                            _ft.set(tuple(_fr) + (1,) * (3 - len(_fr)))
+                        _rop.render(frame_range=_fr)
                     else:
-                        _rop.parm('trange').set(0)
-                _rop.parm('execute').pressButton()
+                        _rop.render()
+                else:
+                    # SOP-level ROPs such as usdexport have no render(): drive trange + Execute.
+                    if _rop.parm('trange') is not None:
+                        if _fr:
+                            _rop.parm('trange').set(1)
+                            _ft = _rop.parmTuple('f')
+                            if _ft is not None:
+                                _ft.deleteAllKeyframes()
+                                _ft.set(tuple(_fr) + (1,) * (3 - len(_fr)))
+                        else:
+                            _rop.parm('trange').set(0)
+                    _rop.parm('execute').pressButton()
+            except Exception as _exc:
+                # Houdini names the node that failed, often far upstream of the exported
+                # one (object merge, inputs): say which node was exported and at which frame.
+                import re as _re
+                _msg = str(_exc).replace('The attempted operation failed.', '').strip()
+                _time = _re.search(r'at time (-?[0-9]+(?:[.][0-9]+)?)', _msg)
+                _where = ' at frame %g' % hou.timeToFrame(float(_time.group(1))) if _time else ''
+                raise RuntimeError(
+                    'Export of %s failed%s. The error can come from any node it depends on '
+                    '(inputs, object merges):\\n%s' % (_n.path(), _where, _msg))
             # A temporary ROP is gone after the export: no path to rewrite later.
             result = {{"ok": True, "rop": None if _rop in _tmp else _rop.path()}}
         finally:

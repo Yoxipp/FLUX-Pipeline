@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from dcc.houdini import client as client_mod
@@ -48,6 +50,39 @@ class ClientParam(unittest.TestCase):
             houdini_import.set_import_path("/obj/geo1/file1", "/tmp/a.abc", client=fake)
         single.run.assert_not_called()
         self.assertEqual(len(fake.codes), 3)
+
+    def test_export_failure_names_the_exported_node_and_frame(self) -> None:
+        # The real message of a guide deform failing upstream of a feather node.
+        houdini_error = (
+            "The attempted operation failed.\n"
+            "Error: Invalid source /obj/sim/guidedeform.\n"
+            "Error cooking /obj/sim/guidedeform at time -1.95833."
+        )
+        rop = mock.MagicMock()
+        rop.type.return_value.name.return_value = "rop_geometry"
+        rop.type.return_value.category.return_value.name.return_value = "Driver"
+        rop.path.return_value = "/obj/body/feather"
+        rop.render.side_effect = RuntimeError(houdini_error)
+        fake_hou = mock.MagicMock()
+        fake_hou.node.return_value = rop
+        fake_hou.timeToFrame.side_effect = lambda t: round(t * 24 + 1)
+
+        class ExecClient:
+            def run(self, code):
+                ns = {"hou": fake_hou}
+                try:
+                    exec(compile(code, "<flux_run>", "exec"), ns)
+                except Exception as exc:
+                    return {"ok": False, "error": str(exc)}
+                return {"ok": True, "result": ns.get("result")}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            resp = houdini_export.export_via_node(
+                "/obj/body/feather", ".bgeo.sc", Path(tmp) / "a.bgeo.sc", client=ExecClient())
+        self.assertFalse(resp["ok"])
+        self.assertIn("Export of /obj/body/feather failed at frame -46.", resp["error"])
+        self.assertIn("Error cooking /obj/sim/guidedeform", resp["error"])
+        self.assertNotIn("The attempted operation failed", resp["error"])
 
     def test_public_transport_names(self) -> None:
         c = client_mod.HoudiniClient(port=1)
