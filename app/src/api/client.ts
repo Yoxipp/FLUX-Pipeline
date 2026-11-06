@@ -280,6 +280,10 @@ export const api = {
   listUserProfiles: () =>
     apiCall<{ profiles: UserProfile[] }>('GET', '/settings/users/profiles'),
 
+  // First launch: the artists of the chosen directory (no active root yet).
+  listUserProfilesAt: (path: string) =>
+    apiCall<{ profiles: UserProfile[] }>('POST', '/settings/users/profiles-at', { path }),
+
   previewUserId: (first_name: string, last_name: string) =>
     apiCall<{ id: string }>('POST', '/settings/users/id-preview', { first_name, last_name }),
 

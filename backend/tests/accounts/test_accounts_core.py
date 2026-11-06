@@ -139,6 +139,48 @@ class PasswordTests(_TempWorkspace):
         self.assertEqual(passwords.record_in(uu.read_user_data("ALICE")), old)
 
 
+class FirstLaunchProfilesTests(_TempWorkspace):
+    def setUp(self):
+        super().setUp()
+        from routers import settings
+        app = FastAPI()
+        app.include_router(settings.router, prefix="/settings")
+        self.client = TestClient(app)
+        self.first = mock.patch("core.config.is_first_launch", return_value=True)
+        self.set_root = mock.patch("routers.settings.set_flux_root")
+        for p in (mock.patch("routers.settings.reset_repository"),
+                  mock.patch("routers.settings.reset_storage")):
+            p.start()
+            self.addCleanup(p.stop)
+        self.first_mock = self.first.start()
+        self.addCleanup(self.first.stop)
+        self.set_root_mock = self.set_root.start()
+        self.addCleanup(self.set_root.stop)
+
+    def test_lists_existing_artists_of_the_chosen_directory(self):
+        passwords.set_password("BOB", "abcd")
+        r = self.client.post("/settings/users/profiles-at", json={"path": str(self.root)})
+        self.assertEqual(r.status_code, 200)
+        by_id = {p["id"]: p for p in r.json()["profiles"]}
+        self.assertEqual(set(by_id), {"ALICE", "BOB"})
+        self.assertTrue(by_id["BOB"]["has_password"])
+        self.set_root_mock.assert_called_once_with(self.root)
+
+    def test_new_folder_is_left_untouched(self):
+        empty = self.root / "new_team"
+        empty.mkdir()
+        r = self.client.post("/settings/users/profiles-at", json={"path": str(empty)})
+        self.assertEqual(r.json()["profiles"], [])
+        self.set_root_mock.assert_not_called()
+        self.assertEqual(list(empty.iterdir()), [])
+
+    def test_refused_after_first_launch(self):
+        self.first_mock.return_value = False
+        r = self.client.post("/settings/users/profiles-at", json={"path": str(self.root)})
+        self.assertEqual(r.status_code, 409)
+        self.set_root_mock.assert_not_called()
+
+
 class AliasTests(_TempWorkspace):
     def test_chain_is_flattened_and_rename_back(self):
         aliases.record_rename("A", "B")

@@ -101,15 +101,12 @@ export function FirstLaunch() {
     setLoading(true)
     setError(null)
     try {
-      // Profiles need the chosen root; the workspace is only set by init, so fall back to plain ids.
-      const { profiles } = await api.listUserProfiles()
+      const { profiles } = await api.listUserProfilesAt(workspace.trim())
       setUsers(profiles)
     } catch {
-      try {
-        const { users: existing } = await api.listUsers()
-        setUsers(existing.map(id => ({ id, first_name: '', last_name: '', has_password: false })))
-      } catch {}
+      setUsers([])
     }
+    setUsername('')
     setLoading(false)
     setStep(2)
   }

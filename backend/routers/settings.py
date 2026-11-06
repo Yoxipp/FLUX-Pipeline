@@ -290,6 +290,33 @@ async def list_user_profiles() -> dict:
     return {"profiles": await loop.run_in_executor(None, _profiles)}
 
 
+@router.post("/users/profiles-at")
+async def list_user_profiles_at(req: WorkspacePath) -> dict:
+    """First launch: the artists of the chosen directory, before any account exists here.
+
+    The repository only reads the active root, so an existing team directory becomes the
+    root now. Still a first launch without a username, and a new folder is left untouched.
+    """
+    from features.accounts import identity
+
+    def _read() -> list[dict]:
+        if not config.is_first_launch():
+            raise PermissionError
+        root = Path(req.path.strip())
+        if not req.path.strip() or not (root / "USER").is_dir():
+            return []
+        set_flux_root(root)
+        reset_repository()
+        reset_storage()
+        return [identity.read_profile(u) for u in user_utils.list_users()]
+
+    loop = asyncio.get_running_loop()
+    try:
+        return {"profiles": await loop.run_in_executor(None, _read)}
+    except PermissionError:
+        raise HTTPException(status_code=409, detail="Réservé au premier lancement.")
+
+
 class NewArtistRequest(BaseModel):
     first_name: str
     last_name: str
