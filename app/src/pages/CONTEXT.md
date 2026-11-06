@@ -74,8 +74,9 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   pour Edit ; clic droit du titre de departement pour prioriser un statut. Tri local a
   la vue, par sequence, sans changer l'ordre sauvegarde. Icone artiste accent sous les
   badges assignes a l'utilisateur ; tooltip affiche uniquement les artistes concernes.
-  Retakes 2026-10-09 : mode Assets groupe par classe (CHAR, PROPS, ENV puis les autres ;
-  libelles Charas/Props/Enviros), groupes repliables. Chevron d'une ligne asset = une ligne
+  Retakes 2026-10-09 : mode Assets groupe par classe (CHAR, ENV, PROPS puis les autres ;
+  libelles Chara/Enviro/Props, FXRIG affiche sous Chara et plus cree depuis Production, tokens disque inchanges,
+  2026-11-06), groupes repliables. Chevron d'une ligne asset = une ligne
   par sous-tache (known_subtasks + cles `TASK|SUB` de task_details) sous la colonne de sa
   tache, badge editable (TaskStatusBadge avec `subtask`). Bouton "Deadline + Me concerne"
   (localStorage `flux.production.sort.deadlineMine`) : lignes avec une tache assignee

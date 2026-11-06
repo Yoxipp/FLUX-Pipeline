@@ -1,6 +1,8 @@
 // Shared helpers for the Production Tab.
 
-export const CATEGORY_ORDER = ['CHAR', 'PROPS', 'ENV', 'FXRIG'] as const
+// Display and creation order in Production (2026-11-06). Disk tokens do not change.
+// FXRIG is animated: its assets show under Chara and are no longer created from here.
+export const CATEGORY_ORDER = ['CHAR', 'ENV', 'PROPS'] as const
 export type Category = (typeof CATEGORY_ORDER)[number]
 
 // Map each category to its CSS var (defined in globals.css).
