@@ -107,7 +107,7 @@ def scan_all_instances(*, probe=None, timeout: float = _SCAN_TIMEOUT_S) -> dict[
 
 
 # ── Active instance (which one a publish / import talks to) ─────────────────
-# Chosen in the UI (sidebar menu, publish picker) and pushed here, so backend
+# Chosen in the launcher menu and pushed here, so backend
 # clients with a single entry point (houdini_client) follow the same choice as the
 # routes that take an explicit port (Maya). Remembered as (port, pid): a port now held
 # by another process is a closed instance (reported in _LOST, never targeted).
@@ -182,7 +182,7 @@ def resolve_port(dcc: str, *, instances: list[dict] | None = None, pid_of=None) 
     if dcc in _LOST and len(live) > 1:
         raise InstanceLostError(
             f"L'instance {dcc} choisie (port {_LOST[dcc]['port']}) a ete fermee et {len(live)} autres tournent : "
-            "choisis celle qui travaille dans la barre laterale de FLUX.")
+            "choisis celle qui travaille dans le launcher de FLUX.")
     if live:
         return int(live[0]["port"])
     base, _count = DCC_PORT_RANGES[dcc]

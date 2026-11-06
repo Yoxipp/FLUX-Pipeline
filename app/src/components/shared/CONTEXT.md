@@ -22,7 +22,7 @@ Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC co
 * Notifications : `App.tsx` (MentionWatcher, FavoriteWatcher) suivent les prefs ; regle pure
   `lib/activityNotify.notificationReason` (tests `activity-notify.test.cjs`), categories
   `actionToType` partagees avec `ActivityPanel` (popover de la cloche, seul acces a l'activite, 2026-11-06 ; route `/activity` redirigee vers l'accueil).
-* `Sidebar` Launcher : mode compact par defaut. Lancer reste visible ; chemin, bridge, Photoshop et
+* `Sidebar` Launcher : le choix de l'instance se fait dans le menu du logiciel (coche, fermer, Deconnecter pour Maya / Houdini ; une seule = connectee seule, plusieurs sans choix = pas de cible ; regles `lib/activeInstance.ts`, tests `active-instance.test.cjs`, 2026-11-06). Le Publisher l'affiche et refuse de publier sans choix valide. Mode compact par defaut. Lancer reste visible ; chemin, bridge, Photoshop et
   New Scene au survol / focus et dans le clic droit de la ligne (aussi touche Menu / Shift+F10,
   Entree lance). Restent toujours visibles : chemin manquant, Maya bloque, plusieurs instances,
   chargements. "Auto-detecter" n'apparait que s'il manque un chemin. Mode complet par profil.
