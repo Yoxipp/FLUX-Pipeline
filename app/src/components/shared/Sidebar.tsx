@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2, Unplug,
   ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench, MessagesSquare,
+  Box, Clapperboard,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -20,6 +21,8 @@ import { useI18n } from '../../i18n'
 import { DccLogo } from './DccLogo'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { openWorkProfile } from './WorkProfileDialog'
+import { detachIfOutside, NavRail, type RailItem } from './NavRail'
+import { useNavRail } from '../../hooks/useNavRail'
 
 interface Props {
   dccStatus: DccStatusMap
@@ -30,16 +33,6 @@ function dccDot(status: DccStatusMap, key: string): string {
   const entry = status[DCC_STATUS_KEYS[key] ?? key]
   if (!entry) return ''
   return entry.connected ? 'ok' : ''
-}
-
-// Drag a page out of the window (or right-click it) to open it in its own window (U4).
-// The drop point is checked against the window rectangle: a drop inside does nothing.
-function detachIfOutside(e: React.DragEvent, route: string) {
-  const { screenX: x, screenY: y } = e
-  if (x === 0 && y === 0) return      // cancelled drag (Escape)
-  const inside = x >= window.screenX && x <= window.screenX + window.outerWidth
-    && y >= window.screenY && y <= window.screenY + window.outerHeight
-  if (!inside) window.electronAPI?.detachPage?.(route)
 }
 
 function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick, route }: {
@@ -143,6 +136,7 @@ export function Sidebar({ dccStatus }: Props) {
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
   const { isVisible: isDccEnabled } = useVisibleDccs()
+  const [railEnabled] = useNavRail()
   const [launcherMenu, setLauncherMenu] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
@@ -782,6 +776,119 @@ export function Sidebar({ dccStatus }: Props) {
     </>
   }
 
+  // ADR 0044: the official mark (accent) + one wide Play button. A click on Play opens
+  // every action of the software (launch, new scene, instances, path, bridge); nothing
+  // happens on hover. Only states to act on stay visible (flag on the button).
+  const launcherRows = <>
+    {SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => {
+      const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
+      const connected      = dccDot(dccStatus, s.key) === 'ok'
+      const isLoading      = launching.has(s.key)
+      const hasPath        = !!dccPaths[s.key]
+      const findOk         = findResult[s.key]
+      const mayaStuck      = s.key === 'maya' && !!dccStatus[statusKey]?.stuck
+      const instances      = dccStatus[statusKey]?.instances ?? []
+      const statusBusy     = !!dccStatus[statusKey]?.busy
+      const statusNoBridge = !!dccStatus[statusKey]?.no_bridge
+      const state = mayaStuck ? 'err' : statusBusy || (statusNoBridge && !connected) ? 'warn' : connected ? 'ok' : ''
+      const stateText = mayaStuck ? 'Instance bloquée sur le port 7001'
+        : statusBusy ? 'Occupé (un export tourne)'
+        : statusNoBridge && !connected ? 'Ouvert sans le bridge FLUX'
+        : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
+        : 'Fermé'
+      const flag = mayaStuck ? 'err' : (!hasPath || findOk === false) ? 'warn' : ''
+      const open = launcherMenu?.soft === s.key
+      return (
+        <div key={s.key} className="dcc-row"
+          onContextMenu={e => { e.preventDefault(); setLauncherMenu({ soft: s.key, x: e.clientX, y: e.clientY }) }}>
+          <span className="dcc-logo-slot" title={`${s.name} · ${stateText}`} style={{ opacity: connected ? 1 : 0.62 }}>
+            <DccLogo dcc={s.key} size={18} title={s.name} />
+            {state && <span className={`dcc-state ${state}`} />}
+          </span>
+          {/* Launch = starts the software at once; the gear opens every other action. */}
+          <button type="button" className={`dcc-play${connected ? ' live' : ''}`} disabled={isLoading}
+            aria-label={`Lancer ${s.name}`} title={`${connected ? 'Nouvelle instance' : 'Lancer'} · ${stateText}`}
+            onClick={() => void handleLaunch(s.key)}>
+            {isLoading
+              ? <Loader size={11} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+              : <Play size={11} strokeWidth={2} fill="currentColor" />}
+            {instances.length > 1 && <span className="dcc-count">×{instances.length}</span>}
+          </button>
+          <Menu.Root open={open} onOpenChange={o => setLauncherMenu(o ? { soft: s.key, x: 0, y: 0 } : null)} modal={false}>
+            <Menu.Trigger asChild>
+              <button type="button" className="dcc-gear" aria-label={`${s.name} : actions`} title="Plus d'actions">
+                <Settings size={13} strokeWidth={1.8} />
+                {flag && <span className={`dcc-flag ${flag}`} />}
+              </button>
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
+                {renderLauncherMenu(s.key)}
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu.Root>
+        </div>
+      )
+    })}
+    {/* Tractor farm render (ADR 0015): not a DCC (not in SOFTWARE), but the row looks like one.
+        Play opens Tractor in its own window (single instance); the gear opens it in this window. */}
+    <div className="dcc-row">
+      <span className="dcc-logo-slot" title="Tractor" style={{ opacity: pathname === '/render' ? 1 : 0.62 }}>
+        <DccLogo dcc="tractor" size={18} title="Tractor" />
+      </span>
+      <button type="button" className="dcc-play" aria-label="Lancer Tractor" title="Ouvrir Tractor dans sa fenêtre"
+        onClick={() => { if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/render'); else navigate('/render') }}>
+        <Play size={11} strokeWidth={2} fill="currentColor" />
+      </button>
+      <Menu.Root modal={false}>
+        <Menu.Trigger asChild>
+          <button type="button" className="dcc-gear" aria-label="Tractor : actions" title="Plus d'actions">
+            <Settings size={13} strokeWidth={1.8} />
+          </button>
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
+            <Menu.Item className="launcher-menu-item" onSelect={() => navigate('/render')}><ServerCog size={13} />Ouvrir dans FLUX</Menu.Item>
+          </Menu.Content>
+        </Menu.Portal>
+      </Menu.Root>
+    </div>
+  </>
+
+  if (railEnabled) {
+    const item = (id: string, icon: React.ElementType, label: string, group: string, route: string, extra?: Partial<RailItem>): RailItem => ({
+      id, icon, label, group, route, active: pathname === route, onClick: () => navigate(route), ...extra,
+    })
+    const onProduction = pathname === '/production'
+    const sections: RailItem[][] = [
+      [item('home', Home, t('nav.home'), '', '/', { notif: unreadMentions })],
+      [
+        item('production', ClipboardList, t('nav.production'), 'Production', '/production', { active: onProduction }),
+        // Assets / Shots only exist in the wide bar otherwise: shown here while on Production.
+        ...(onProduction ? (['asset', 'shot'] as const).map((mode): RailItem => ({
+          id: `production-${mode}`, icon: mode === 'asset' ? Box : Clapperboard, label: t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot'),
+          group: 'Production', child: true, active: productionMode === mode, onClick: () => navigate(`/production?mode=${mode}`),
+        })) : []),
+      ],
+      [
+        item('calendar', CalendarDays, t('nav.calendar'), 'Team', '/calendar'),
+        item('team', MessagesSquare, t('nav.team'), 'Team', '/team'),
+        ...(toolVisible ? [item('tool', Wrench, t('nav.tool'), 'Team', '/tool', { active: pathname === '/tool' || pathname.startsWith('/tool/') })] : []),
+      ],
+      [
+        item('folders', FolderOpen, t('nav.folderManager'), 'Fichiers', '/projects'),
+        item('publisher', Upload, t('nav.publisher'), 'Fichiers', '/publisher'),
+        item('usd', Layers, t('nav.usd'), 'Fichiers', '/usd'),
+        item('shelf', BookOpen, t('nav.shelfManager'), 'Fichiers', '/shelf'),
+      ],
+    ]
+    const entries = SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => dccStatus[DCC_STATUS_KEYS[s.key] ?? s.key])
+    const launcherState = entries.some(e => e?.stuck) ? 'err' as const
+      : entries.some(e => e?.busy) ? 'warn' as const
+      : entries.some(e => e?.connected) ? 'ok' as const : '' as const
+    return <NavRail sections={sections} launcher={launcherRows} launcherState={launcherState} />
+  }
+
   return (
     <div style={{
       width: 200, borderRight: '1px solid var(--rule)',
@@ -821,82 +928,7 @@ export function Sidebar({ dccStatus }: Props) {
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
-        {/* ADR 0044: the official mark (accent) + one wide Play button. A click on Play opens
-            every action of the software (launch, new scene, instances, path, bridge); nothing
-            happens on hover. Only states to act on stay visible (flag on the button). */}
-        {SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => {
-          const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
-          const connected      = dccDot(dccStatus, s.key) === 'ok'
-          const isLoading      = launching.has(s.key)
-          const hasPath        = !!dccPaths[s.key]
-          const findOk         = findResult[s.key]
-          const mayaStuck      = s.key === 'maya' && !!dccStatus[statusKey]?.stuck
-          const instances      = dccStatus[statusKey]?.instances ?? []
-          const statusBusy     = !!dccStatus[statusKey]?.busy
-          const statusNoBridge = !!dccStatus[statusKey]?.no_bridge
-          const state = mayaStuck ? 'err' : statusBusy || (statusNoBridge && !connected) ? 'warn' : connected ? 'ok' : ''
-          const stateText = mayaStuck ? 'Instance bloquée sur le port 7001'
-            : statusBusy ? 'Occupé (un export tourne)'
-            : statusNoBridge && !connected ? 'Ouvert sans le bridge FLUX'
-            : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
-            : 'Fermé'
-          const flag = mayaStuck ? 'err' : (!hasPath || findOk === false) ? 'warn' : ''
-          const open = launcherMenu?.soft === s.key
-          return (
-            <div key={s.key} className="dcc-row"
-              onContextMenu={e => { e.preventDefault(); setLauncherMenu({ soft: s.key, x: e.clientX, y: e.clientY }) }}>
-              <span className="dcc-logo-slot" title={`${s.name} · ${stateText}`} style={{ opacity: connected ? 1 : 0.62 }}>
-                <DccLogo dcc={s.key} size={18} title={s.name} />
-                {state && <span className={`dcc-state ${state}`} />}
-              </span>
-              {/* Launch = starts the software at once; the gear opens every other action. */}
-              <button type="button" className={`dcc-play${connected ? ' live' : ''}`} disabled={isLoading}
-                aria-label={`Lancer ${s.name}`} title={`${connected ? 'Nouvelle instance' : 'Lancer'} · ${stateText}`}
-                onClick={() => void handleLaunch(s.key)}>
-                {isLoading
-                  ? <Loader size={11} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                  : <Play size={11} strokeWidth={2} fill="currentColor" />}
-                {instances.length > 1 && <span className="dcc-count">×{instances.length}</span>}
-              </button>
-              <Menu.Root open={open} onOpenChange={o => setLauncherMenu(o ? { soft: s.key, x: 0, y: 0 } : null)} modal={false}>
-                <Menu.Trigger asChild>
-                  <button type="button" className="dcc-gear" aria-label={`${s.name} : actions`} title="Plus d'actions">
-                    <Settings size={13} strokeWidth={1.8} />
-                    {flag && <span className={`dcc-flag ${flag}`} />}
-                  </button>
-                </Menu.Trigger>
-                <Menu.Portal>
-                  <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
-                    {renderLauncherMenu(s.key)}
-                  </Menu.Content>
-                </Menu.Portal>
-              </Menu.Root>
-            </div>
-          )
-        })}
-        {/* Tractor farm render (ADR 0015): not a DCC (not in SOFTWARE), but the row looks like one.
-            Play opens Tractor in its own window (single instance); the gear opens it in this window. */}
-        <div className="dcc-row">
-          <span className="dcc-logo-slot" title="Tractor" style={{ opacity: pathname === '/render' ? 1 : 0.62 }}>
-            <DccLogo dcc="tractor" size={18} title="Tractor" />
-          </span>
-          <button type="button" className="dcc-play" aria-label="Lancer Tractor" title="Ouvrir Tractor dans sa fenêtre"
-            onClick={() => { if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/render'); else navigate('/render') }}>
-            <Play size={11} strokeWidth={2} fill="currentColor" />
-          </button>
-          <Menu.Root modal={false}>
-            <Menu.Trigger asChild>
-              <button type="button" className="dcc-gear" aria-label="Tractor : actions" title="Plus d'actions">
-                <Settings size={13} strokeWidth={1.8} />
-              </button>
-            </Menu.Trigger>
-            <Menu.Portal>
-              <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
-                <Menu.Item className="launcher-menu-item" onSelect={() => navigate('/render')}><ServerCog size={13} />Ouvrir dans FLUX</Menu.Item>
-              </Menu.Content>
-            </Menu.Portal>
-          </Menu.Root>
-        </div>
+        {launcherRows}
       </NavGroup>
 
       <div style={{ flex: 1 }} />
