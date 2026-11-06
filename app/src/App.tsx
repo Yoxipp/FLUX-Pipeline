@@ -25,7 +25,6 @@ import { ActionPublish } from './pages/ActionPublish'
 import { FlowEditor }    from './pages/flow_editor/FlowEditor'
 import { ToolPage }      from './pages/tool_pages/ToolPage'
 import { PageBuilder }   from './pages/tool_pages/PageBuilder'
-import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
@@ -80,7 +79,6 @@ function MentionWatcher() {
 // profile adds publishes / comments / errors of other artists (ADR 0043).
 // Silent on the first snapshot of a project so its backlog isn't replayed.
 function FavoriteWatcher() {
-  const navigate = useNavigate()
   const { events, loaded, project: feedProject } = useActivityFeed()
   const { prefs } = useWorkProfile()
   const { project } = useProject()
@@ -110,11 +108,11 @@ function FavoriteWatcher() {
         description: body,
         position: 'bottom-right',
         duration: 6000,
-        action: { label: 'Activity', onClick: () => navigate('/activity') },
+        action: { label: 'Voir', onClick: () => window.dispatchEvent(new Event('flux:open-activity')) },
       })
       void window.electronAPI?.showNotification?.(title, body)
     }
-  }, [events, loaded, feedProject, navigate])
+  }, [events, loaded, feedProject])
   return null
 }
 
@@ -157,7 +155,7 @@ function AppShell({ settings }: { settings: Settings }) {
         <BackendBanner />
 
         <div className="flex flex-1 min-h-0">
-          {!DETACHED && <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />}
+          {!DETACHED && <Sidebar dccStatus={dccStatus} />}
 
           <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
             <PageErrorBoundary>
@@ -170,7 +168,7 @@ function AppShell({ settings }: { settings: Settings }) {
               {/* TOOL pages (Flows P7, 04 §6); /tool/:id/edit = the page editor. */}
               <Route path="/tool" element={<ToolPage />} />
               <Route path="/tool/:id/edit" element={<PageBuilder />} />
-              <Route path="/activity"  element={<Activity />} />
+              <Route path="/activity"  element={<Navigate to="/" replace />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
               <Route path="/usd"       element={<UsdPage />} />

@@ -90,7 +90,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.production':          { fr: 'Production',               en: 'Production' },
   'nav.calendar':            { fr: 'Calendrier',               en: 'Calendar' },
   'nav.team':                { fr: 'Team',                     en: 'Team' },
-  'nav.activity':            { fr: 'Activité',                 en: 'Activity' },
   'nav.actionPublish':       { fr: 'Publish (action)',         en: 'Publish (action)' },
   'nav.production.pin':      { fr: 'Garder Production ouvert', en: 'Keep Production open' },
   'nav.production.unpin':    { fr: 'Ne plus garder Production ouvert', en: 'Stop keeping Production open' },

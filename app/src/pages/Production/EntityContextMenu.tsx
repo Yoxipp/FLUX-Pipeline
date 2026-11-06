@@ -34,7 +34,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
   const locked = trackingLocked(state, entity)
   const inherited = isShot && Boolean(seq?.locked)
   const selection: Selection = { kind: isShot ? 'shot' : 'asset', id: entity.id }
-  // Follow the whole shot: its events land in Activity > Self and notify (retake 04).
+  // Follow the whole shot: its events land in the bell > Self and notify (retake 04).
   const { has, toggleKey } = useFavorites()
   const followKey = isShot ? shotFollowKey(project, seq?.name ?? '', entity.name) : ''
   const followed = isShot && has(followKey)
@@ -84,7 +84,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
       <Dropdown.Portal><Dropdown.Content className="production-context-menu" align="start" collisionPadding={10}>
         <Dropdown.Label className="production-menu-artist">{entity.name}</Dropdown.Label>
         <Dropdown.Item className="production-menu-item" onSelect={() => { setSelection(selection); onEdit() }}>Edit</Dropdown.Item>
-        {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => { void toggleKey(followKey); toast.success(followed ? `${entity.name} : plus suivi` : `${entity.name} suivi : ses events arrivent dans Activity > Self`) }}>{followed ? 'Ne plus suivre' : 'Suivre le shot'}</Dropdown.Item>}
+        {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => { void toggleKey(followKey); toast.success(followed ? `${entity.name} : plus suivi` : `${entity.name} suivi : ses events arrivent dans la cloche > Self`) }}>{followed ? 'Ne plus suivre' : 'Suivre le shot'}</Dropdown.Item>}
         {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => navigate(`/calendar?${new URLSearchParams({ seq: seq?.name ?? '', shot: entity.name, project })}`)}>Calendar</Dropdown.Item>}
         {isShot && <Dropdown.Item disabled={busy || inherited} className="production-menu-item" onSelect={() => { if (locked) setUnlock(true); else void lock(true) }}>{locked ? 'Unlock' : 'Lock'}{inherited ? ` · ${seq?.name}` : ''}</Dropdown.Item>}
         <Dropdown.Item disabled={locked} className="production-menu-item" onSelect={() => setNewDir('')}>Nouveau dossier</Dropdown.Item>

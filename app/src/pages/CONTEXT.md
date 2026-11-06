@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `Team` (route `/team`, groupe PIPELINE sous Calendrier : `ChatWidget` du projet actif en pleine hauteur, `fill`, meme UI que la page TOOL Team), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Team` (route `/team`, groupe PIPELINE sous Calendrier : `ChatWidget` du projet actif en pleine hauteur, `fill`, meme UI que la page TOOL Team), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -143,7 +143,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * `folder_manager/shared.ts` (types, helpers, contexte), `open_in.ts` (actions "Open in" DCC), `ItemModals.tsx`,
   `icons.tsx`.
 
-## Activity
+## Activity (popover de la cloche, `components/shared/ActivityPanel.tsx`)
 
 * Menu Notifications (en-tete) : mentions, taches suivies, publishs / commentaires / erreurs
   des autres artistes du projet actif. Pre-regle par le profil de travail (ADR 0043).

@@ -166,7 +166,7 @@ async function createWindow(): Promise<void> {
 // preload, same session: the S1 token header applies). The main window keeps its
 // page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
 const DETACHABLE_ROUTES = new Set([
-  '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
+  '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/disk',
   // Opened from Parametres avances: Flows editor (the old YAML action editor was removed in P8).
   '/action-graph',
   // Tractor farm page, opened from the launcher like a software (single window).

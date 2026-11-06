@@ -10,7 +10,7 @@
 // A profile is only a snapshot of WorkPrefs. Applying it copies its prefs into the
 // working prefs; later tweaks in the pages change the working prefs and show "modified".
 // ADR 0043: a profile presets the Production "Show" departments and the activity
-// notifications; both stay editable by hand (Show menu, Activity > Notifications).
+// notifications; both stay editable by hand (Show menu, bell > Notifications).
 // A profile also narrows the software shown, inside what Settings > Logiciels enables.
 // Folder Manager layout is NOT part of a profile (page preference, per browser).
 // Values stay scalar (project.json only keeps str/bool/number): department lists are

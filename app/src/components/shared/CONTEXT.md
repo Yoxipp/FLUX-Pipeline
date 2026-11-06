@@ -15,13 +15,13 @@ Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC co
   integres, projet, perso). Un profil pre-regle les colonnes de Show (Production), les
   notifications d'activite, la page de demarrage, le Launcher et le logiciel du Publisher.
   Pas de Folder Manager (ADR 0043). Ouvert par `openWorkProfile()` depuis Parametres, le clic
-  droit du Launcher, Production > Show et Activity > Notifications. Monte une fois dans `App`.
+  droit du Launcher, Production > Show et cloche > Notifications. Monte une fois dans `App`.
 * Etat : `app/src/WorkProfileContext.tsx` (User.json `work_profile`, sauvegarde debouncee 400 ms,
   profils du projet actif via `/folder/projects/{p}/work-profiles`) ; modele pur et validation
   dans `app/src/lib/workProfiles.ts` (tests `scripts/tests/work-profiles.test.cjs`).
 * Notifications : `App.tsx` (MentionWatcher, FavoriteWatcher) suivent les prefs ; regle pure
   `lib/activityNotify.notificationReason` (tests `activity-notify.test.cjs`), categories
-  `actionToType` partagees avec la page Activity.
+  `actionToType` partagees avec `ActivityPanel` (popover de la cloche, seul acces a l'activite, 2026-11-06 ; route `/activity` redirigee vers l'accueil).
 * `Sidebar` Launcher : mode compact par defaut. Lancer reste visible ; chemin, bridge, Photoshop et
   New Scene au survol / focus et dans le clic droit de la ligne (aussi touche Menu / Shift+F10,
   Entree lance). Restent toujours visibles : chemin manquant, Maya bloque, plusieurs instances,

@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, RefreshCw, Pin } from 'lucide-react'
+import * as Popover from '@radix-ui/react-popover'
+import { Bell, Settings, ChevronDown, X, Minus, Maximize2, RefreshCw, Pin } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { ActivityPanel } from './ActivityPanel'
 import { Avatar } from './ui'
 import { FluxLogo } from './Logo'
 import { Console } from './Console'
@@ -48,6 +50,7 @@ const IS_DETACHED_WINDOW = new URLSearchParams(window.location.search).get('deta
 export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [settingsHov,  setSettingsHov]  = useState(false)
   const [bellHov,      setBellHov]      = useState(false)
+  const [bellOpen,     setBellOpen]     = useState(false)
   const [refreshing,   setRefreshing]   = useState(false)
   const [pinned,       setPinned]       = useState(false)
   const [pinHov,       setPinHov]       = useState(false)
@@ -58,6 +61,13 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const { t } = useI18n()
   const share = useShareLatency()
   const user = username ?? 'User'
+
+  // Notification toasts open the bell through this event (they live outside the title bar).
+  useEffect(() => {
+    const open = () => setBellOpen(true)
+    window.addEventListener('flux:open-activity', open)
+    return () => window.removeEventListener('flux:open-activity', open)
+  }, [])
 
   // Refresh without restart: broadcast a global event that the shell hooks
   // (settings, activity, DCC paths) listen for and re-fetch on.
@@ -170,24 +180,26 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       {/* console (left of the bell) */}
       <Console />
 
-      {/* notif bell → Activité */}
+      {/* notification bell: the only access to activity (2026-11-06) */}
+      <Popover.Root open={bellOpen} onOpenChange={setBellOpen}>
       <div className="no-drag" style={{ position: 'relative' }}>
+        <Popover.Trigger asChild>
         <div
           title={t('titlebar.notifications')}
-          onClick={() => navigate('/activity')}
           onMouseEnter={() => setBellHov(true)}
           onMouseLeave={() => setBellHov(false)}
           style={{
             width: 28, height: 28, borderRadius: 7,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: (bellHov || pathname === '/activity') ? 'var(--ink)' : 'var(--ink-3)',
-            background: (bellHov || pathname === '/activity') ? 'var(--paper-2)' : 'transparent',
+            color: (bellHov || bellOpen) ? 'var(--ink)' : 'var(--ink-3)',
+            background: (bellHov || bellOpen) ? 'var(--paper-2)' : 'transparent',
             cursor: 'pointer',
             transition: 'background 0.1s, color 0.1s',
           }}
         >
           <Bell size={14} strokeWidth={1.75} />
         </div>
+        </Popover.Trigger>
         {unreadCount > 0 && (
           <div style={{
             position: 'absolute', top: 2, right: 2,
@@ -200,6 +212,15 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
           }}>{unreadCount}</div>
         )}
       </div>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={8} collisionPadding={10} style={{
+          zIndex: 900, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8,
+          boxShadow: 'var(--shadow-md)', overflow: 'hidden', outline: 'none',
+        }}>
+          <ActivityPanel onClose={() => setBellOpen(false)} />
+        </Popover.Content>
+      </Popover.Portal>
+      </Popover.Root>
 
       {/* settings gear: opens the Settings page (User / Projet / Avance, retake 06) */}
       <div
@@ -217,7 +238,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
           transition: 'background 0.12s, color 0.12s',
         }}
       >
-        <Settings2 size={14} strokeWidth={1.75} />
+        <Settings size={14} strokeWidth={1.75} />
       </div>
 
       {/* user: avatar only (ADR 0044), the name is the tooltip; click = change user */}

@@ -1,7 +1,7 @@
 // WorkProfileDialog.tsx - the one place where work profiles are managed (ADR 0042, 0043).
 // A profile presets the Production Show columns and the activity notifications; both stay
-// editable by hand where they live (Production > Show, Activity > Notifications).
-// Opened from Settings, the Launcher context menu, Show and Activity through openWorkProfile().
+// editable by hand where they live (Production > Show, bell > Notifications).
+// Opened from Settings, the Launcher context menu, Show and the bell through openWorkProfile().
 
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -115,7 +115,7 @@ export function WorkProfileDialog() {
         </div>
         <p className="work-profile-intro">
           Un profil pré-règle votre vue Production (colonnes de Show) et vos notifications d'activité, ainsi que la page
-          d'accueil, les logiciels affichés et le Publisher. Tout reste modifiable à la main : Production &gt; Show, Activity &gt; Notifications.
+          d'accueil, les logiciels affichés et le Publisher. Tout reste modifiable à la main : Production &gt; Show, cloche &gt; Notifications.
           Le profil suit votre utilisateur sur tous les postes.
         </p>
         <div className="work-profile-body">

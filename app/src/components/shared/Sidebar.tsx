@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Home, Upload, Layers,
-  BookOpen, FolderOpen, Activity,
+  BookOpen, FolderOpen,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
   ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench, MessagesSquare,
@@ -23,7 +23,6 @@ import { openWorkProfile } from './WorkProfileDialog'
 
 interface Props {
   dccStatus: DccStatusMap
-  unreadCount: number
 }
 
 
@@ -119,7 +118,7 @@ function NavGroup({ title, children, defaultOpen = true }: {
 
 const LS_PRODUCTION_PINNED = 'flux.sidebar.productionPinned'
 
-export function Sidebar({ dccStatus, unreadCount }: Props) {
+export function Sidebar({ dccStatus }: Props) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [productionExpanded, setProductionExpanded] = useState(false)
@@ -784,9 +783,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         {/* Team chat of the project, channels on the left (built-in, 2026-10-30, ADR 0077). */}
         <NavItem icon={MessagesSquare} label={t('nav.team')}           active={pathname === '/team'}      indent route="/team" onClick={() => navigate('/team')} />
-        <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
         {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one.
-            Under Activity in PIPELINE (2026-10-30). */}
+            Last of PIPELINE (2026-10-30). */}
         {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 

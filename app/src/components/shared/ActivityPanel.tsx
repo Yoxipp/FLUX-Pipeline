@@ -3,23 +3,25 @@ import { useNavigate } from 'react-router-dom'
 import { Upload, Download, RefreshCw, XCircle, FolderOpen, FolderTree, Copy, AtSign, Heart, MessageSquare, Bell, Check, UserRound, Eye, X, AlertTriangle, type LucideIcon } from 'lucide-react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
-import { api } from '../api/client'
-import { useActivityFeed } from '../hooks/useFeeds'
-import { useProject } from '../ProjectContext'
-import { useSessionState } from '../hooks/useSessionState'
-import { useMentionsFeed } from '../hooks/useFeeds'
-import { useFavorites, eventMatchesFavorite, shotFollowKey } from '../hooks/useFavorites'
-import { useSettings } from '../hooks/useSettings'
-import { useI18n } from '../i18n'
-import { Btn } from '../components/shared/ui'
-import { ExpandPicker } from '../components/shared/ExpandPicker'
-import { parseFluxFilename } from './Production/util'
-import type { ActivityEvent } from '../types'
-import { actionToType, REASON_LABEL, type ActivityType } from '../lib/activityNotify'
-import { NOTIFY_OPTIONS } from '../lib/workProfiles'
-import { useWorkProfile } from '../WorkProfileContext'
-import { openWorkProfile } from '../components/shared/WorkProfileDialog'
+import { api } from '../../api/client'
+import { useActivityFeed } from '../../hooks/useFeeds'
+import { useProject } from '../../ProjectContext'
+import { useSessionState } from '../../hooks/useSessionState'
+import { useMentionsFeed } from '../../hooks/useFeeds'
+import { useFavorites, eventMatchesFavorite, shotFollowKey } from '../../hooks/useFavorites'
+import { useSettings } from '../../hooks/useSettings'
+import { useI18n } from '../../i18n'
+import { Btn } from './ui'
+import { ExpandPicker } from './ExpandPicker'
+import { parseFluxFilename } from '../../pages/Production/util'
+import type { ActivityEvent } from '../../types'
+import { actionToType, REASON_LABEL, type ActivityType } from '../../lib/activityNotify'
+import { NOTIFY_OPTIONS } from '../../lib/workProfiles'
+import { useWorkProfile } from '../../WorkProfileContext'
+import { openWorkProfile } from './WorkProfileDialog'
 
+// The only access to activity (2026-11-06): the popover of the title bar bell.
+// Mounted while open only, so a closed panel costs no request.
 const HISTORY_PAGE = 200
 
 // Stored dest paths are portable ("$FLUX/rel/path"); expand against the local
@@ -61,14 +63,19 @@ const FILTERS: { labelKey: string; type: FilterKey }[] = [
 // global log.
 type View = 'self' | 'global'
 
-export function Activity() {
+export function ActivityPanel({ onClose }: { onClose: () => void }) {
   const { events: liveEvents, followedShots, markAllRead } = useActivityFeed()
   const { project } = useProject()
   const [view, setView] = useSessionState<View>('activity.view', 'self')
   // Self is fetched with a deeper window than the shared feed (older followed events),
   // again whenever the shared feed or the follow list changes.
   const [selfEvents, setSelfEvents] = useState<ActivityEvent[]>([])
-  const navigate = useNavigate()
+  const routerNavigate = useNavigate()
+  // Leaving for another page closes the popover.
+  const navigate: typeof routerNavigate = ((...args: Parameters<typeof routerNavigate>) => {
+    onClose()
+    return routerNavigate(...args)
+  }) as typeof routerNavigate
   const { t } = useI18n()
   const { settings } = useSettings()
   const workspace = settings?.workspace
@@ -207,10 +214,10 @@ export function Activity() {
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ width: 520, maxWidth: 'calc(100vw - 24px)', height: 'min(72vh, 620px)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      {/* One toolbar: filters left, actions right. No page title (ADR 0044). */}
-      <div className="page-toolbar" style={{ gap: 6 }}>
+      {/* One toolbar: filters left, actions right (ADR 0044). */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '8px 10px', borderBottom: '1px solid var(--rule)' }}>
         <ExpandPicker title={t(view === 'self' ? 'activity.view.selfHint' : 'activity.view.globalHint')}
           value={view}
           options={(['self', 'global'] as const).map(v => ({ value: v, label: t(`activity.view.${v}`), title: t(`activity.view.${v}Hint`) }))}
@@ -227,7 +234,7 @@ export function Activity() {
       </div>
 
       {view === 'self' && project && followedShots.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '8px 20px', borderBottom: '1px solid var(--rule)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--rule)' }}>
           <span className="lbl" style={{ marginRight: 4 }}>{t('activity.followed')}</span>
           {followedShots.map(s => (
             <span key={`${s.seq}/${s.shot}`} title={s.exists ? `${s.seq} ${s.shot}` : t('activity.shotGone')}
@@ -245,7 +252,7 @@ export function Activity() {
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {items.length === 0 && (
-          <div style={{ padding: '24px 20px', fontSize: 11, color: 'var(--ink-4)', maxWidth: 520, lineHeight: 1.5 }}>
+          <div style={{ padding: '20px 12px', fontSize: 11, color: 'var(--ink-4)', maxWidth: 520, lineHeight: 1.5 }}>
             {!project ? t('activity.noProject')
               : view === 'self' ? t(followedShots.length ? 'activity.selfEmpty' : 'activity.selfEmptyNoFollow')
               : t('activity.empty')}
@@ -260,7 +267,7 @@ export function Activity() {
             <div
               key={i}
               className="row"
-              style={{ padding: '10px 20px', gap: 12, cursor: clickable ? 'pointer' : undefined }}
+              style={{ padding: '8px 12px', gap: 10, cursor: clickable ? 'pointer' : undefined }}
               // Click opens the destination/context (in-app); mentions open the team chat.
               onClick={r.onClick ? r.onClick : hasPath ? () => openContext(r.dest_folder) : undefined}
               title={hasPath ? `${t('activity.openContext')} : ${r.dest_folder}` : undefined}
@@ -316,7 +323,7 @@ export function Activity() {
         })}
         {/* Load older, rotated history from the cold archives (on demand). */}
         {view === 'global' && histMore && (
-          <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ padding: '12px', display: 'flex', justifyContent: 'center' }}>
             <Btn ghost sm onClick={() => void loadOlder()} disabled={histLoading}>
               {histLoading ? t('activity.historyLoading') : t('activity.loadOlder')}
             </Btn>

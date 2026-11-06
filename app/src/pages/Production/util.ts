@@ -62,7 +62,7 @@ export const defaultSeqColor = (key: string): string =>
 export const shotColorFromSeqColor = (seqColor: string): string =>
   `color-mix(in oklch, ${seqColor} 78%, black 22%)`
 
-// $FLUX/... → absolute (mirror of Activity.tsx's expandFluxPath).
+// $FLUX/... → absolute (mirror of ActivityPanel.tsx's expandFluxPath).
 export function expandFluxPath(stored: string, workspace: string | null | undefined): string {
   if (!stored) return stored
   if (stored.startsWith('$FLUX/')) return workspace ? `${workspace}/${stored.slice('$FLUX/'.length)}` : stored

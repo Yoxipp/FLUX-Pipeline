@@ -9,7 +9,7 @@ import { TeamChat } from './home/TeamChat'
 
 // Home page: three columns "Tes tâches" | "Tes retakes" | team chat (one production load
 // shared by both), team chat on the right. The shortcut grid repeated the sidebar
-// (ADR 0044); the recent activity feed lives in the Activity page.
+// (ADR 0044); the recent activity feed lives in the title bar bell.
 export function Hub() {
   const { t }         = useI18n()
   const { locale }    = useTr()
