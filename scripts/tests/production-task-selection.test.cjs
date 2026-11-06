@@ -9,8 +9,9 @@ function load(name) {
   const source = fs.readFileSync(path.join(__dirname, '../../app/src/pages/Production', name + '.ts'), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
   const mod = { exports: {} }
+  cache[name] = mod.exports
   new Function('exports', 'require', 'module', compiled)(mod.exports, n => n.startsWith('./') ? load(n.slice(2)) : require(n), mod)
-  return cache[name] = mod.exports
+  return mod.exports
 }
 
 const m = load('taskSelection')
