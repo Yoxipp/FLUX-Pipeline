@@ -91,6 +91,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.calendar':            { fr: 'Calendrier',               en: 'Calendar' },
   'nav.team':                { fr: 'Team',                     en: 'Team' },
   'nav.actionPublish':       { fr: 'Publish (action)',         en: 'Publish (action)' },
+  'settings.navRail':        { fr: 'Barre de navigation fine (logos seuls)', en: 'Thin navigation bar (icons only)' },
   'nav.production.pin':      { fr: 'Garder Production ouvert', en: 'Keep Production open' },
   'nav.production.unpin':    { fr: 'Ne plus garder Production ouvert', en: 'Stop keeping Production open' },
   'nav.production.modes':    { fr: 'Modes de production',      en: 'Production modes' },
