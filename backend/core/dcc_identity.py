@@ -22,9 +22,10 @@ import time
 
 _LISTEN_TTL = 1.5
 _PROC_TTL = 5.0
-# Scene / version of a free instance, and the "busy" answer (re-checked sooner).
+# Scene / version of a free instance, and the "busy" answer. A busy bridge is not asked
+# more often than a free one: each question waits on its main thread (2026-11-06).
 _DETAIL_TTL = 8.0
-_BUSY_TTL = 3.0
+_BUSY_TTL = 8.0
 
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 _lock = threading.Lock()
