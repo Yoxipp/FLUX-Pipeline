@@ -115,6 +115,29 @@ class PasswordTests(_TempWorkspace):
         passwords.set_password("BOB", "second")       # reset / change -> new salt
         self.assertFalse(passwords.can_enter("BOB", None))
 
+    def _store_old_cost_record(self, user: str, password: str) -> dict:
+        import hashlib
+        salt = bytes(range(16))
+        digest = hashlib.scrypt(password.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+        record = {"algo": "scrypt", "n": 2 ** 14, "r": 8, "p": 1, "salt": salt.hex(), "hash": digest.hex()}
+        uu.write_user_data(user, {passwords.PASSWORD_KEY: record})
+        return record
+
+    def test_new_hash_uses_owasp_cost(self):
+        self.assertEqual(passwords.hash_password("abcd")["n"], 2 ** 17)
+
+    def test_old_cost_is_upgraded_on_entry(self):
+        self._store_old_cost_record("ALICE", "abcd")
+        self.assertTrue(passwords.can_enter("ALICE", "abcd"))
+        record = passwords.record_in(uu.read_user_data("ALICE"))
+        self.assertEqual(record["n"], 2 ** 17)
+        self.assertTrue(passwords.verify_password("abcd", record))
+
+    def test_wrong_password_does_not_upgrade(self):
+        old = self._store_old_cost_record("ALICE", "abcd")
+        self.assertFalse(passwords.can_enter("ALICE", "nope"))
+        self.assertEqual(passwords.record_in(uu.read_user_data("ALICE")), old)
+
 
 class AliasTests(_TempWorkspace):
     def test_chain_is_flattened_and_rename_back(self):

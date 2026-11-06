@@ -11,16 +11,19 @@ import hashlib
 import hmac
 import os
 
+from core.logger import get_logger
 from utils import user_utils
+
+log = get_logger(__name__)
 
 PASSWORD_KEY = "password"
 MIN_LENGTH = 4
 MAX_LENGTH = 256
 
 _ALGO = "scrypt"
-_N, _R, _P = 2 ** 14, 8, 1          # ~16 MB, a few tens of ms per check
-_MAX_N, _MAX_R, _MAX_P = 2 ** 15, 16, 4   # bound a hand-edited record
-_MAXMEM = 64 * 1024 * 1024
+_N, _R, _P = 2 ** 17, 8, 1          # OWASP minimum, ~134 MB per check
+_MAX_N, _MAX_R, _MAX_P = 2 ** 17, 16, 4   # bound a hand-edited record
+_MAXMEM = 320 * 1024 * 1024         # scrypt needs 128 * n * r: covers the bounds above
 _SALT_BYTES = 16
 _KEY_BYTES = 32
 
@@ -121,7 +124,27 @@ def is_remembered(user: str) -> bool:
 
 def can_enter(user: str, password: str | None) -> bool:
     """True when *user* has no password, is remembered on this PC, or *password* matches."""
-    return not has_password(user) or is_remembered(user) or check_password(user, password)
+    if not has_password(user) or is_remembered(user):
+        return True
+    if not check_password(user, password):
+        return False
+    _upgrade_hash(user, password or "")
+    return True
+
+
+def _upgrade_hash(user: str, password: str) -> None:
+    """Re-hash a record weaker than the current cost, after a verified password.
+
+    The new salt changes the "remember" fingerprint, so a PC that remembered this
+    artist asks the password once more. A failed write only delays the upgrade.
+    """
+    data = user_utils.read_user_data(user)
+    record = record_in(data)
+    if record is None or int(record.get("n", 0)) >= _N:
+        return
+    data[PASSWORD_KEY] = hash_password(password)
+    if not user_utils.write_user_data(user, data):
+        log.warning("password hash of '%s' not upgraded: user settings not writable", user)
 
 
 def set_password(user: str, password: str | None) -> bool:
