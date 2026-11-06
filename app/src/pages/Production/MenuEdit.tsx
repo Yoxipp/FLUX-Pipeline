@@ -17,6 +17,7 @@ import type {
   ProductionState, ProductionTask,
 } from '../../types'
 import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, expandFluxPath, shotColorFromSeqColor } from './util'
+import { assetDisplayClass } from './tableRows'
 import { ProdBtn } from './ProdButtons'
 import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
 import type { Selection } from './Production'
@@ -479,7 +480,7 @@ function CreateSection({ setState, setSelection, activeCategory }: {
         <div style={_lbl}>{t('prod.newAsset')}</div>
         {!activeCategory && (
           <select value={cls} onChange={e => setCls(e.target.value)} style={{ ..._input, marginBottom: 6, width: '100%' }}>
-            {CATEGORY_ORDER.map(c => <option key={c} value={c}>{c}</option>)}
+            {CATEGORY_ORDER.map(c => <option key={c} value={c}>{t(categoryLabelKey(c)) || c}</option>)}
           </select>
         )}
         {activeCategory && (
@@ -490,7 +491,7 @@ function CreateSection({ setState, setSelection, activeCategory }: {
             fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
-            {activeCategory}
+            {t(categoryLabelKey(activeCategory)) || activeCategory}
           </div>
         )}
         <input
@@ -1385,7 +1386,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
     for (const cls of CATEGORY_ORDER) m.set(cls, [])
     for (const a of state.assets) {
       if (q && !a.name.toUpperCase().includes(q) && !a.class.toUpperCase().includes(q)) continue
-      const c = a.class.toUpperCase()
+      const c = assetDisplayClass(a.class)
       const list = m.get(c) ?? []
       list.push(a); m.set(c, list)
     }

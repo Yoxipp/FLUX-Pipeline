@@ -1,5 +1,5 @@
-// ProductionAsset — root shows 4 big category tiles (Charas / Enviros /
-// Props / FX). Click a tile → drilldown view listing just that category's
+// ProductionAsset — root shows big category tiles (Chara / Enviro /
+// Props). Click a tile → drilldown view listing just that category's
 // assets, with a back button. Clicking empty background deselects.
 
 import { useMemo } from 'react'
@@ -41,7 +41,7 @@ export function ProductionAsset({
     if (e.target === e.currentTarget) setSelection({ kind: 'none' })
   }
 
-  // ── Root : 4 tiles ──────────────────────────────────────────────────────────
+  // ── Root : tiles ──────────────────────────────────────────────────────────
   if (!activeCategory) {
     return (
       <div

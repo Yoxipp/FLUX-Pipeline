@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { api } from '../../api/client'
+import { useI18n } from '../../i18n'
 import type { ProductionState } from '../../types'
 import type { Selection } from './Production'
 import { createShotBatch } from './taskActions'
+import { CATEGORY_ORDER, categoryLabelKey } from './util'
 import type { CreateKind } from './CreateMenu'
 
 interface Props {
@@ -21,7 +23,8 @@ export function NewProductionDialog({ project, mode, state, setState, selection,
     ? initialKind : mode === 'shot' ? state.sequences.length ? 'shot' : 'seq' : 'asset')
   const [seqId, setSeqId] = useState(selection.kind === 'seq' ? selection.id : selection.kind === 'shot' ? state.shots.find(s => s.id === selection.id)?.seq_id ?? '' : state.sequences[0]?.id ?? '')
   const [category, setCategory] = useState('CHAR')
-  const [categories, setCategories] = useState(['CHAR', 'PROPS', 'ENV', 'FXRIG'])
+  const [categories, setCategories] = useState<string[]>([...CATEGORY_ORDER])
+  const { t } = useI18n()
   const [name, setName] = useState('')
   const [main, setMain] = useState('')
   const [secondary, setSecondary] = useState('')
@@ -29,7 +32,9 @@ export function NewProductionDialog({ project, mode, state, setState, selection,
   const [count, setCount] = useState(1)
   const [error, setError] = useState('')
   useEffect(() => { void api.getTokens(project).then(r => {
-    const classes = Object.entries(r.tokens.CLASS ?? {}).filter(([, path]) => !path.includes('{seq}') && !path.includes('{shot}')).map(([token]) => token)
+    // FXRIG is no longer created from Production (2026-11-06). Known classes first, in display order.
+    const rank = (c: string) => { const i = (CATEGORY_ORDER as readonly string[]).indexOf(c); return i < 0 ? CATEGORY_ORDER.length : i }
+    const classes = Object.entries(r.tokens.CLASS ?? {}).filter(([token, path]) => token !== 'FXRIG' && !path.includes('{seq}') && !path.includes('{shot}')).map(([token]) => token).sort((a, b) => rank(a) - rank(b))
     if (classes.length) { setCategories(classes); setCategory(classes.includes('CHAR') ? 'CHAR' : classes[0]) }
   }).catch(() => {}) }, [project])
   const create = () => {
@@ -72,7 +77,7 @@ export function NewProductionDialog({ project, mode, state, setState, selection,
       <Dialog.Description>Créer dans {project}</Dialog.Description>
       <form onSubmit={e => { e.preventDefault(); create() }} className="production-create-form">
         <label>Type<select value={kind} onChange={e => { setKind(e.target.value); setError('') }}>{mode === 'shot' ? <><option value="shot">Shot</option><option value="seq">Séquence</option></> : <><option value="asset">Asset</option><option value="group">Groupe</option></>}</select></label>
-        {mode === 'asset' ? <><label>Catégorie<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(c => <option key={c}>{c}</option>)}</select></label><label>Nom<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="HERO" required /></label></> : <>
+        {mode === 'asset' ? <><label>Catégorie<select value={category} onChange={e => setCategory(e.target.value)}>{categories.map(c => <option key={c} value={c}>{categoryLabelKey(c) ? t(categoryLabelKey(c)) : c}</option>)}</select></label><label>Nom<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="HERO" required /></label></> : <>
           {kind === 'shot' && <><label>Séquence<select required value={seqId} onChange={e => setSeqId(e.target.value)}><option value="">Choisir une séquence</option>{state.sequences.map(s => <option key={s.id} value={s.id} disabled={Boolean(s.locked)}>{s.name}{s.label ? ` · ${s.label}` : ''}{s.locked ? ' · verrouillée' : ''}</option>)}</select></label><label>Nombre de shots<input type="number" min={1} max={1000} required value={count} onChange={e => setCount(Number(e.target.value))} /></label></>}
           <div className="production-number-fields"><label>Numéro principal<input inputMode="numeric" pattern="[0-9]{0,3}" maxLength={3} value={main} onChange={e => setMain(e.target.value.replace(/\D/g, ''))} placeholder="Auto" /></label><label>Secondaire<input inputMode="numeric" pattern="[0-9]?" maxLength={1} value={secondary} onChange={e => setSecondary(e.target.value.replace(/\D/g, ''))} placeholder="0" /></label></div>
           <p className="tracking-muted">1 + 0 → 0010. Les shots suivants avancent par pas de 10.</p><label>Libellé<input value={label} onChange={e => setLabel(e.target.value)} placeholder="Optionnel" /></label>

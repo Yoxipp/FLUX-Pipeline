@@ -13,7 +13,13 @@ export function departmentRank(state: ProductionState, entity: TrackingEntity, d
 }
 
 /** Retake B2: asset classes shown first, in this order; other classes follow alphabetically. */
-export const ASSET_CLASS_ORDER = ['CHAR', 'PROPS', 'ENV']
+export const ASSET_CLASS_ORDER = ['CHAR', 'ENV', 'PROPS']
+
+/** Group an asset class shows under: FXRIG is animated, so under Chara (display only, the token stays). */
+export const assetDisplayClass = (cls: string): string => {
+  const key = cls.toUpperCase()
+  return key === 'FXRIG' ? 'CHAR' : key
+}
 
 /**
  * Retake B4 "Deadline + Me concerne": rows with a task assigned to me first, then the
@@ -43,7 +49,7 @@ export function productionRowGroups(state: ProductionState, entities: TrackingEn
   if (mode === 'asset') {
     const byClass = new Map<string, TrackingEntity[]>()
     for (const entity of entities) {
-      const cls = ('class' in entity ? entity.class : '').toUpperCase() || 'OTHER'
+      const cls = assetDisplayClass('class' in entity ? entity.class : '') || 'OTHER'
       if (!byClass.has(cls)) byClass.set(cls, [])
       byClass.get(cls)!.push(entity)
     }
