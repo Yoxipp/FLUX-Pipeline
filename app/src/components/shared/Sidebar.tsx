@@ -5,7 +5,7 @@ import {
   Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
+  Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2, Unplug,
   ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench, MessagesSquare,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
@@ -172,9 +172,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const toolVisible = !!toolPages && (toolPages.pages.some(p => !p.shadowed) || toolPages.can_edit.team || toolPages.can_edit.project)
   const [presets, setPresets] = useState<Preset[]>([])
 
-  // Multi-instance (cluster C): which instance each DCC targets. The selector row
-  // control only appears when a DCC exposes more than one running instance.
-  const { activePort, setActivePort } = useActiveInstances(dccStatus)
+  // Multi-instance (cluster C): which instance each DCC targets, chosen in the launcher menu.
+  const { activePort, setActivePort, disconnect, isDisconnected } = useActiveInstances(dccStatus)
 
   // Close an instance: normal close first (the DCC may ask to save); if it stays,
   // the toast offers "Forcer" (kill, unsaved work lost).
@@ -197,7 +196,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       toast.error(`Fermeture de ${label} : ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
     }
   }, [])
-  const [instMenu, setInstMenu] = useState<{ statusKey: string; name: string; y: number } | null>(null)
 
   // Load the active project's presets (for button colour + menu), refresh on edits.
   useEffect(() => {
@@ -672,6 +670,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       : soft === 'unreal' ? unrealServerOk : null) === true
     const instances = dccStatus[statusKey]?.instances ?? []
     const mayaStuck = soft === 'maya' && !!dccStatus[statusKey]?.stuck
+    const canDisconnect = soft === 'maya' || soft === 'houdini'
     // New Scene: presets of the active project for this soft, grouped by TASK token.
     const linked = presets.filter(p => p.soft === soft && p.file)
     const groups = new Map<string, Preset[]>()
@@ -719,11 +718,40 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           </Menu.SubContent>
         </Menu.Portal>
       </Menu.Sub>}
-      {instances.length > 1 && (
-        <Menu.Item className="launcher-menu-item" onSelect={() => setInstMenu({ statusKey, name, y: launcherAnchorY(soft) })}>
-          <Layers size={13} />Instances<span className="launcher-menu-hint">{instances.length} · port {activePort(statusKey) ?? '-'}</span>
-        </Menu.Item>
-      )}
+      {/* The instance FLUX works with is chosen here (2026-11-06). Maya and Houdini can
+          be disconnected: their publish then waits for a choice. */}
+      {instances.length > 0 && (instances.length > 1 || canDisconnect) && <>
+        <Menu.Separator className="launcher-menu-separator" />
+        <Menu.Label className="launcher-menu-label">{instances.length > 1 ? 'Choisir l’instance' : 'Instance'}</Menu.Label>
+        {instances.map(inst => {
+          const active = inst.port === activePort(statusKey)
+          return (
+            <Menu.Item key={inst.id} className="launcher-menu-item" onSelect={() => setActivePort(statusKey, inst.port)}
+              title={[inst.scene, inst.pid ? `pid ${inst.pid}` : ''].filter(Boolean).join(' · ')}>
+              <span style={{ width: 13, display: 'inline-flex', flexShrink: 0 }}>{active && <Check size={13} color="var(--accent-hi)" />}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {inst.scene != null ? inst.label : inst.pid ? `pid ${inst.pid}` : inst.label}
+              </span>
+              <span className="launcher-menu-hint">{inst.state === 'busy' ? 'occupé · ' : ''}:{inst.port}</span>
+              <span role="button" title={`Fermer ${name} :${inst.port}`}
+                onClick={e => { e.stopPropagation(); setLauncherMenu(null); void closeInstance(statusKey, name, inst.port) }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: 4, color: 'var(--ink-4)', flexShrink: 0 }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--err)' }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--ink-4)' }}>
+                <X size={10} strokeWidth={2.25} />
+              </span>
+            </Menu.Item>
+          )
+        })}
+        {canDisconnect && activePort(statusKey) != null && (
+          <Menu.Item className="launcher-menu-item" title={`FLUX n'utilise plus ${name}, qui reste ouvert`} onSelect={() => disconnect(statusKey)}>
+            <Unplug size={13} />Déconnecter
+          </Menu.Item>
+        )}
+        {canDisconnect && isDisconnected(statusKey) && (
+          <Menu.Label className="launcher-menu-label" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>Déconnecté : choisis une instance</Menu.Label>
+        )}
+      </>}
       {mayaStuck && (
         <Menu.Item className="launcher-menu-item launcher-menu-danger" disabled={reapingMaya} onSelect={() => void handleReapMaya()}>
           <AlertTriangle size={13} />Fermer l'instance bloquée (port 7001)
@@ -753,12 +781,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <Menu.Separator className="launcher-menu-separator" />
       <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
     </>
-  }
-
-  // Vertical anchor of a launcher row (the instance picker opens next to it).
-  const launcherAnchorY = (soft: string): number => {
-    const el = document.querySelector(`[aria-label="${SOFTWARE.find(x => x.key === soft)?.name ?? soft} : actions"]`)
-    return el ? el.getBoundingClientRect().top : window.innerHeight / 2
   }
 
   return (
@@ -879,68 +901,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
       <div style={{ flex: 1 }} />
 
-      {/* Instance picker — choose which running instance of a DCC the pipeline targets,
-          or close one (X: like the window's close button; "Forcer" only if it stays). */}
-      {instMenu && (() => {
-        const insts = dccStatus[instMenu.statusKey]?.instances ?? []
-        const current = activePort(instMenu.statusKey)
-        return (
-          <>
-            <div onClick={() => setInstMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-            <div style={{
-              position: 'fixed', left: 8, bottom: Math.max(8, window.innerHeight - instMenu.y),
-              width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
-              borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
-            }}>
-              <div style={{ padding: '4px 9px 6px', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-                Instance · {instMenu.name}
-              </div>
-              {insts.map((inst) => {
-                const active = inst.port === current
-                return (
-                  <button
-                    key={inst.id}
-                    onClick={() => { setActivePort(instMenu.statusKey, inst.port); setInstMenu(null) }}
-                    title={[inst.scene, inst.pid ? `pid ${inst.pid}` : ''].filter(Boolean).join(' · ')}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                      padding: '6px 9px', borderRadius: 5, border: 'none', cursor: 'pointer',
-                      fontSize: 11, fontFamily: 'var(--sans)',
-                      background: active ? 'var(--accent-soft)' : 'transparent',
-                      color: active ? 'var(--ink)' : 'var(--ink-2)',
-                    }}
-                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--accent-soft)' }}
-                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--accent-hi)', flexShrink: 0 }}>
-                      {inst.port}
-                    </span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {inst.scene != null ? inst.label : inst.pid ? `pid ${inst.pid}` : inst.label}
-                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}> · {inst.version}</span>}
-                    </span>
-                    {inst.state === 'busy' && (
-                      <span title="Occupé : un export tourne" style={{ fontSize: 10, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
-                    )}
-                    {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
-                    <span
-                      role="button"
-                      title={`Fermer ${instMenu.name} :${inst.port}`}
-                      onClick={e => { e.stopPropagation(); setInstMenu(null); void closeInstance(instMenu.statusKey, instMenu.name, inst.port) }}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16,
-                               borderRadius: 4, color: 'var(--ink-4)', flexShrink: 0 }}
-                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--err)'; e.currentTarget.style.background = 'var(--paper)' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--ink-4)'; e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <X size={10} strokeWidth={2.25} />
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </>
-        )
-      })()}
     </div>
   )
 }

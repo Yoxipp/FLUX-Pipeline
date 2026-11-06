@@ -30,7 +30,7 @@ import { TextureMapTable, mapParams as buildMapParams } from './publisher/Textur
 import { PublishDestination } from './publisher/PublishDestination'
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
-import { readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
+import { isInstanceDisconnected, readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
 import { useSessionState, readSession, writeSession, clearSession } from '../hooks/useSessionState'
 import { toast } from 'sonner'
 import { useTr } from '../i18n'
@@ -1877,7 +1877,8 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
         const r = await api.getDccInstances(dcc)
         if (cancelled) return
         setOpenInstances(r.instances)
-        setActiveInstPort(readActiveInstancePort(dcc) ?? r.active ?? r.instances[0]?.port ?? null)
+        setActiveInstPort(isInstanceDisconnected(dcc) ? null
+          : readActiveInstancePort(dcc) ?? r.active ?? (r.instances.length === 1 ? r.instances[0].port : null))
       } catch { if (!cancelled) setOpenInstances([]) }
     }
     void poll()
@@ -1895,24 +1896,39 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     }
     if (dcc === 'Maya' && scope) setMayaScope(scope)
   }
+  // The instance is chosen in the launcher (2026-11-06): the Publisher only shows it,
+  // and what is selected in it (a node to publish, or the Maya selection).
+  const activeInst = openInstances.find(i => i.port === activeInstPort)
+  const instancePortSeen = useRef<number | null>(null)
+  useEffect(() => {
+    if (instancePortSeen.current === activeInstPort) return
+    const first = instancePortSeen.current === null
+    instancePortSeen.current = activeInstPort
+    if (first || dcc !== 'Houdini') return
+    // Another Houdini was chosen in the launcher: a node of the previous one means nothing.
+    pickedNodeRef.current = null
+    autoExtForNodeRef.current = null
+    setRopNodePath(openInstances.find(i => i.port === activeInstPort)?.selection?.[0] ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeInstPort])
   const instanceChooser = openInstances.length > 1 && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-      <div className="cap">{openInstances.length} {dcc} {tr('ouverts : choisis celui qui publie', 'open: pick the one that publishes')}</div>
-      {openInstances.map(it => {
-        const on = it.port === activeInstPort
+      <div className="cap">{openInstances.length} {dcc} {tr('ouverts : le choix se fait dans le launcher', 'open: choose in the launcher')}</div>
+      {!activeInst && (
+        <div style={{ fontSize: 11, color: 'var(--warn)' }}>{tr('Aucune instance choisie : le publish attend ton choix.', 'No instance chosen: the publish waits for your choice.')}</div>
+      )}
+      {activeInst && (() => {
+        const it = activeInst
         const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : tr('Scène sans nom', 'Untitled scene')
         const sel = it.selection ?? []
         return (
-          <div key={it.port} onClick={() => chooseInstance(it.port, undefined, dcc === 'Maya' ? 'scene' : undefined)}
-            title={it.scene ?? ''}
-            style={{
-              padding: '7px 10px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-              border: '1px solid ' + (on ? 'var(--rule-3)' : 'var(--rule-2)'),
-              background: on ? 'var(--accent-soft)' : 'var(--paper)',
-              display: 'flex', flexDirection: 'column', gap: 5,
-            }}>
+          <div title={it.scene ?? ''} style={{
+            padding: '7px 10px', borderRadius: 6, minWidth: 0,
+            border: '1px solid var(--rule-3)', background: 'var(--accent-soft)',
+            display: 'flex', flexDirection: 'column', gap: 5,
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--rule-3)' }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: 'var(--accent)' }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{scene}</span>
               <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
             </div>
@@ -1921,12 +1937,12 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                 <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? tr('aucun node sélectionné', 'no node selected') : tr('rien de sélectionné', 'nothing selected')}</span>
               )}
               {sel.slice(0, 12).map(n => {
-                const picked = on && (dcc === 'Houdini' ? ropNodePath === n : mayaScope === 'selection')
+                const picked = dcc === 'Houdini' ? ropNodePath === n : mayaScope === 'selection'
                 return (
                   <span key={n} title={n}
-                    onClick={e => { e.stopPropagation(); chooseInstance(it.port, dcc === 'Houdini' ? n : undefined, dcc === 'Maya' ? 'selection' : undefined) }}
+                    onClick={() => chooseInstance(it.port, dcc === 'Houdini' ? n : undefined, dcc === 'Maya' ? 'selection' : undefined)}
                     style={{
-                      fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
+                      fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%', cursor: 'pointer',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       border: '1px solid ' + (picked ? 'var(--rule-3)' : 'var(--rule-2)'),
                       background: picked ? 'var(--accent-soft)' : 'var(--paper-2)',
@@ -1938,12 +1954,12 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             </div>
           </div>
         )
-      })}
+      })()}
     </div>
   )
 
-  // Several Maya / Houdini open: ask which one publishes before starting.
-  const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; pid?: number | null; label: string; scene: string | null }[] } | null>(null)
+  // Maya / Houdini: FLUX never guesses which instance publishes. Disconnected, or several
+  // open without a valid choice: refused with the way out (the launcher).
   const requestPublish = useCallback(async () => {
     if (publishing) return
     if (dcc === 'Maya' || dcc === 'Houdini') {
@@ -1954,8 +1970,12 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
         // another Maya / Houdini is another scene): else ask.
         const same = chosen ? r.instances.find(i => i.port === chosen.port) : undefined
         const valid = !!same && (chosen!.pid == null || same.pid == null || same.pid === chosen!.pid)
+        if (r.instances.length > 0 && isInstanceDisconnected(dcc)) {
+          toast.error(tr(`${dcc} est déconnecté de FLUX : choisis une instance dans le launcher.`, `${dcc} is disconnected from FLUX: choose an instance in the launcher.`))
+          return
+        }
         if (r.instances.length > 1 && !valid) {
-          setInstancePick({ dcc, items: r.instances })
+          toast.error(tr(`${r.instances.length} ${dcc} ouverts : choisis celui qui publie dans le launcher.`, `${r.instances.length} ${dcc} open: choose the one that publishes in the launcher.`))
           return
         }
         if (r.instances.length === 1 && !valid) {
@@ -1965,17 +1985,6 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     }
     void handlePublish()
   }, [dcc, publishing, handlePublish])
-  const publishOn = (port: number) => {
-    if (!instancePick) return
-    const pid = instancePick.items.find(i => i.port === port)?.pid ?? null
-    setInstancePick(null)
-    writeMapAndPublish(instancePick.dcc, port, pid)
-  }
-  // Houdini follows the backend choice: let it land before the publish call.
-  const writeMapAndPublish = (dccKey: string, port: number, pid: number | null) => {
-    writeActiveInstancePort(dccKey, port, pid)
-    void api.setActiveInstance(dccKey, port, pid).catch(() => undefined).then(() => handlePublish())
-  }
 
   const filename = buildFilename()
 
@@ -2972,47 +2981,6 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
       </>}
 
       {/* Instance picker: several Maya / Houdini are open */}
-      {instancePick && (
-        <div onClick={() => setInstancePick(null)} style={{
-          position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.45)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-        }}>
-          <div className="card" onClick={e => e.stopPropagation()} style={{
-            width: 440, maxWidth: '100%', padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
-            background: 'var(--paper-2)', boxShadow: 'var(--shadow-md)',
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-              {tr(`Publier depuis quel ${instancePick.dcc} ?`, `Publish from which ${instancePick.dcc}?`)}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {tr(`${instancePick.items.length} instances ouvertes. Le choix reste actif pour les prochains publishs.`, `${instancePick.items.length} open instances. The choice stays active for the next publishes.`)}
-            </div>
-            {instancePick.items.map(it => {
-              const active = readActiveInstancePort(instancePick.dcc) === it.port
-              const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : tr('Scène sans nom', 'Untitled scene')
-              return (
-                <div key={it.port} onClick={() => publishOn(it.port)} title={it.scene ?? ''} style={{
-                  padding: '9px 12px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-                  border: '1px solid ' + (active ? 'var(--rule-3)' : 'var(--rule-2)'),
-                  background: active ? 'var(--accent-soft)' : 'var(--paper)',
-                  display: 'flex', alignItems: 'center', gap: 10,
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scene}</div>
-                    <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      port {it.port}{it.scene ? ` · ${it.scene}` : ''}
-                    </div>
-                  </div>
-                  {active && <span style={{ fontSize: 11, color: 'var(--accent-hi)', flexShrink: 0 }}>{tr('actif', 'active')}</span>}
-                </div>
-              )
-            })}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Btn ghost onClick={() => setInstancePick(null)}>{tr('Annuler', 'Cancel')}</Btn>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

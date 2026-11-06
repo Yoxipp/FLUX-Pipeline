@@ -5,18 +5,19 @@
 // that choice valid as instances come and go, and persists it across reloads.
 // One hook for the whole status map (never one per row) so hook order is stable.
 //
-// A1 (2026-09-27): the choice is (port, pid). A port taken back by another process
-// (the chosen Houdini closed, a new one opened) is NOT the chosen instance: with one
-// instance left FLUX switches to it and says so, with several it asks.
+// Rules (pure, tested) in lib/activeInstance.ts: one instance connects alone, with several
+// the choice is made in the launcher (2026-11-06).
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DccStatusMap } from '../types'
 import { api } from '../api/client'
+import { reconcileChoices, targetPort, type ActiveChoice, type Choices } from '../lib/activeInstance'
 
 const LS_KEY = 'flux.activeInstance'   // { [dccStatusKey]: {port, pid} } (old: port only)
+const LS_OFF_KEY = 'flux.disconnectedInstances'   // { [dccStatusKey]: true }
 
-export interface ActiveChoice { port: number; pid: number | null }
+export type { ActiveChoice }
 
 function normalize(v: unknown): ActiveChoice | null {
   if (typeof v === 'number') return { port: v, pid: null }          // stored before A1
@@ -46,6 +47,24 @@ function writeMap(m: Record<string, ActiveChoice>): void {
   try { localStorage.setItem(LS_KEY, JSON.stringify(m)) } catch { /* blocked */ }
 }
 
+function readOff(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(LS_OFF_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeOff(m: Record<string, boolean>): void {
+  try { localStorage.setItem(LS_OFF_KEY, JSON.stringify(m)) } catch { /* blocked */ }
+}
+
+/** True when the user disconnected this DCC from FLUX in the launcher. */
+export function isInstanceDisconnected(dccKey: string): boolean {
+  return !!readOff()[dccKey]
+}
+
 /**
  * Read the currently-selected instance port for a DCC without a hook or the
  * status map — for callers (Publisher, Importer) that only need to route a
@@ -63,75 +82,50 @@ export function readActiveInstance(dccKey: string): ActiveChoice | null {
 }
 
 /** Store the chosen instance of a DCC (localStorage + backend, so the Houdini
- *  client follows it). Used by the publish picker outside the sidebar hook. */
+ *  client follows it). Used by the Publisher outside the sidebar hook. */
 export function writeActiveInstancePort(dccKey: string, port: number, pid: number | null = null): void {
   writeMap({ ...readMap(), [dccKey]: { port, pid } })
   void api.setActiveInstance(dccKey, port, pid).catch(() => { /* backend down: next push */ })
 }
 
 export interface ActiveInstances {
-  /** port currently targeted for a DCC, or null when it has no instance up. */
+  /** port currently targeted for a DCC, or null when none is (none up, several without a choice, disconnected). */
   activePort: (dccKey: string) => number | null
-  /** choose the active instance port for a DCC. */
+  /** choose the active instance port for a DCC (reconnects it). */
   setActivePort: (dccKey: string, port: number) => void
+  /** stop working with this DCC until it is chosen again. Does not close it. */
+  disconnect: (dccKey: string) => void
+  isDisconnected: (dccKey: string) => boolean
 }
 
 export function useActiveInstances(status: DccStatusMap): ActiveInstances {
-  const [map, setMap] = useState<Record<string, ActiveChoice>>(readMap)
+  const [map, setMap] = useState<Choices>(readMap)
+  const [off, setOff] = useState<Record<string, boolean>>(readOff)
   // One warning per lost choice, not one per status tick.
   const warned = useRef<Record<string, string>>({})
 
-  // Reconcile the stored choice against what is actually running: a chosen port gone
-  // or held by another pid is a closed instance. One instance left: take it (said);
-  // several: keep none chosen, the Publisher asks before publishing.
+  // Reconcile the stored choices against what is actually running.
   useEffect(() => {
-    let changed = false
-    const next = { ...map }
-    for (const [dccKey, entry] of Object.entries(status)) {
-      const insts = entry.instances ?? []
-      if (insts.length === 0) continue
-      const cur = next[dccKey]
-      const same = cur ? insts.find((i) => i.port === cur.port) : undefined
-      const gone = !!cur && (!same || (cur.pid != null && same.pid != null && same.pid !== cur.pid))
-      if (cur && same && !gone && cur.pid == null && same.pid != null) {
-        next[dccKey] = { port: cur.port, pid: same.pid }           // learn the pid of an old choice
-        changed = true
-        continue
-      }
-      if (cur && !gone) continue
-      if (gone) {
-        const key = `${cur!.port}:${cur!.pid}`
-        if (warned.current[dccKey] !== key) {
-          warned.current[dccKey] = key
-          if (insts.length === 1) {
-            toast.warning(`${dccKey} choisi (port ${cur!.port}) ferme : FLUX travaille maintenant avec ${insts[0].label}`)
-          } else {
-            toast.warning(`${dccKey} choisi (port ${cur!.port}) ferme : ${insts.length} autres ouverts, choisis celui qui travaille`)
-          }
-        }
-        if (insts.length > 1) {
-          delete next[dccKey]
-          changed = true
-          continue
-        }
-      }
-      next[dccKey] = { port: insts[0].port, pid: insts[0].pid ?? null }   // sorted ascending by port
-      changed = true
+    const r = reconcileChoices(map, status, off)
+    for (const l of r.lost) {
+      const key = `${l.lost.port}:${l.lost.pid}`
+      if (warned.current[l.dcc] === key) continue
+      warned.current[l.dcc] = key
+      toast.warning(l.taken
+        ? `${l.dcc} choisi (port ${l.lost.port}) fermé : FLUX travaille maintenant avec ${l.taken.label ?? `le port ${l.taken.port}`}`
+        : `${l.dcc} choisi (port ${l.lost.port}) fermé : ${l.remaining} autres ouverts, choisis celui qui travaille dans le launcher`)
     }
-    if (changed) {
-      setMap(next)
-      writeMap(next)
+    if (r.changed) {
+      setMap(r.choices)
+      writeMap(r.choices)
+      setOff(r.disconnected)
+      writeOff(r.disconnected)
     }
   }, [status])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const activePort = useCallback(
-    (dccKey: string): number | null => {
-      const insts = status[dccKey]?.instances ?? []
-      if (insts.length === 0) return null
-      const cur = map[dccKey]
-      return cur != null && insts.some((i) => i.port === cur.port) ? cur.port : insts[0].port
-    },
-    [status, map],
+    (dccKey: string): number | null => targetPort(dccKey, map, status[dccKey]?.instances ?? [], off),
+    [status, map, off],
   )
 
   // The backend keeps the choice in memory (restart = base port): push it on every
@@ -149,7 +143,30 @@ export function useActiveInstances(status: DccStatusMap): ActiveInstances {
       writeMap(nextMap)
       return nextMap
     })
+    setOff((prev) => {
+      const next = { ...prev }
+      delete next[dccKey]
+      writeOff(next)
+      return next
+    })
   }, [status])
 
-  return { activePort, setActivePort }
+  const disconnect = useCallback((dccKey: string) => {
+    setMap((prev) => {
+      const nextMap = { ...prev }
+      delete nextMap[dccKey]
+      writeMap(nextMap)
+      return nextMap
+    })
+    setOff((prev) => {
+      const next = { ...prev, [dccKey]: true }
+      writeOff(next)
+      return next
+    })
+    void api.setActiveInstance(dccKey, null).catch(() => { /* backend down */ })
+  }, [])
+
+  const isDisconnected = useCallback((dccKey: string) => !!off[dccKey], [off])
+
+  return { activePort, setActivePort, disconnect, isDisconnected }
 }
