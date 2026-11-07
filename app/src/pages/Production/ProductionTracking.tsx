@@ -7,7 +7,7 @@ import { CalendarClock, Check, ChevronDown, ChevronRight, ImagePlus, Search, Set
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
-import type { ProductionDependency, ProductionState, ProductionTask, ProductionThumbnail } from '../../types'
+import type { ProductionDependency, ProductionPublish, ProductionState, ProductionTask, ProductionThumbnail } from '../../types'
 import type { Selection } from './Production'
 import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, assigneeIncludes, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
 import type { TrackingEntity } from './tracking'
@@ -35,7 +35,8 @@ interface Props {
   setState: (patch: (prev: ProductionState) => ProductionState) => void
   selection: Selection
   setSelection: (s: Selection) => void
-  onOpenDetail: (selection: Selection, task: ProductionTask, subtask?: string) => void
+  onOpenDetail: (selection: Selection, task: ProductionTask, subtask?: string, version?: string) => void
+  publishesByTask: Record<string, ProductionPublish[]>
   onEdit: () => void
   onNew: (kind?: CreateKind) => void
   onSettings: () => void
@@ -47,7 +48,7 @@ interface Props {
 const LS_SORT_DEADLINE_MINE = 'flux.production.sort.deadlineMine'
 const IDENTITY_WIDTH = 280, TIMING_WIDTH = 110, CASTING_WIDTH = 170, DEPARTMENT_MIN_WIDTH = 110
 
-export function ProductionTracking({ project, mode, state, setState, selection, setSelection, onOpenDetail, onEdit, onNew, onSettings, onOpenEntity, onlyEntityId, loading }: Props) {
+export function ProductionTracking({ project, mode, state, setState, selection, setSelection, onOpenDetail, publishesByTask, onEdit, onNew, onSettings, onOpenEntity, onlyEntityId, loading }: Props) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useProductionShow(project, mode, onlyEntityId)
   const [sort, setSort] = useState<DepartmentSort>(null)
@@ -215,7 +216,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                 previewMenu={isShot ? { sources: previewSources(previewCandidates(state, entity)), current: previewSource, onPick: setPreviewSource, title: t('prod.preview.source'), hint: t('prod.preview.sourceHint') } : undefined} />
               <div className="tracking-name">
                 {!isShot && <span className="tracking-parent">{entity.class}</span>}
-                <EntityContextMenu project={project} state={state} entity={entity} setState={setState} setSelection={setSelection} onEdit={onEdit} />
+                <EntityContextMenu project={project} state={state} entity={entity} setState={setState} setSelection={setSelection} onEdit={onEdit} publishesByTask={publishesByTask} onOpenVersion={(task, version) => onOpenDetail(selectEntity(entity), task, undefined, version)} />
                 {isShot && <div className="tracking-label-row">{entity.label && <span className="tracking-label" title={entity.label}>{entity.label}</span>}<ShotDeadlineBadge state={state} shot={entity} calendar={calendar} /></div>}
               </div>
             </div></td>

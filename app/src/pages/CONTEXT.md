@@ -113,6 +113,9 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   Cette valeur explicite cache meme un badge fixe sans retirer la tache, les sous-taches,
   l'artiste ou les notes ; le clic droit de la cellule permet de choisir un nouveau statut.
   Un badge fixe efface ne suffit pas a faire passer le shot en Done.
+* Tache (ADR 0088) : `MenuSpec.taskPanel` ouvre `TaskDetail` en panneau a droite, plus d'onglet de tache. Sections repliables
+  (`Fold`, etat par poste), `PathBrowser` reste monte replie car il resout le dossier. `taskPublishes.ts` : versions et tri.
+  Clic droit d'une entite : "Ouvrir une version" (`initialOpen.version`).
 * Retakes : `TaskDetail.renderHeader` insere le statut et les actions dans le seul bandeau
   colore `TaskStrip`. Aucune suppression de tache/sous-tache depuis cette page.
   Sidebar Production : clic sur Production = deplie Assets/Shots, fermeture aux changements

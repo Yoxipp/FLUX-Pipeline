@@ -13,6 +13,7 @@ import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset, isCustomAccent } from '../../lib/accentPresets'
 import { SOFTWARE } from '../../lib/dccs'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { useNavRail } from '../../hooks/useNavRail'
 import { useWorkProfile } from '../../WorkProfileContext'
 import { useProject } from '../../ProjectContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
@@ -47,6 +48,7 @@ export function UserSettings({ username }: { username: string }) {
   const [logColors, setLogColors] = useState<Record<string, string>>({})
   const { isEnabled: isDccEnabled, setEnabled: setEnabledDccs } = useEnabledDccs()
   const workProfile = useWorkProfile()
+  const [navRail, setNavRail] = useNavRail()
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -134,6 +136,13 @@ export function UserSettings({ username }: { username: string }) {
             {!isCustomAccent(accentKey) && '+'}
           </label>
         </div>
+      </div>
+
+      <div className="card" style={card}>
+        <label style={{ ...row, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={navRail} onChange={e => setNavRail(e.target.checked)} style={{ accentColor: 'var(--accent)', margin: 0 }} />
+          {t('settings.navRail')}
+        </label>
       </div>
 
       <SecTitle>{t('settings.logColors')}</SecTitle>

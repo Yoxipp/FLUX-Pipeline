@@ -7,7 +7,8 @@ import { Eye, LockKeyhole, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { productionSync } from '../../hooks/useProduction'
-import type { ProductionState } from '../../types'
+import type { ProductionPublish, ProductionState, ProductionTask } from '../../types'
+import { publishVersion, sortPublishes } from './taskPublishes'
 import type { Selection } from './Production'
 import { useArchiveDelete, UNLOCK_PHRASE } from './MenuEdit'
 import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
@@ -16,10 +17,12 @@ import { trackingLocked, type TrackingEntity } from './tracking'
 import { viewportRect } from '../../components/shared/tooltipPosition'
 import { shotFollowKey, useFavorites } from '../../hooks/useFavorites'
 
-export function EntityContextMenu({ project, state, entity, setState, setSelection, onEdit }: {
+export function EntityContextMenu({ project, state, entity, setState, setSelection, onEdit, publishesByTask, onOpenVersion }: {
   project: string; state: ProductionState; entity: TrackingEntity
   setState: (patch: (prev: ProductionState) => ProductionState) => void
   setSelection: (selection: Selection) => void; onEdit: () => void
+  publishesByTask: Record<string, ProductionPublish[]>
+  onOpenVersion: (task: ProductionTask, version: string) => void   // opens the task panel on that version
 }) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -74,6 +77,11 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible') }
     finally { setBusy(false) }
   }
+  // Tasks that have at least one versioned publish, for "Ouvrir une version".
+  const versioned = entity.tasks.flatMap(task => {
+    const versions = sortPublishes(publishesByTask[`${entity.id}|${task.id}`] ?? []).map(p => publishVersion(p.file)).filter(Boolean)
+    return versions.length ? [{ task, versions: [...new Set(versions)] }] : []
+  })
   return <>
     <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title={isShot ? `Clic droit : Edit, ${followed ? 'Ne plus suivre' : 'Suivre'}, Calendar, Lock, Nouveau dossier, Delete` : 'Clic droit : Edit, Nouveau dossier, Delete'}
       onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
@@ -84,6 +92,21 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
       <Dropdown.Portal><Dropdown.Content className="production-context-menu" align="start" collisionPadding={10}>
         <Dropdown.Label className="production-menu-artist">{entity.name}</Dropdown.Label>
         <Dropdown.Item className="production-menu-item" onSelect={() => { setSelection(selection); onEdit() }}>Edit</Dropdown.Item>
+        <Dropdown.Sub>
+          <Dropdown.SubTrigger disabled={!versioned.length} className="production-menu-item">Ouvrir une version</Dropdown.SubTrigger>
+          <Dropdown.Portal><Dropdown.SubContent className="production-context-menu" sideOffset={4} collisionPadding={10}>
+            {versioned.map(({ task, versions }) => (
+              <Dropdown.Sub key={task.id}>
+                <Dropdown.SubTrigger className="production-menu-item">{task.name}</Dropdown.SubTrigger>
+                <Dropdown.Portal><Dropdown.SubContent className="production-context-menu" sideOffset={4} collisionPadding={10} style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {versions.map(version => (
+                    <Dropdown.Item key={version} className="production-menu-item" onSelect={() => onOpenVersion(task, version)}>{version}</Dropdown.Item>
+                  ))}
+                </Dropdown.SubContent></Dropdown.Portal>
+              </Dropdown.Sub>
+            ))}
+          </Dropdown.SubContent></Dropdown.Portal>
+        </Dropdown.Sub>
         {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => { void toggleKey(followKey); toast.success(followed ? `${entity.name} : plus suivi` : `${entity.name} suivi : ses events arrivent dans la cloche > Self`) }}>{followed ? 'Ne plus suivre' : 'Suivre le shot'}</Dropdown.Item>}
         {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => navigate(`/calendar?${new URLSearchParams({ seq: seq?.name ?? '', shot: entity.name, project })}`)}>Calendar</Dropdown.Item>}
         {isShot && <Dropdown.Item disabled={busy || inherited} className="production-menu-item" onSelect={() => { if (locked) setUnlock(true); else void lock(true) }}>{locked ? 'Unlock' : 'Lock'}{inherited ? ` · ${seq?.name}` : ''}</Dropdown.Item>}

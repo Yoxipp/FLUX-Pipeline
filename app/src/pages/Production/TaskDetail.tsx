@@ -1,4 +1,5 @@
-// TaskDetail — Notes + completion + subtasks + Comments + Recent Publishes.
+// TaskDetail — the light task panel (2026-11-06): status, artist, last publish, version,
+// Ouvrir, Folder Manager, then folded notes, comments, subtasks, publishes, media, USD, path.
 //
 // Also used for the Subtask view; when `subtaskFilter` is set, the Subtasks
 // section is hidden and detail state (notes/completion/comments) writes into
@@ -8,8 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  Check, Clapperboard, Copy, Download, Film, FolderOpen, FolderTree, Heart, History,
-  Image as ImageIcon, List, Pin, RotateCcw, Trash2, UploadCloud, X,
+  Check, ChevronDown, ChevronRight, Clapperboard, Copy, Download, Film, FolderOpen, FolderTree, Heart, History,
+  Image as ImageIcon, List, RotateCcw, Trash2, UploadCloud, X,
 } from 'lucide-react'
 import { api, type RefVersion, type UsdAssetInfo, type UsdShotInfo } from '../../api/client'
 import { readSession, writeSession } from '../../hooks/useSessionState'
@@ -25,6 +26,7 @@ import type {
 } from '../../types'
 import { expandFluxPath, taskColorFromName } from './util'
 import { notifyRefChange } from './previewSourceStore'
+import { publishOfVersion, publishVersion, sortPublishes } from './taskPublishes'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 
 interface Props {
@@ -35,8 +37,8 @@ interface Props {
   subtaskFilter: string | null
   detailKey:     string                         // task_details key : "<task>" or "<task>|<subtask>"
   headerActions?: React.ReactNode
-  pinned?:       boolean
-  onTogglePin?:  () => void
+  initialVersion?: string                       // version picked from the entity context menu
+  onClose:       () => void
   onPatchTask:   (patch: Partial<ProductionTask>) => void
   onPatchDetail: (patch: Partial<ProductionTaskDetail>) => void
   renderHeader?: (actions: React.ReactNode) => React.ReactNode
@@ -51,7 +53,7 @@ const CLASS_TO_PUBLISHER_CATEGORY: Record<string, string> = {
 
 export function TaskDetail({
   asset, task, entityKind, publishes, subtaskFilter, detailKey,
-  pinned, onTogglePin, headerActions,
+  initialVersion, onClose, headerActions,
   onPatchTask, onPatchDetail, renderHeader,
 }: Props) {
   const { t }        = useI18n()
@@ -75,13 +77,10 @@ export function TaskDetail({
   // Current TASK/INSTANCE selection mirrored up from PathBrowser — feeds "Publish here".
   const [sel, setSel] = useState<{ task: string; instance: string }>({ task: '', instance: '' })
 
-  // Newest first, by date+time (ISO date + HH:MM sort lexicographically).
-  const sortedPublishes = [...publishes].sort(
-    (a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`),
-  )
+  const sortedPublishes = sortPublishes(publishes)
   const latestPublish = sortedPublishes[0] ?? null
   // Version picker: the publish whose note and comments are shown (newest by default).
-  const [publishId, setPublishId] = useState('')
+  const [publishId, setPublishId] = useState(() => publishOfVersion(sortedPublishes, initialVersion)?.id ?? '')
   const selPublish = sortedPublishes.find(p => p.id === publishId) ?? latestPublish
   const selVersion = selPublish ? publishVersion(selPublish.file) : ''
 
@@ -182,177 +181,214 @@ export function TaskDetail({
         <button onClick={goPublishHere} title="Faire un publish ici" style={_headerBtn}>
           <UploadCloud size={12} strokeWidth={1.75} color="var(--accent-hi)" />
         </button>
-        {/* folder actions on this task/subtask's resolved folder */}
         <button onClick={copyTaskFolder} title="Copier le chemin du dossier" style={_headerBtn}>
           <Copy size={12} strokeWidth={1.75} />
         </button>
-        <button onClick={openTaskFolder} title="Ouvrir dans le Folder Manager" style={_headerBtn}>
-          <FolderTree size={12} strokeWidth={1.75} />
-        </button>
-        {/* pin — machine-wide, keeps this tab across restarts */}
-        {onTogglePin && (
-          <button
-            onClick={() => onTogglePin()}
-            title={pinned ? 'Désépingler' : 'Épingler cet onglet'}
-            style={_headerBtn}
-          >
-            <Pin
-              size={12} strokeWidth={1.75}
-              color={pinned ? 'var(--accent-hi)' : 'var(--ink-3)'}
-              fill={pinned ? 'var(--accent)' : 'none'}
-            />
-          </button>
-        )}
         {/* favorite heart — user-wide, wired below */}
         <FavoriteToggle detailKey={detailKey} asset={asset} task={task} subtask={subtaskFilter} />
+        <button onClick={onClose} title="Fermer" aria-label="Fermer le panneau de tâche" style={_headerBtn}>
+          <X size={12} strokeWidth={1.75} />
+        </button>
   </div>
 
+  const taskUpper = task.name.toUpperCase()
+  const artist = (subtaskFilter ? asset.task_details?.[`${taskUpper}|${subtaskFilter.toUpperCase()}`]?.assignee : undefined)
+    ?? asset.task_details?.[taskUpper]?.assignee ?? ''
+  const selRel = selPublish?.dest_folder && project ? projectRelPath(project, `${selPublish.dest_folder}/${selPublish.file}`) : ''
+  const comments = (detail.comments || []).filter(c => !c.version || !selVersion || c.version === selVersion)
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <aside className="task-panel" aria-label={`Tâche ${task.name}`}>
       {renderHeader ? renderHeader(headerControls) : <div className="production-retake-header">{headerControls}</div>}
 
-      {/* two-column body */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: 0 }}>
-        {/* Left: notes / completion / subtasks / comments */}
-        <div style={{ padding: '10px 14px', overflowY: 'auto', borderRight: '1px solid var(--rule)' }}>
-          <Section label={t('prod.notes')}>
-            {/* Global task note (task_details[key].notes), always editable, saved on change. */}
-            <textarea
-              value={detail.notes || ''}
-              onChange={e => onPatchDetail({ notes: e.target.value })}
-              placeholder={t('prod.taskNotePlaceholder')}
-              rows={4}
-              style={_textarea}
-            />
-          </Section>
-
-          <Section label={t('prod.progress')}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-            }}>
-              <input
-                type="range" min={0} max={100} step={5}
-                value={detail.completion ?? 0}
-                onChange={e => onPatchDetail({ completion: Number(e.target.value) })}
-                style={{ flex: 1, accentColor: color }}
-              />
-              <span style={{
-                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
-                minWidth: 34, textAlign: 'right',
-              }}>{detail.completion ?? 0}%</span>
-            </div>
-          </Section>
-
-          {!subtaskFilter && (
-            <Section label={t('prod.subtasks')}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                {task.known_subtasks.map(s => (
-                  <span key={s} style={_tag} title={s}>
-                    {s}
-                  </span>
+      <div className="task-panel-body">
+        {/* What an artist needs at a glance. The status and the artist change from the badge in the header. */}
+        <div className="task-panel-summary">
+          <div className="task-panel-row"><span>Artiste</span><strong>{artist || 'Non assigné'}</strong></div>
+          <div className="task-panel-row">
+            <span>Dernier publish</span>
+            {latestPublish
+              ? <strong title={latestPublish.file}>{publishVersion(latestPublish.file) || latestPublish.file} · {latestPublish.user} · {latestPublish.date}</strong>
+              : <em>{t('prod.noPublishes')}</em>}
+          </div>
+          {sortedPublishes.length > 0 && (
+            <label className="task-panel-row">
+              <span>Version</span>
+              <select value={selPublish?.id ?? ''} onChange={e => setPublishId(e.target.value)} title={t('prod.pickVersion')}
+                style={{ ..._input, flex: 1, minWidth: 0, height: 24, padding: '0 6px' }}>
+                {sortedPublishes.map(p => (
+                  <option key={p.id} value={p.id}>{publishVersion(p.file) || p.file}{p.instance ? ` · ${p.instance}` : ''}</option>
                 ))}
-                {task.known_subtasks.length === 0 && (
-                  <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</span>
-                )}
-              </div>
-              <input
-                value={subtaskInput}
-                onChange={e => setSubtaskInput(e.target.value.toUpperCase())}
-                onKeyDown={e => { if (e.key === 'Enter') addSubtask() }}
-                placeholder={t('prod.addSubtask')}
-                style={{ ..._input, width: '100%' }}
-              />
-            </Section>
+              </select>
+            </label>
           )}
-
-          <Section label="COMMENTS">
-            <textarea
-              value={commentInput}
-              onChange={e => setCommentInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); postComment() }
-              }}
-              rows={3}
-              placeholder=""
-              style={_textarea}
-            />
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
-            }}>
-              <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Ctrl+Enter</span>
-              <span style={{ flex: 1 }} />
-              <label title={t('prod.commentRetakeHint')} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-                fontSize: 11, color: asRetake ? 'var(--err)' : 'var(--ink-3)', userSelect: 'none',
-              }}>
-                <input type="checkbox" checked={asRetake} onChange={e => setAsRetake(e.target.checked)} style={{ margin: 0 }} />
-                {t('prod.commentRetake')}
-              </label>
-              <button
-                onClick={postComment}
-                disabled={!commentInput.trim()}
-                style={_postBtn}
-              >Envoyer</button>
-            </div>
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(detail.comments || []).filter(c => !c.version || !selVersion || c.version === selVersion).slice().reverse().map(c => {
-                const read = readState.isRead(c.id)
-                return (
-                  <div key={c.id} style={{
-                    border: '1px solid var(--rule-2)', borderRadius: 6, padding: '6px 8px 6px 10px',
-                    background: 'var(--paper)',
-                    borderLeft: read ? '1px solid var(--rule-2)' : '3px solid var(--rule-3)',
-                  }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
-                    }}>
-                      <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
-                        color: 'var(--accent-hi)', letterSpacing: '0.04em',
-                      }}>{c.author}</span>
-                      <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
-                      {c.version && <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{c.version}</span>}
-                      {c.kind === 'retake' && (
-                        <span style={{
-                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
-                          color: 'var(--err)', border: '1px solid color-mix(in oklch, var(--err) 45%, var(--rule-2))',
-                          borderRadius: 3, padding: '0 4px',
-                        }}>RETAKE</span>
-                      )}
-                      <span style={{ flex: 1 }} />
-                      <button
-                        onClick={() => void readState.setRead(c.id, !read)}
-                        title={read ? 'Marquer non lu' : 'Marquer lu'}
-                        style={{
-                          ..._miniIconBtn,
-                          borderColor: read ? 'var(--ok)' : 'var(--rule-2)',
-                          color: read ? 'var(--ok)' : 'var(--ink-3)',
-                          background: read ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : 'var(--paper-2)',
-                        }}
-                      >
-                        <Check size={9} strokeWidth={2.2} />
-                      </button>
-                      <button
-                        onClick={() => { void readState.setRead(c.id, false); removeComment(c.id) }}
-                        title="Supprimer"
-                        style={{
-                          ..._miniIconBtn,
-                          borderColor: 'color-mix(in oklch, var(--err) 40%, var(--rule-2))',
-                          color: 'var(--err)',
-                          background: 'var(--paper-2)',
-                        }}
-                      >×</button>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{c.text}</div>
-                  </div>
-                )
-              })}
-            </div>
-          </Section>
+          <div className="task-panel-actions">
+            <OpenInMenu project={project || ''} relPath={selRel} label="Ouvrir" />
+            <button onClick={openTaskFolder} title="Ouvrir dans le Folder Manager" className="task-panel-btn">
+              <FolderTree size={11} strokeWidth={1.75} />Folder Manager
+            </button>
+          </div>
         </div>
 
-        {/* Right: Path browser + Recent Publishes grouped by subtask (Task view) or filtered (Subtask view) */}
-        <div style={{ padding: '10px 14px', overflowY: 'auto' }}>
+        <Fold id="notes" label={t('prod.notes')} defaultOpen>
+          {/* Global task note (task_details[key].notes), always editable, saved on change. */}
+          <textarea
+            value={detail.notes || ''}
+            onChange={e => onPatchDetail({ notes: e.target.value })}
+            placeholder={t('prod.taskNotePlaceholder')}
+            rows={3}
+            style={_textarea}
+          />
+          <div style={{ ..._lbl, marginTop: 8 }}>{t('prod.progress')}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="range" min={0} max={100} step={5}
+              value={detail.completion ?? 0}
+              onChange={e => onPatchDetail({ completion: Number(e.target.value) })}
+              style={{ flex: 1, accentColor: color }}
+              aria-label={t('prod.progress')}
+            />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)', minWidth: 34, textAlign: 'right' }}>{detail.completion ?? 0}%</span>
+          </div>
+        </Fold>
+
+        <Fold id="comments" label="Commentaires" count={comments.length} defaultOpen>
+          <textarea
+            value={commentInput}
+            onChange={e => setCommentInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); postComment() }
+            }}
+            rows={3}
+            placeholder=""
+            aria-label="Nouveau commentaire"
+            style={_textarea}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Ctrl+Enter</span>
+            <span style={{ flex: 1 }} />
+            <label title={t('prod.commentRetakeHint')} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+              fontSize: 11, color: asRetake ? 'var(--err)' : 'var(--ink-3)', userSelect: 'none',
+            }}>
+              <input type="checkbox" checked={asRetake} onChange={e => setAsRetake(e.target.checked)} style={{ margin: 0 }} />
+              {t('prod.commentRetake')}
+            </label>
+            <button onClick={postComment} disabled={!commentInput.trim()} style={_postBtn}>Envoyer</button>
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {comments.slice().reverse().map(c => {
+              const read = readState.isRead(c.id)
+              return (
+                <div key={c.id} style={{
+                  border: '1px solid var(--rule-2)', borderRadius: 6, padding: '6px 8px 6px 10px',
+                  background: 'var(--paper)',
+                  borderLeft: read ? '1px solid var(--rule-2)' : '3px solid var(--rule-3)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                      color: 'var(--accent-hi)', letterSpacing: '0.04em',
+                    }}>{c.author}</span>
+                    <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
+                    {c.version && <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{c.version}</span>}
+                    {c.kind === 'retake' && (
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                        color: 'var(--err)', border: '1px solid color-mix(in oklch, var(--err) 45%, var(--rule-2))',
+                        borderRadius: 3, padding: '0 4px',
+                      }}>RETAKE</span>
+                    )}
+                    <span style={{ flex: 1 }} />
+                    <button
+                      onClick={() => void readState.setRead(c.id, !read)}
+                      title={read ? 'Marquer non lu' : 'Marquer lu'}
+                      style={{
+                        ..._miniIconBtn,
+                        borderColor: read ? 'var(--ok)' : 'var(--rule-2)',
+                        color: read ? 'var(--ok)' : 'var(--ink-3)',
+                        background: read ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : 'var(--paper-2)',
+                      }}
+                    >
+                      <Check size={9} strokeWidth={2.2} />
+                    </button>
+                    <button
+                      onClick={() => { void readState.setRead(c.id, false); removeComment(c.id) }}
+                      title="Supprimer"
+                      style={{
+                        ..._miniIconBtn,
+                        borderColor: 'color-mix(in oklch, var(--err) 40%, var(--rule-2))',
+                        color: 'var(--err)',
+                        background: 'var(--paper-2)',
+                      }}
+                    >×</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                </div>
+              )
+            })}
+          </div>
+        </Fold>
+
+        {!subtaskFilter && (
+          <Fold id="subtasks" label={t('prod.subtasks')} count={task.known_subtasks.length}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+              {task.known_subtasks.map(s => <span key={s} style={_tag} title={s}>{s}</span>)}
+              {task.known_subtasks.length === 0 && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</span>}
+            </div>
+            <input
+              value={subtaskInput}
+              onChange={e => setSubtaskInput(e.target.value.toUpperCase())}
+              onKeyDown={e => { if (e.key === 'Enter') addSubtask() }}
+              placeholder={t('prod.addSubtask')}
+              style={{ ..._input, width: '100%', boxSizing: 'border-box' }}
+            />
+          </Fold>
+        )}
+
+        <Fold id="publishes" label={t('prod.recentPublishes')} count={sortedPublishes.length}>
+          {!latestPublish && <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>}
+          {selPublish && (
+            <PublishRow
+              p={selPublish}
+              onOpen={() => openInFolderManager(selPublish)}
+              onCopy={() => copyPath(selPublish)}
+              onExplorer={() => openInExplorer(selPublish)}
+            />
+          )}
+          {/* Note the author left when publishing the selected version. */}
+          {selPublish && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ ..._lbl, marginBottom: 6 }}>{t('prod.publishNote')}</div>
+              <div style={{ ..._textarea, minHeight: 40, cursor: 'default', whiteSpace: 'pre-wrap', boxSizing: 'border-box' }}>
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
+                  {selVersion || selPublish.file} · {selPublish.user} · {selPublish.date} {selPublish.time}
+                </div>
+                {(selPublish.description || '').trim()
+                  ? selPublish.description
+                  : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishNote')}</span>}
+              </div>
+            </div>
+          )}
+          {sortedPublishes.length > 1 && (
+            <button onClick={() => setPublishListOpen(true)} className="task-panel-btn" style={{ marginTop: 8 }}>
+              <List size={11} strokeWidth={1.9} />Voir tous les publishs
+            </button>
+          )}
+        </Fold>
+
+        <Fold id="media" label="Médias">
+          <MediaEmbed project={project || ''} relPath={refBasePath} unresolved={refError} color={color}
+            context={`${entityKind === 'shot' ? `${asset.class} ${asset.name}` : asset.name} · ${task.name}${subtaskFilter ? ` · ${subtaskFilter}` : ''}`} />
+        </Fold>
+
+        <Fold id="usd" label="USD">
+          <TaskUsd project={project || ''} asset={asset} entityKind={entityKind}
+            publishes={sortedPublishes} user={settings?.username || ''} />
+        </Fold>
+
+        {/* Stays mounted when folded: it resolves the folder of the Folder Manager button and of the media. */}
+        <Fold id="path" label="Chemin" keepMounted>
           <PathBrowser
             project={project || ''}
             asset={asset}
@@ -363,73 +399,7 @@ export function TaskDetail({
             onResolvedPath={(p, err) => { setRefBasePath(p); setRefError(err || '') }}
             onSelChange={(task, instance) => setSel({ task, instance })}
           />
-
-          <div style={{ ..._lbl, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>{t('prod.recentPublishes')}</span>
-            {subtaskFilter && (
-              <span style={{ color: color, textTransform: 'none', letterSpacing: 0 }}>
-                · {subtaskFilter}
-              </span>
-            )}
-            <span style={{ flex: 1 }} />
-            {sortedPublishes.length > 1 && (
-              <select
-                value={selPublish?.id ?? ''}
-                onChange={e => setPublishId(e.target.value)}
-                title={t('prod.pickVersion')}
-                style={{ ..._input, height: 22, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 10.5, textTransform: 'none', letterSpacing: 0 }}
-              >
-                {sortedPublishes.map(p => (
-                  <option key={p.id} value={p.id}>{publishVersion(p.file) || p.file}{p.instance ? ` · ${p.instance}` : ''}</option>
-                ))}
-              </select>
-            )}
-            {sortedPublishes.length > 0 && (
-              <button
-                onClick={() => setPublishListOpen(true)}
-                title="Voir tous les publishs récents"
-                style={{
-                  border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
-                  color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center',
-                }}
-              >
-                <List size={15} strokeWidth={1.9} />
-              </button>
-            )}
-          </div>
-          {!latestPublish && (
-            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>
-          )}
-          {selPublish && (
-            <PublishRow
-              p={selPublish}
-              onOpen={() => openInFolderManager(selPublish)}
-              onCopy={() => copyPath(selPublish)}
-              onExplorer={() => openInExplorer(selPublish)}
-            />
-          )}
-
-          {/* Note the author left when publishing the selected version. */}
-          {selPublish && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ ..._lbl, marginBottom: 6 }}>{t('prod.publishNote')}</div>
-              <div style={{ ..._textarea, minHeight: 40, cursor: 'default', whiteSpace: 'pre-wrap' }}>
-                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
-                  {selVersion || selPublish.file} · {selPublish.user} · {selPublish.date} {selPublish.time}
-                </div>
-                {(selPublish.description || '').trim()
-                  ? selPublish.description
-                  : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishNote')}</span>}
-              </div>
-            </div>
-          )}
-
-          <MediaEmbed project={project || ''} relPath={refBasePath} unresolved={refError} color={color}
-            context={`${entityKind === 'shot' ? `${asset.class} ${asset.name}` : asset.name} · ${task.name}${subtaskFilter ? ` · ${subtaskFilter}` : ''}`} />
-
-          <TaskUsd project={project || ''} asset={asset} entityKind={entityKind}
-            publishes={sortedPublishes} user={settings?.username || ''} />
-        </div>
+        </Fold>
       </div>
 
       {publishListOpen && (
@@ -443,7 +413,40 @@ export function TaskDetail({
           onExplorer={openInExplorer}
         />
       )}
-    </div>
+    </aside>
+  )
+}
+
+// Folded sections of the panel (2026-11-06): light by default, nothing lost. The state
+// is kept per section on this machine. Content mounts on first opening unless keepMounted.
+function Fold({ id, label, count, defaultOpen = false, keepMounted = false, children }: {
+  id: string; label: string; count?: number; defaultOpen?: boolean; keepMounted?: boolean; children: React.ReactNode
+}) {
+  const lsKey = `flux.production.taskPanel.${id}`
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem(lsKey)
+      if (v === 'open') return true
+      if (v === 'closed') return false
+    } catch { /* blocked storage */ }
+    return defaultOpen
+  })
+  const toggle = () => setOpen(prev => {
+    const next = !prev
+    try { localStorage.setItem(lsKey, next ? 'open' : 'closed') } catch { /* blocked storage */ }
+    return next
+  })
+  return (
+    <section className="task-panel-fold">
+      <button type="button" className="task-panel-fold-head" aria-expanded={open} onClick={toggle}>
+        {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+        <span>{label}</span>
+        {!!count && <span className="task-panel-count">{count}</span>}
+      </button>
+      {keepMounted
+        ? <div hidden={!open} className="task-panel-fold-body">{children}</div>
+        : open && <div className="task-panel-fold-body">{children}</div>}
+    </section>
   )
 }
 
@@ -514,8 +517,7 @@ function TaskUsd({ project, asset, entityKind, publishes, user }: {
   }
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ ..._lbl, marginBottom: 6 }}>USD</div>
+    <div>
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: '8px 10px',
                     display: 'flex', flexDirection: 'column', gap: 6 }}>
         {/* This task's own department layer. */}
@@ -581,11 +583,6 @@ function TaskUsd({ project, asset, entityKind, publishes, user }: {
       </div>
     </div>
   )
-}
-
-// vNNN of a published file name ('' when none).
-function publishVersion(file: string): string {
-  return /_(v\d{3,})(?=\.|$)/i.exec(file)?.[1] ?? ''
 }
 
 // ── one recent-publish row (inline latest + modal list) ──────────────────────
@@ -1402,15 +1399,6 @@ const _dropHint: React.CSSProperties = {
 }
 
 // ── local atoms ──────────────────────────────────────────────────────────────
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={_lbl}>{label}</div>
-      {children}
-    </div>
-  )
-}
-
 const _lbl: React.CSSProperties = {
   fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em',
   color: 'var(--ink-3)', textTransform: 'uppercase', marginBottom: 4,

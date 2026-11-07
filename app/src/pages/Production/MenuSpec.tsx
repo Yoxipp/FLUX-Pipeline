@@ -49,7 +49,7 @@ interface Props {
   settingsPane?:      React.ReactNode
   entityView?:        (entityId: string) => React.ReactNode | null
   loading?:           boolean
-  initialOpen?:       { task: string; subtask?: string } | null
+  initialOpen?:       { task: string; subtask?: string; version?: string } | null
   onInitialOpenApplied?: () => void
 }
 
@@ -64,14 +64,18 @@ type Tab =
   | { key: string; kind: 'settings' }
   | { key: string; kind: 'assets' }                                        // anchored to selection (shot/seq only)
   | { key: string; kind: 'entityRoot'; entityId: string }                  // free-floating tasks-landing for a specific entity
-  | { key: string; kind: 'task';    entityId: string; taskId: string }
-  | { key: string; kind: 'subtask'; entityId: string; taskId: string; subtask: string }
 
 interface PinnedRef {
-  kind:    'task' | 'subtask' | 'entityRoot'
+  kind:    'entityRoot'
   entityId: string
-  taskId?:  string
-  subtask?: string
+}
+
+// A task no longer opens a tab (2026-11-06): one light panel beside the current view.
+interface TaskPanelRef {
+  entityId: string
+  taskId:   string
+  subtask:  string | null
+  version?: string
 }
 
 const ROOT_TAB:   Tab = { key: 'root',   kind: 'root' }
@@ -94,8 +98,6 @@ function publishMatchesSubtask(p: ProductionPublish, subtask: string): boolean {
   const sub = subtask.toUpperCase()
   return (p.instance || '').toUpperCase() === sub || publishFolderLeaf(p) === sub
 }
-const taskKey   = (entityId: string, taskId: string) => `task:${entityId}:${taskId}`
-const subKey    = (entityId: string, taskId: string, sub: string) => `sub:${entityId}:${taskId}:${sub}`
 const entityRootKey = (entityId: string) => `entityRoot:${entityId}`
 
 const pinLsKey = (project: string) => `flux.production.pinned.${project}`
@@ -113,11 +115,8 @@ function readPinned(project: string): PinnedRef[] {
         if (!p) return null
         const id = p.entityId ?? p.assetId
         if (typeof id !== 'string') return null
-        if (p.kind === 'entityRoot') return { kind: 'entityRoot', entityId: id }
-        if ((p.kind === 'task' || p.kind === 'subtask') && typeof p.taskId === 'string') {
-          return { kind: p.kind, entityId: id, taskId: p.taskId, subtask: p.subtask }
-        }
-        return null
+        // Pins of old task tabs are dropped: tasks open in the panel now.
+        return p.kind === 'entityRoot' ? { kind: 'entityRoot', entityId: id } : null
       })
       .filter((x): x is PinnedRef => x !== null)
   } catch { return [] }
@@ -167,7 +166,7 @@ function toAssetShim(res: ResolvedEntity): Asset {
   }
 }
 
-type SpecSnapshot = { tabs: Tab[]; activeKey: string; entityId: string | undefined }
+type SpecSnapshot = { tabs: Tab[]; activeKey: string; entityId: string | undefined; panel?: TaskPanelRef | null }
 const specSessionKey = (project: string) => `prod.specTabs:${project}`
 
 export function MenuSpec({ state, setState, selection, publishesByTask, loading, initialOpen, onInitialOpenApplied, main, timeline, workspaceMode, settingsPane, entityView }: Props) {
@@ -176,8 +175,10 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
 
   // Session snapshot (U3): open tabs come back when returning to Production.
   const snap = useRef(project ? readSession<SpecSnapshot>(specSessionKey(project)) : undefined).current
-  const [tabs, setTabs]           = useState<Tab[]>(snap?.tabs ?? [ROOT_TAB])
+  // A snapshot taken before the panel can still hold task tabs: they are ignored.
+  const [tabs, setTabs]           = useState<Tab[]>(() => (snap?.tabs ?? [ROOT_TAB]).filter(tab => !['task', 'subtask'].includes(tab.kind)))
   const [activeKey, setActiveKey] = useState<string>(snap?.activeKey ?? 'root')
+  const [taskPanel, setTaskPanel] = useState<TaskPanelRef | null>(snap?.panel ?? null)
   const previousTab = useRef(activeKey)
   useEffect(() => {
     if (previousTab.current === activeKey) return
@@ -191,6 +192,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     if (previousMode.current === workspaceMode) return
     previousMode.current = workspaceMode
     setActiveKey('root')
+    setTaskPanel(null)
   }, [workspaceMode])
 
   const selectedRes: ResolvedEntity | null = useMemo(() => {
@@ -239,23 +241,14 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     if (!project) { setTabs([]); setActiveKey('root'); return }
     if (skipPinRestoreRef.current) { skipPinRestoreRef.current = false; return }   // session snapshot wins
     const pins = readPinned(project)
-    const restored: Tab[] = pins.flatMap((p): Tab[] => {
-      if (p.kind === 'entityRoot') {
-        return [{ key: entityRootKey(p.entityId), kind: 'entityRoot', entityId: p.entityId }]
-      }
-      if (!p.taskId) return []
-      if (p.kind === 'subtask' && p.subtask) {
-        return [{ key: subKey(p.entityId, p.taskId, p.subtask), kind: 'subtask', entityId: p.entityId, taskId: p.taskId, subtask: p.subtask }]
-      }
-      return [{ key: taskKey(p.entityId, p.taskId), kind: 'task', entityId: p.entityId, taskId: p.taskId }]
-    })
-    setTabs(restored)
+    setTabs(pins.map((p): Tab => ({ key: entityRootKey(p.entityId), kind: 'entityRoot', entityId: p.entityId })))
     setActiveKey('root')
+    setTaskPanel(null)
   }, [project])
 
   useEffect(() => {
-    if (project) writeSession<SpecSnapshot>(specSessionKey(project), { tabs, activeKey, entityId: lastEntityRef.current })
-  }, [project, tabs, activeKey, selectedRes?.entity.id])
+    if (project) writeSession<SpecSnapshot>(specSessionKey(project), { tabs, activeKey, entityId: lastEntityRef.current, panel: taskPanel })
+  }, [project, tabs, activeKey, taskPanel, selectedRes?.entity.id])
 
   // Garbage-collect tabs pointing at a removed entity/task.
   //
@@ -273,20 +266,11 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     setTabs(prev => {
       const kept = prev.filter(tab => {
         if (tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') return true
-        const res = resolveEntity(state, tab.entityId)
-        if (!res) return false
-        if (tab.kind === 'entityRoot') return true
-        return res.entity.tasks.some(x => x.id === tab.taskId)
+        return !!resolveEntity(state, tab.entityId)
       })
       if (kept.length !== prev.length) {
         if (project) {
-          const stillPinned = readPinned(project).filter(p => {
-            const res = resolveEntity(state, p.entityId)
-            if (!res) return false
-            if (p.kind === 'entityRoot') return true
-            return res.entity.tasks.some(x => x.id === p.taskId)
-          })
-          writePinned(project, stillPinned)
+          writePinned(project, readPinned(project).filter(p => !!resolveEntity(state, p.entityId)))
         }
         if (!kept.some(x => x.key === activeKey)) setActiveKey('root')
       }
@@ -317,46 +301,13 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     }
     const target = selectedRes.entity.tasks.find(x => x.name.toUpperCase() === initialOpen.task.toUpperCase())
     if (!target) return
-    const entityId = selectedRes.entity.id
-    if (initialOpen.subtask) {
-      const key = subKey(entityId, target.id, initialOpen.subtask.toUpperCase())
-      setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, {
-        key, kind: 'subtask', entityId, taskId: target.id, subtask: initialOpen.subtask!.toUpperCase(),
-      }]))
-      setActiveKey(key)
-    } else {
-      const key = taskKey(entityId, target.id)
-      setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, {
-        key, kind: 'task', entityId, taskId: target.id,
-      }]))
-      setActiveKey(key)
-    }
+    setTaskPanel({ entityId: selectedRes.entity.id, taskId: target.id, subtask: initialOpen.subtask?.toUpperCase() ?? null, version: initialOpen.version })
     onInitialOpenApplied?.()
   }, [initialOpen, selectedRes])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tab management helpers
-  // One tab per task (2026-09-26): opening a subtask, or the whole task, reuses the
-  // tab of that task when one is open (same place, pin kept) and switches what it shows.
-  const showTaskTab = (entityId: string, taskId: string, subtask: string | null) => {
-    const next: Tab = subtask
-      ? { key: subKey(entityId, taskId, subtask), kind: 'subtask', entityId, taskId, subtask }
-      : { key: taskKey(entityId, taskId), kind: 'task', entityId, taskId }
-    // A pinned tab of the task is never repurposed (2026-09-26): the same subtask
-    // just goes to it, another one opens a second tab of the task.
-    const pinned = new Set(project ? readPinned(project).map(refToKey) : [])
-    setTabs(prev => {
-      if (prev.some(x => x.key === next.key)) return prev
-      const i = prev.findIndex(x => (x.kind === 'task' || x.kind === 'subtask')
-        && x.entityId === entityId && x.taskId === taskId && !pinned.has(x.key))
-      if (i < 0) return [...prev, next]
-      const out = prev.slice()
-      out[i] = next
-      return out
-    })
-    setActiveKey(next.key)
-  }
-  const openTaskTab = (entityId: string, taskId: string) => showTaskTab(entityId, taskId, null)
-  const openSubtaskTab = (entityId: string, taskId: string, subtask: string) => showTaskTab(entityId, taskId, subtask)
+  const openTaskTab = (entityId: string, taskId: string) => setTaskPanel({ entityId, taskId, subtask: null })
+  const openSubtaskTab = (entityId: string, taskId: string, subtask: string) => setTaskPanel({ entityId, taskId, subtask })
   const openEntityRootTab = (entityId: string) => {
     const key = entityRootKey(entityId)
     setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'entityRoot', entityId }]))
@@ -397,12 +348,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   const togglePin = (tab: Tab) => {
     if (!project || tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') return
     const cur = readPinned(project)
-    const ref: PinnedRef =
-      tab.kind === 'entityRoot'
-        ? { kind: 'entityRoot', entityId: tab.entityId }
-        : tab.kind === 'subtask'
-          ? { kind: 'subtask', entityId: tab.entityId, taskId: tab.taskId, subtask: tab.subtask }
-          : { kind: 'task',    entityId: tab.entityId, taskId: tab.taskId }
+    const ref: PinnedRef = { kind: 'entityRoot', entityId: tab.entityId }
     const key = refToKey(ref)
     const next = cur.some(p => refToKey(p) === key)
       ? cur.filter(p => refToKey(p) !== key)
@@ -440,6 +386,8 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         ))}
       </div>
 
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
       {main && <div style={{ display: active.kind === 'root' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }}>{main}</div>}
       {timeline && <div style={{ display: active.kind === 'timeline' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }}>{timeline}</div>}
       {active.kind === 'root' && !main && (
@@ -480,15 +428,16 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           />
         )
       })()}
-      {(active.kind === 'task' || active.kind === 'subtask') && (() => {
-        const res = resolveEntity(state, active.entityId)
-        if (!res) return <div style={_hint}>Entité introuvable</div>
-        const task = res.entity.tasks.find(x => x.id === active.taskId)
-        if (!task) return <div style={_hint}>Tâche introuvable</div>
+      </div>
+      {taskPanel && (() => {
+        // An entity or a task removed meanwhile simply closes the panel.
+        const res = resolveEntity(state, taskPanel.entityId)
+        const task = res?.entity.tasks.find(x => x.id === taskPanel.taskId)
+        if (!res || !task) return null
         const shim = toAssetShim(res)
         const bucket = publishesByTask[`${res.entity.id}|${task.id}`] || []
         const department = trackingDepartments(state, res.kind === 'asset' ? 'asset' : 'shot').find(d => taskMatchesDepartment(task, d))
-        const subtask = active.kind === 'subtask' ? active.subtask : ''
+        const subtask = taskPanel.subtask ?? ''
         const subdetail = shim.task_details?.[`${task.name.toUpperCase()}|${subtask.toUpperCase()}`]
         const status = department ? subtask
           ? subdetail?.status === '' ? '' : department.fixed || subdetail?.status || (subdetail?.completion ?? 0) > 0 ? detailStatus(subdetail) : ''
@@ -496,45 +445,31 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         const statusBadge = <TaskStatusBadge project={project || ''} state={state} setState={setState} entity={res.entity} task={task} subtask={subtask} statuses={department?.statuses} status={status} />
         const renderHeader = (actions: React.ReactNode) => <TaskStrip
           task={task} asset={shim}
-          activeSub={active.kind === 'subtask' ? active.subtask : null}
+          activeSub={taskPanel.subtask}
           publishCount={bucket.length}
           onOpenTask={() => openTaskTab(res.entity.id, task.id)}
           onOpenSubtask={sub => openSubtaskTab(res.entity.id, task.id, sub)}
           actions={actions}
         />
-        if (active.kind === 'task') {
-          return (
-            <TaskDetail
-              asset={shim} task={task}
-              headerActions={statusBadge}
-              renderHeader={renderHeader}
-              entityKind={res.kind}
-              subtaskFilter={null}
-              detailKey={task.name}
-              publishes={bucket}
-              pinned={isPinned(active.key)}
-              onTogglePin={() => togglePin(active)}
-              onPatchTask={patch => patchEntityTask(setState, res, task.id, patch)}
-              onPatchDetail={patch => patchEntityDetail(setState, res, task.name, patch)}
-            />
-          )
-        }
+        const detailKey = subtask ? `${task.name}|${subtask}` : task.name
         return (
           <TaskDetail
+            key={`${res.entity.id}|${task.id}|${subtask}|${taskPanel.version ?? ''}`}
             asset={shim} task={task}
             entityKind={res.kind}
             headerActions={statusBadge}
             renderHeader={renderHeader}
-            subtaskFilter={active.subtask}
-            detailKey={`${task.name}|${active.subtask}`}
-            publishes={bucket.filter(p => publishMatchesSubtask(p, active.subtask))}
-            pinned={isPinned(active.key)}
-            onTogglePin={() => togglePin(active)}
+            subtaskFilter={taskPanel.subtask}
+            detailKey={detailKey}
+            publishes={subtask ? bucket.filter(p => publishMatchesSubtask(p, subtask)) : bucket}
+            initialVersion={taskPanel.version}
+            onClose={() => setTaskPanel(null)}
             onPatchTask={patch => patchEntityTask(setState, res, task.id, patch)}
-            onPatchDetail={patch => patchEntityDetail(setState, res, `${task.name}|${active.subtask}`, patch)}
+            onPatchDetail={patch => patchEntityDetail(setState, res, detailKey, patch)}
           />
         )
       })()}
+      </div>
     </div>
   )
 }
@@ -569,7 +504,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
     if (tab.kind === 'assets') {
       const n = selectedRes && (selectedRes.kind === 'shot' || selectedRes.kind === 'seq')
         ? (selectedRes.entity.assets?.length ?? 0) : 0
-      return { label: `ASSETS · ${n}`, color: 'var(--prod-shot)', sub: '' }
+      return { label: `ASSETS LIÉS · ${n}`, color: 'var(--prod-shot)', sub: '' }
     }
     if (tab.kind === 'entityRoot') {
       const res = resolveEntity(state, tab.entityId)
@@ -579,15 +514,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
         color: 'var(--accent)', sub: entityTable && res && res.kind !== 'seq' ? res.kind : 'tasks',
       }
     }
-    const res = resolveEntity(state, tab.entityId)
-    const shim = res ? toAssetShim(res) : null
-    const tk = res?.entity.tasks.find(x => x.id === tab.taskId)
-    const name = tk?.name ?? '—'
-    return {
-      label: shim ? `${shim.name} · ${name}` : name,
-      color: taskColorFromName(name),
-      sub: tab.kind === 'subtask' ? tab.subtask : '',
-    }
+    return { label: '—', color: 'var(--accent)', sub: '' }
   }, [tab, state, selectedRes, rootLabel, entityTable])
 
   const draggable = tab.kind !== 'root' && tab.kind !== 'assets' && tab.kind !== 'timeline' && tab.kind !== 'settings'
@@ -1376,9 +1303,7 @@ const _menuItem: React.CSSProperties = {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function refToKey(p: PinnedRef): string {
-  if (p.kind === 'entityRoot') return entityRootKey(p.entityId)
-  if (p.kind === 'subtask' && p.subtask && p.taskId) return subKey(p.entityId, p.taskId, p.subtask)
-  return taskKey(p.entityId, p.taskId ?? '')
+  return entityRootKey(p.entityId)
 }
 
 function patchEntityTask(
