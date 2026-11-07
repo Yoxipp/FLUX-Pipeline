@@ -1,12 +1,18 @@
-// Thin navigation bar switch (2026-11-06), per machine. One of the two bars is removed
-// once they have been compared, so this stays a plain local preference.
+// Thin navigation bar switch (2026-11-06), per machine, on by default (2026-11-07).
+// One of the two bars is removed once they have been compared, so this stays a plain local
+// preference.
 import { useCallback, useEffect, useState } from 'react'
 
 const KEY = 'flux.ui.navRail'
 const EVENT = 'flux:nav-rail-changed'
 
+// A machine that never touched the switch has no stored value and gets the thin bar.
+export function navRailFromStored(stored: string | null): boolean {
+  return stored !== '0'
+}
+
 function read(): boolean {
-  try { return localStorage.getItem(KEY) === '1' } catch { return false }
+  try { return navRailFromStored(localStorage.getItem(KEY)) } catch { return navRailFromStored(null) }
 }
 
 export function useNavRail(): [boolean, (on: boolean) => void] {
