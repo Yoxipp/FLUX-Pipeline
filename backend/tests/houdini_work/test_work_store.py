@@ -300,8 +300,20 @@ class Routes(unittest.TestCase):
     def test_served_module_and_production_shots(self) -> None:
         code = self.client.get("/dcc/houdini/work/module").json()["code"]
         compile(code, "<flux_work module>", "exec")
-        for name in ("def load(", "def save(", "def take_over(", "def normalized_hash(", "def load_work("):
+        for name in ("def load(", "def save(", "def take_over(", "def bind(", "def on_created("):
             self.assertIn(name, code)
+        # ADR 0090: one scene per work, native dirty flag, no cpio left.
+        self.assertIn("hou.hipFile.hasUnsavedChanges()", code)
+        self.assertIn('hou.hipFile.save(r["hip"])', code)
+        for gone in ("cpio", "baseline_hash", "work_path", "WORK_"):
+            self.assertNotIn(gone, code)
+        from dcc.houdini.hda import flux_work_hda
+        compile(flux_work_hda.BOOTSTRAP, "<flux_work bootstrap>", "exec")
+        for category in ("Sop", "Lop"):
+            build = flux_work_hda._build_code("x.hda", category)
+            compile(build, "<flux_work build>", "exec")
+            self.assertNotIn("work_path", build)
+            self.assertIn('{ loaded_task != "" }', build)
         production = {"sequences": [{"id": "s1", "name": "seq010"}, {"id": "s2", "name": "SEQ020"}],
                       "shots": [{"seq_id": "s1", "name": "sh030"}, {"seq_id": "s1", "name": "SH010"},
                                 {"seq_id": "zz", "name": "ORPHAN"}]}
