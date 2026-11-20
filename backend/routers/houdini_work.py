@@ -221,6 +221,33 @@ async def work_start(req: LockRequest) -> dict:
         task=req.task.upper(), author=_author(req.author), host=req.host))
 
 
+class LaunchRequest(BaseModel):
+    path: str
+
+
+@router.post("/open")
+async def work_open(req: LockRequest) -> dict:
+    """Production "Ouvrir le travail Houdini": the task's scene (w000 copied first when
+    it has none) sent to a running Houdini, which asks the artist when its scene is not
+    blank; no Houdini answering -> a new one on the scene (ADR 0090 point 3)."""
+    from dcc.houdini import work_open as wo
+
+    started = await work_start(req)
+    res = await asyncio.get_running_loop().run_in_executor(None, lambda: wo.open_in_houdini(started["hip"]))
+    return {**res, "version": started["version"], "created_template": started["created_template"]}
+
+
+@router.post("/launch")
+async def work_launch(req: LaunchRequest) -> dict:
+    """"Nouvelle instance" chosen in Houdini: a new Houdini on that work scene. Only a
+    FLUX Work version is accepted (never an arbitrary file)."""
+    from dcc.houdini import work_open as wo
+
+    if work_store.identify(req.path) is None:
+        raise HTTPException(status_code=400, detail="Pas une scene FLUX Work : %s" % req.path)
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: wo.launch_work(req.path))
+
+
 @router.get("/identify")
 async def work_identify(path: str) -> dict:
     """Task of an opened scene from its manifest; {"work": None} for a free scene."""
