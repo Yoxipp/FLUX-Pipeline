@@ -331,6 +331,13 @@ class Routes(unittest.TestCase):
                         return_value=[{"shot": "SH010"}, {"shot": "SH020"}, {"shot": "SH030"}, {"shot": "SH040"}]):
             tpl = self.client.get("/dcc/houdini/work/template",
                                   params={"project": "PROJ", "task": "RENDER", "seq": "seq010"}).json()
+        # Shipped templates (work_template_build.py): RENDER, then one per network.
+        self.assertEqual(tpl["source"], "flux")
+        self.assertTrue(tpl["hip"].endswith("resources/scenes/houdini/work/RENDER.hip"))
+        for task, name in (("CFX", "DEFAULT_SOP.hip"), ("FX", "DEFAULT_SOP.hip"), ("LIGHT", "DEFAULT_LOP.hip")):
+            path, source = ws.template_hip(self.project, task)
+            self.assertEqual((path.name, source), (name, "flux"))
+        self.assertEqual(list(ws.BUNDLED_TEMPLATES.glob("*.cpio")), [])
         self.assertEqual((tpl["setup"]["seq"], tpl["setup"]["blocks"]), ("SEQ010", 4))
         self.assertIn("def grow_to", tpl["setup"]["sequence_module"])
         cfx = self.client.get("/dcc/houdini/work/template", params={"project": "PROJ", "task": "CFX"}).json()
