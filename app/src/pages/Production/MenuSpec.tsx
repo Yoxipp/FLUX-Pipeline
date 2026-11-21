@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { readSession, writeSession } from '../../hooks/useSessionState'
-import { Pin, X, Layers, RefreshCw, Heart, Clapperboard } from 'lucide-react'
+import { Pin, X, Layers, RefreshCw, Heart, Clapperboard, FolderOpen } from 'lucide-react'
 import { useFavoriteBinding } from '../../hooks/useFavorites'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -808,6 +808,9 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
   }, [res.kind === 'shot' ? res.entity.id : null, res.kind === 'shot' ? res.entity.inherit_tasks : null, res.kind === 'shot' ? res.seq?.tasks.length : null])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const shim = toAssetShim(res)
+  // Shot / sequence tasks a FLUX Work opens in Houdini (ADR 0090).
+  const workRef = res.kind === 'shot' ? { seq: res.seq?.name ?? '', shot: res.entity.name }
+    : res.kind === 'seq' ? { seq: res.entity.name, shot: '' } : null
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
@@ -828,6 +831,7 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
               task.known_subtasks.map(s => [s, shim.task_details?.[`${task.name}|${s}`]?.completion ?? 0])
             )}
             inherited={false}
+            houdiniWork={workRef && workRef.seq && HOUDINI_WORK_TASKS.has(task.name.toUpperCase()) ? workRef : null}
           />
         ))}
         {/* The assembled USD of the asset (component / assembly), 2026-09-26. */}
@@ -1043,13 +1047,30 @@ function SeqRenderSceneNode({ seq }: { seq: string }) {
   )
 }
 
+// ── FLUX Work: the task's Houdini scene (ADR 0090) ─────────────────────────────
+const HOUDINI_WORK_TASKS = new Set(['CFX', 'FX', 'LIGHT', 'RENDER'])
+
+async function openHoudiniWork(project: string, ref: { seq: string; shot: string }, task: string) {
+  const label = [ref.seq, ref.shot, task].filter(Boolean).join(' ')
+  const id = toast.loading(`Ouverture du travail ${label}…`)
+  try {
+    const r = await api.openHoudiniWork(project, ref.seq, ref.shot, task)
+    const file = r.hip.split(/[\\/]/).pop()
+    if (r.mode === 'sent') toast.success(`Envoyé à Houdini · ${file}`, { id, duration: 4000 })
+    else if (r.mode === 'launched') toast.success(`Houdini lancé · ${file}`, { id, duration: 4000 })
+    else toast.error('Houdini introuvable', { id, duration: 6000 })
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e), { id, duration: 6000 })
+  }
+}
+
 const _miniBtn: React.CSSProperties = {
   padding: '4px 10px', borderRadius: 6, border: '1px solid var(--rule-2)', background: 'var(--paper)',
   color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, cursor: 'pointer',
 }
 
 // ── one task node ────────────────────────────────────────────────────────────
-function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited }: {
+function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited, houdiniWork }: {
   task:               ProductionTask
   asset:              Asset
   publishCount:       number
@@ -1058,7 +1079,9 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
   completion:         number
   subtaskCompletions: Record<string, number>
   inherited?:         boolean
+  houdiniWork?:       { seq: string; shot: string } | null
 }) {
+  const { project } = useProject()
   const [expanded, setExpanded] = useState(false)
   const [hoveredSub, setHoveredSub] = useState<string | null>(null)
   // Collapsed footprint kept in the row while the card is open: the open card floats
@@ -1127,6 +1150,12 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
           <button style={_menuItem} onClick={() => { setMenu(null); onOpenHeader() }}>
             <Layers size={12} strokeWidth={1.75} color="var(--ink-3)" />
             Ouvrir la tâche
+          </button>
+        )}
+        {houdiniWork && project && (
+          <button style={_menuItem} onClick={() => { setMenu(null); void openHoudiniWork(project, houdiniWork, task.name.toUpperCase()) }}>
+            <FolderOpen size={12} strokeWidth={1.75} color="var(--ink-3)" />
+            Ouvrir le travail Houdini
           </button>
         )}
       </div>

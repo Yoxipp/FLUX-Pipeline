@@ -1,18 +1,21 @@
 """
-FLUX Work: versions of a Houdini work subnet (ADR 0051, step E2).
+FLUX Work: versions of a Houdini work scene (ADR 0051, ADR 0090: one work = one scene).
 
 One folder per (seq, shot, task)::
 
     <department folder>/work/houdini/<TASK>/
-        w000.cpio + w000.json      template (version 0)
-        w001.cpio + w001.json ...  versions, never overwritten, no LAST
+        w000.hip + w000.json       template (version 0), copied by FLUX
+        w001.hipnc + w001.json ... versions, never overwritten, no LAST
         lock.json                  indicative lock (who, host, since)
 
-Houdini writes the ``.cpio`` itself (ADR 0005). The backend only handles metadata:
-listing, reservation of the next number (exclusive creation of ``wNNN.json``, state
-``writing``), commit (``state: ok`` once the cpio is on disk and its hash checked),
-the lock and the divergence check. Several artists by mistake (not at the same time)
+The scene extension follows the Houdini license that saved it (.hip / .hiplc / .hipnc).
+Houdini writes the scene itself (ADR 0005). The backend handles metadata: listing,
+reservation of the next number (exclusive creation of ``wNNN.json``, state ``writing``),
+commit (``state: ok`` once the scene is on disk), the lock, the divergence check and the
+copy of the template into ``w000``. Several artists by mistake (not at the same time)
 must never overwrite each other: a number is taken by an atomic create, never reused.
+A manifest carries the project / seq / shot / task, so an opened scene knows its task
+from its own path (``identify``).
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import time
 from datetime import datetime, timezone
@@ -41,21 +45,45 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # Network a task's content lives in (ADR 0051): SOP for CFX / FX, LOP for LIGHT / RENDER.
 TASK_CATEGORY = {"CFX": "Sop", "FX": "Sop", "LIGHT": "Lop", "RENDER": "Lop"}
-# Templates (w000 source) shipped with FLUX; a project overrides one with
-# <project>/template/houdini_work/<TASK>.cpio (built by dcc/houdini/work_template_build.py).
+# Templates (w000 source) shipped with FLUX: <TASK>.hip, else DEFAULT_SOP / DEFAULT_LOP.hip
+# by the task's network (built by dcc/houdini/work_template_build.py). A project overrides
+# one with <project>/template/houdini_work/<TASK>.hip (or .hiplc / .hipnc).
 BUNDLED_TEMPLATES = Path(__file__).resolve().parents[2] / "resources" / "scenes" / "houdini" / "work"
 PROJECT_TEMPLATES = ("template", "houdini_work")
+# Scene extensions, by Houdini license (same rule as houdini_render_scene.py).
+HIP_EXTS = (".hip", ".hiplc", ".hipnc")
 
 
-def template_cpio(project_path: str | Path, task: str) -> tuple[Path | None, str]:
-    """(template cpio of *task*, "project" | "flux"), (None, "") when there is none."""
-    name = (task or "").strip().upper() + ".cpio"
-    own = Path(project_path).joinpath(*PROJECT_TEMPLATES, name)
-    if own.is_file():
+def hip_ext_for_license(category: str) -> str:
+    """Scene extension Houdini writes under *category* (``hou.licenseCategory()`` name):
+    Commercial .hip, Indie .hiplc, anything else (Apprentice, Education...) .hipnc."""
+    name = str(category or "").split(".")[-1].strip().lower()
+    if name == "commercial":
+        return ".hip"
+    if name == "indie":
+        return ".hiplc"
+    return ".hipnc"
+
+
+def _first_hip(folder: Path, stem: str) -> Path | None:
+    for ext in HIP_EXTS:
+        path = folder / (stem + ext)
+        if path.is_file():
+            return path
+    return None
+
+
+def template_hip(project_path: str | Path, task: str) -> tuple[Path | None, str]:
+    """(template scene of *task*, "project" | "flux"), (None, "") when there is none.
+    FLUX falls back on the default scene of the task's network (SOP or LOP)."""
+    task = (task or "").strip().upper()
+    own = _first_hip(Path(project_path).joinpath(*PROJECT_TEMPLATES), task) if task else None
+    if own is not None:
         return own, "project"
-    bundled = BUNDLED_TEMPLATES / name
-    if bundled.is_file():
-        return bundled, "flux"
+    for stem in (task, "DEFAULT_" + TASK_CATEGORY.get(task, "Sop").upper()):
+        bundled = _first_hip(BUNDLED_TEMPLATES, stem) if stem else None
+        if bundled is not None:
+            return bundled, "flux"
     return None, ""
 
 
@@ -148,7 +176,8 @@ def list_versions(folder: str | Path) -> list[dict]:
             continue
         data = _read_json(path) or {"state": "unreadable"}
         data["version"] = version_name(int(m.group(1)))
-        data["cpio"] = str(path.with_suffix(".cpio")).replace("\\", "/")
+        hip = _first_hip(folder, data["version"])
+        data["hip"] = str(hip).replace("\\", "/") if hip else ""
         if data.get("state") == STATE_WRITING:
             try:
                 data["stale"] = now - path.stat().st_mtime > STALE_WRITING_S
@@ -168,11 +197,15 @@ def latest_ok(folder: str | Path) -> dict | None:
 def reserve_version(folder: str | Path, *, author: str, host: str = "", based_on: str = "",
                     comment: str = "", houdini_version: str = "", license: str = "",
                     category: str = "", seq: str = "", shot: str = "", task: str = "",
-                    template: bool = False) -> dict:
+                    project: str = "", ext: str = "", template: bool = False) -> dict:
     """Take the next number by creating ``wNNN.json`` exclusively (state ``writing``).
     Two hosts asking at the same time get two different numbers. *template* reserves
-    ``w000`` (refused when it already exists). Returns the manifest + target paths."""
+    ``w000`` (refused when it already exists). *ext* = scene extension (default: the one
+    of *license*). Returns the manifest + target paths (``hip``)."""
     folder = Path(folder)
+    ext = (ext or hip_ext_for_license(license)).lower()
+    if ext not in HIP_EXTS:
+        raise WorkError(f"Extension de scene invalide : {ext!r}")
     folder.mkdir(parents=True, exist_ok=True)
     taken = [_number(v["version"]) for v in list_versions(folder)]
     number = 0 if template else max([n for n in taken if n > 0] + [0]) + 1
@@ -180,7 +213,8 @@ def reserve_version(folder: str | Path, *, author: str, host: str = "", based_on
         "state": STATE_WRITING, "based_on": based_on or "", "author": author or "",
         "host": host or socket.gethostname(), "date": _now(), "comment": comment or "",
         "houdini_version": houdini_version or "", "license": license or "",
-        "category": category or "", "seq": seq, "shot": shot, "task": task,
+        "category": category or "", "project": project or "", "seq": seq, "shot": shot,
+        "task": task,
     }
     while True:
         path = folder / (version_name(number) + ".json")
@@ -197,17 +231,15 @@ def reserve_version(folder: str | Path, *, author: str, host: str = "", based_on
     version = version_name(number)
     log.info("Work version reserved: %s/%s by %s", folder, version, author)
     return {**manifest, "version": version,
-            "cpio": str(folder / (version + ".cpio")).replace("\\", "/"),
+            "hip": str(folder / (version + ext)).replace("\\", "/"),
             "manifest": str(path).replace("\\", "/")}
 
 
-def commit_version(folder: str | Path, version: str, *, hash: str = "", size: int = 0,
+def commit_version(folder: str | Path, version: str, *, size: int = 0,
                    node_types: list | None = None, external_deps: list | None = None,
                    embedded_hdas: list | None = None, render_blocks: list | None = None) -> dict:
-    """Mark a reservation ``ok`` once Houdini has renamed the cpio in place. The hash is
-    recomputed from the file: a mismatch with the one Houdini sent is refused."""
-    from dcc.houdini.hda.flux_work_io import file_hash
-
+    """Mark a reservation ``ok`` once Houdini has written the scene. No content hash: two
+    identical saves of a .hip differ (ADR 0090), the scene's own dirty flag replaces it."""
     folder = Path(folder)
     _number(version)
     path = folder / (version + ".json")
@@ -216,21 +248,18 @@ def commit_version(folder: str | Path, version: str, *, hash: str = "", size: in
         raise WorkError(f"Version inconnue : {version}")
     if manifest.get("state") != STATE_WRITING:
         raise WorkError(f"{version} n'est pas en cours d'ecriture (etat {manifest.get('state')})")
-    cpio = folder / (version + ".cpio")
-    if not cpio.is_file():
-        raise WorkError(f"{version}.cpio absent : la sauvegarde Houdini n'a pas abouti")
-    on_disk = file_hash(str(cpio))
-    if hash and hash != on_disk:
-        raise WorkError(f"{version}.cpio ne correspond pas au contenu envoye par Houdini")
+    hip = _first_hip(folder, version)
+    if hip is None:
+        raise WorkError(f"Scene {version} absente : la sauvegarde Houdini n'a pas abouti")
     manifest.update({
-        "state": STATE_OK, "hash": on_disk, "size": size or cpio.stat().st_size,
+        "state": STATE_OK, "size": size or hip.stat().st_size, "file": hip.name,
         "node_types": node_types or [], "external_deps": external_deps or [],
         "embedded_hdas": embedded_hdas or [], "committed": _now(),
     })
     if render_blocks is not None:
         manifest["render_blocks"] = render_blocks
     _write_json(path, manifest)
-    return {**manifest, "version": version}
+    return {**manifest, "version": version, "hip": str(hip).replace("\\", "/")}
 
 
 def abort_version(folder: str | Path, version: str) -> bool:
@@ -242,12 +271,58 @@ def abort_version(folder: str | Path, version: str) -> bool:
     manifest = _read_json(path)
     if manifest is None or manifest.get("state") == STATE_OK:
         return False
-    for leftover in (folder / (version + ".cpio.tmp"), folder / (version + ".cpio"), path):
+    for leftover in [folder / (version + ext) for ext in HIP_EXTS] + [path]:
         try:
             leftover.unlink()
         except FileNotFoundError:
             pass
     return True
+
+
+def start_work(folder: str | Path, project_path: str | Path, *, project: str, seq: str,
+               shot: str, task: str, author: str = "", host: str = "") -> dict:
+    """What to open for a task: its newest committed scene. A task without any version
+    gets its template copied into ``w000`` first (never over an existing file); Houdini
+    then opens w000, sets the task and saves w001 right away (ADR 0090 point 4)."""
+    folder = Path(folder)
+    latest = latest_ok(folder)
+    created = False
+    if latest is None:
+        source, origin = template_hip(project_path, task)
+        if source is None:
+            raise WorkError(f"Aucun template Houdini pour la tache {task}")
+        reserved = reserve_version(folder, author=author, host=host, comment="template",
+                                   category=TASK_CATEGORY.get(task.upper(), ""), project=project,
+                                   seq=seq, shot=shot, task=task, ext=source.suffix, template=True)
+        target = Path(reserved["hip"])
+        try:
+            with open(source, "rb") as src, open(target, "xb") as dst:
+                shutil.copyfileobj(src, dst)
+        except OSError as exc:
+            abort_version(folder, "w000")
+            raise WorkError(f"Copie du template impossible : {exc}") from exc
+        commit_version(folder, "w000")
+        created = True
+        log.info("Work template copied: %s -> %s (%s)", source, target, origin)
+        latest = latest_ok(folder)
+    return {"hip": latest["hip"], "version": latest["version"], "created_template": created,
+            "folder": str(folder).replace("\\", "/")}
+
+
+def identify(path: str | Path) -> dict | None:
+    """Task of an opened scene ``.../wNNN.<hip ext>`` from its manifest; None when the
+    file is not a FLUX Work version (a free scene)."""
+    path = Path(path)
+    if path.suffix.lower() not in HIP_EXTS or not re.match(r"^w\d{3,}$", path.stem):
+        return None
+    manifest = _read_json(path.with_suffix(".json"))
+    if not manifest or not manifest.get("task"):
+        return None
+    return {"project": manifest.get("project", ""), "seq": manifest.get("seq", ""),
+            "shot": manifest.get("shot", ""), "task": manifest.get("task", ""),
+            "version": path.stem, "state": manifest.get("state", ""),
+            "category": manifest.get("category", ""),
+            "folder": str(path.parent).replace("\\", "/")}
 
 
 # ── lock (indicative) ─────────────────────────────────────────────────────────

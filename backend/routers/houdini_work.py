@@ -1,6 +1,7 @@
 """
-FLUX Work routes (ADR 0051): versions of a Houdini work subnet, called by the FLUX Work
-HDA. Metadata only: Houdini writes the .cpio itself (ADR 0005).
+FLUX Work routes (ADR 0051, ADR 0090): versions of a Houdini work scene, called by the
+FLUX Work HDA and the Production menu. Metadata and the template copy only: Houdini
+writes the .hip itself (ADR 0005).
 Mounted at /dcc/houdini/work.
 """
 
@@ -37,12 +38,12 @@ class ReserveRequest(TaskRef):
     houdini_version: str = ""
     license: str = ""
     category: str = ""        # Sop | Lop
+    ext: str = ""             # scene extension, default from license
     template: bool = False
 
 
 class CommitRequest(TaskRef):
     version: str
-    hash: str = ""
     size: int = 0
     node_types: list = []
     external_deps: list = []
@@ -134,15 +135,15 @@ def _render_setup(project_path, project: str, seq: str, shot: str) -> dict:
 
 @router.get("/template")
 async def work_template(project: str, task: str, seq: str = "", shot: str = "") -> dict:
-    """Source of the w000 of a task: the project's template cpio, else FLUX's, else none
-    (the Work builds its default content). RENDER also gets its setup plan."""
+    """Source of the w000 of a task (the project's template scene, else FLUX's). RENDER
+    also gets its setup plan, applied by the Work when it opens w000."""
     project_path = _project_path(project)
-    path, source = work_store.template_cpio(project_path, task)
+    path, source = work_store.template_hip(project_path, task)
     setup = None
     if task.strip().upper() == "RENDER" and seq.strip():
         setup = await asyncio.get_running_loop().run_in_executor(
             None, lambda: _render_setup(project_path, project, seq, shot))
-    return {"cpio": str(path).replace("\\", "/") if path else "", "source": source,
+    return {"hip": str(path).replace("\\", "/") if path else "", "source": source,
             "category": work_store.TASK_CATEGORY.get(task.strip().upper(), ""), "setup": setup}
 
 
@@ -196,17 +197,62 @@ async def work_reserve(req: ReserveRequest) -> dict:
     return await _run(lambda: work_store.reserve_version(
         folder, author=_author(req.author), host=req.host, based_on=req.based_on,
         comment=req.comment, houdini_version=req.houdini_version, license=req.license,
-        category=req.category, seq=req.seq.upper(), shot=req.shot.upper(), task=req.task.upper(),
-        template=req.template))
+        category=req.category, project=req.project, seq=req.seq.upper(), shot=req.shot.upper(),
+        task=req.task.upper(), ext=req.ext, template=req.template))
 
 
 @router.post("/commit")
 async def work_commit(req: CommitRequest) -> dict:
     folder = _folder(req)
     return await _run(lambda: work_store.commit_version(
-        folder, req.version, hash=req.hash, size=req.size, node_types=req.node_types,
+        folder, req.version, size=req.size, node_types=req.node_types,
         external_deps=req.external_deps, embedded_hdas=req.embedded_hdas,
         render_blocks=req.render_blocks))
+
+
+@router.post("/start")
+async def work_start(req: LockRequest) -> dict:
+    """Scene to open for a task: its newest version, the template copied into w000 when
+    the task has none (Houdini then saves w001 at once, ADR 0090)."""
+    folder = _folder(req)
+    project_path = _project_path(req.project)
+    return await _run(lambda: work_store.start_work(
+        folder, project_path, project=req.project, seq=req.seq.upper(), shot=req.shot.upper(),
+        task=req.task.upper(), author=_author(req.author), host=req.host))
+
+
+class LaunchRequest(BaseModel):
+    path: str
+
+
+@router.post("/open")
+async def work_open(req: LockRequest) -> dict:
+    """Production "Ouvrir le travail Houdini": the task's scene (w000 copied first when
+    it has none) sent to a running Houdini, which asks the artist when its scene is not
+    blank; no Houdini answering -> a new one on the scene (ADR 0090 point 3)."""
+    from dcc.houdini import work_open as wo
+
+    started = await work_start(req)
+    res = await asyncio.get_running_loop().run_in_executor(None, lambda: wo.open_in_houdini(started["hip"]))
+    return {**res, "version": started["version"], "created_template": started["created_template"]}
+
+
+@router.post("/launch")
+async def work_launch(req: LaunchRequest) -> dict:
+    """"Nouvelle instance" chosen in Houdini: a new Houdini on that work scene. Only a
+    FLUX Work version is accepted (never an arbitrary file)."""
+    from dcc.houdini import work_open as wo
+
+    if work_store.identify(req.path) is None:
+        raise HTTPException(status_code=400, detail="Pas une scene FLUX Work : %s" % req.path)
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: wo.launch_work(req.path))
+
+
+@router.get("/identify")
+async def work_identify(path: str) -> dict:
+    """Task of an opened scene from its manifest; {"work": None} for a free scene."""
+    return {"work": await asyncio.get_running_loop().run_in_executor(
+        None, lambda: work_store.identify(path))}
 
 
 @router.post("/abort")

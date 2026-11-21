@@ -954,6 +954,12 @@ export const api = {
       'POST', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/launch`,
       { dcc }),
 
+  // FLUX Work (ADR 0090): the task's .hip sent to a running Houdini, or a new one launched.
+  openHoudiniWork: (project: string, seq: string, shot: string, task: string) =>
+    apiCall<{ ok: boolean; mode: 'sent' | 'launched' | 'failed'; port: number | null; hip: string;
+              version: string; created_template: boolean }>(
+      'POST', '/dcc/houdini/work/open', { project, seq, shot, task }),
+
   // DCC
   getFluxTokensFromPath: (project: string, rel_path: string) =>
     apiCall<{ CLASS: string; TYPE: string; NAME: string; INSTANCE: string }>(

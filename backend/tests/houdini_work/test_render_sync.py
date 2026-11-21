@@ -105,7 +105,7 @@ class Routes(unittest.TestCase):
     def test_plan_reads_the_blocks_of_the_base_version(self) -> None:
         folder = ws.work_dir(self.project, "SEQ010", "", "RENDER")
         r = ws.reserve_version(folder, author="adam", host="PC1", template=True)
-        Path(r["cpio"]).write_bytes(b"x")
+        Path(r["hip"]).write_bytes(b"x")
         ws.commit_version(folder, "w000", render_blocks=_blocks(SH010=(1001, 1040), SH020=(1001, 1050)))
         got = self.client.post("/dcc/houdini/work/render-sync/plan",
                                json={**self.ref, "base_version": "w000",
