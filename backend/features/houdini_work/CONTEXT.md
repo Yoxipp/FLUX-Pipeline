@@ -28,6 +28,12 @@ MetadataRepository : ils decrivent des octets ecrits par Houdini (ADR 0005).
 Work RENDER <-> Timeline Production, comparaison a trois scene / `render_blocks` de la version chargee / Production
 (`plan` : push, pull, conflicts, create, missing ; `apply` : plages + shots crees, verrous respectes).
 
+`backup_cleaner.py` (ADR 0090 point 8, ADR 0092) : `scan` / `apply` des backups Houdini des dossiers FLUX Work
+(`backup/`, `*_bak*`, jamais `wNNN`) et des copies d'autosave du projet sur ce poste, plus vieux que `keep_days()`
+(reglage `houdini_backup_keep_days`, defaut 14, 0 = coupe), le plus recent de chaque scene garde. `apply` ne supprime que
+les ids d'un nouveau scan, journal `.flux_cleanup/houdini_backups/`. Routes dans `routers/folder_manager.py`
+(`/folder/projects/{p}/cleanup/houdini-backups`) ; UI : onglet Disque et panneau des Supervisors a 13h / 18h.
+
 Routes : `routers/houdini_work.py`, montees sous `/dcc/houdini/work` (`tasks`, `status`, `reserve`, `commit`, `abort`,
 `start`, `identify`, `open`, `launch`, `lock`, `unlock`, `module`, `shots`, `template`, `render-sync/plan`,
 `render-sync/apply`). `open` = menu clic droit d'une tache CFX / FX / LIGHT / RENDER dans Production

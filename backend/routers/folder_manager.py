@@ -900,6 +900,28 @@ async def post_cleanup_restore(project_name: str, req: CleanupRestore) -> dict:
     return await _cleanup_call(lambda: ac.restore_cleanup(project_path, req.journal_id))
 
 
+class HoudiniBackupsApply(BaseModel):
+    ids: list[str]                  # item ids of the scan (final deletion)
+
+
+@router.get("/projects/{project_name}/cleanup/houdini-backups")
+async def get_houdini_backups(project_name: str) -> dict:
+    """Houdini backups / autosave copies older than the setting (ADR 0092)."""
+    from features.houdini_work import backup_cleaner as bc
+
+    project_path = _require_project(project_name)
+    return await _cleanup_call(lambda: bc.scan(project_path, project_name))
+
+
+@router.post("/projects/{project_name}/cleanup/houdini-backups")
+async def post_houdini_backups(project_name: str, req: HoudiniBackupsApply) -> dict:
+    """Delete the validated backups that a fresh scan still lists, journal written."""
+    from features.houdini_work import backup_cleaner as bc
+
+    project_path = _require_project(project_name)
+    return await _cleanup_call(lambda: bc.apply(project_path, project_name, req.ids))
+
+
 @router.post("/projects/{project_name}/clone")
 async def post_project_clone(project_name: str, req: ProjectClone) -> dict:
     """Copy of the project next to it, put on the current layout (the original is not touched)."""
