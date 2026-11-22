@@ -494,6 +494,8 @@ def bind(node):
     read_only = not lock.get("ok")
     _set(node, "read_only", 1 if read_only else 0)
     holder = lock.get("lock") or {}
+    if not read_only:
+        _autosave_arm(node)
     if work["version"] == "w000":
         if _is_render(ref):
             tpl = _get(_API + "/template", **ref)
@@ -505,6 +507,8 @@ def bind(node):
                     % (holder.get("author"), holder.get("host"))); return
         save(node, comment="template", template=True)
         return
+    if not read_only and _offer_recovery(node, ref, work["version"]):
+        return
     msg = ""
     if read_only:
         msg = "LECTURE SEULE (verrou %s@%s, Reprendre pour sauver)" % (holder.get("author"), holder.get("host"))
@@ -512,6 +516,117 @@ def bind(node):
         msg = _follow_timeline(node, ref, _stage(node), work["version"])
     if msg:
         _status(node, "%s %s  %s" % (_label(ref), work["version"], msg))
+
+# â”€â”€ autosave and recovery (features/houdini_work/autosave.py, ADR 0090 point 6) â”€â”€
+
+_AUTOSAVE_TICK_S = 20.0       # the event loop callback only looks at the clock
+
+def _autosave_state():
+    """One state per Houdini session, kept on the hou module so that a re-exec of this
+    module (fix without rebuild) replaces the old callback instead of doubling it."""
+    import hou
+    st = getattr(hou, "_flux_work_autosave", None)
+    if st is None:
+        st = {"cb": None, "node": "", "last": time.monotonic(), "minutes": None, "busy": False}
+        hou._flux_work_autosave = st
+    return st
+
+def _autosave_arm(node):
+    """Start the timer for this scene's FLUX Work (UI sessions only)."""
+    import hou
+    if not hou.isUIAvailable():
+        return
+    st = _autosave_state()
+    st["node"] = node.path()
+    st["last"] = time.monotonic()
+    if st["cb"] is not None:
+        try:
+            hou.ui.removeEventLoopCallback(st["cb"])
+        except Exception:
+            pass
+    st["cb"] = _autosave_tick
+    hou.ui.addEventLoopCallback(_autosave_tick)
+
+def _autosave_tick():
+    """Event loop callback: cheap clock check, the work happens once per interval."""
+    import hou
+    st = _autosave_state()
+    try:
+        if st["busy"]:
+            return
+        wait = (st["minutes"] if st["minutes"] is not None else 5) * 60.0
+        if wait <= 0:
+            wait = 60.0                       # off: look at the setting again every minute
+        if time.monotonic() - st["last"] < max(wait, _AUTOSAVE_TICK_S):
+            return
+        st["last"] = time.monotonic()
+        st["busy"] = True
+        try:
+            _autosave_once(st)
+        finally:
+            st["busy"] = False
+    except Exception:
+        pass                                  # an autosave problem never reaches the artist
+
+def _autosave_once(st):
+    """Interval from the backend (advanced switch), then a copy of the bound scene when it
+    has unsaved changes. save(copy) renames the scene, setName gives the name back."""
+    import hou
+    cfg = _get(_API + "/autosave/config")
+    if "minutes" not in cfg:
+        return                                # FLUX offline: next time
+    st["minutes"] = int(cfg["minutes"])
+    if st["minutes"] <= 0:
+        return
+    node = hou.node(st["node"])
+    if node is None or not _bound(node) or _ro(node) or not hou.hipFile.hasUnsavedChanges():
+        return
+    if hou.hipFile.isNewFile():
+        return
+    ref = _ref(node, loaded=True)
+    slot = _post(_API + "/autosave/slot", dict(ref, ext=os.path.splitext(hou.hipFile.path())[1]))
+    if not slot.get("path"):
+        return
+    current = hou.hipFile.path()
+    try:
+        hou.hipFile.save(slot["path"], save_to_recent_files=False)
+    finally:
+        hou.hipFile.setName(current)
+    _keep_dirty(node)
+
+def _keep_dirty(node):
+    """The scene had unsaved changes before the autosave copy: it must still have them,
+    or Houdini would close without asking and the real wNNN would never be written. A
+    harmless re-set of a hidden parm (same value) marks it modified again if the copy
+    cleared the flag."""
+    import hou
+    if hou.hipFile.hasUnsavedChanges():
+        return
+    p = node.parm("loaded_version")
+    if p is not None:
+        p.set(p.eval())
+
+def _offer_recovery(node, ref, version):
+    """Opening a work: an autosave newer than its file is proposed (2026-11-21: here
+    in Houdini only). Yes = it becomes the next version wNNN+1 and that scene opens."""
+    import hou
+    if not hou.isUIAvailable():
+        return False
+    found = _get(_API + "/autosave/candidate", **ref).get("candidate")
+    if not found:
+        return False
+    when = time.strftime("%d/%m %H:%M", time.localtime(found["mtime"]))
+    choice = _ask("Une sauvegarde automatique du %s est plus recente que %s %s.\\n"
+                  "La recuperer comme version suivante ?" % (when, _label(ref), version),
+                  ("Recuperer", "Ignorer"), default=0, close=1)
+    if choice != 0:
+        return False
+    r = _post(_API + "/autosave/recover", dict(ref, author="", host=_host()))
+    if not r.get("hip"):
+        _status(node, "Recuperation refusee : %s" % (r.get("error") or r))
+        return False
+    _defer(lambda: _open_scene(r["hip"]))
+    return True
 
 def _open_scene(path):
     import hou
