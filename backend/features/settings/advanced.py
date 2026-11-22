@@ -40,6 +40,8 @@ SWITCHES: dict[str, tuple[str, str]] = {
     # FLUX Work Houdini autosave interval of this machine, minutes, 0 = off (ADR 0090 point 6;
     # read by the HDA through /dcc/houdini/work/autosave/config at each autosave).
     "houdini_autosave_minutes": ("FLUX_HOUDINI_AUTOSAVE_MINUTES", "minutes"),
+    # Age in days past which the Houdini backups go, 0 = cleaner off (ADR 0092; read at each scan).
+    "houdini_backup_keep_days": ("FLUX_HOUDINI_BACKUP_KEEP_DAYS", "days"),
 }
 
 # Env vars present when the backend started (dev .bat, CI): restored when a saved value is cleared.
@@ -52,7 +54,7 @@ def _current(name: str) -> Any:
     from flux_actions import switch
     from flux_flows import events as flows_events
     from flux_flows import scheduler as flows_scheduler
-    from features.houdini_work import autosave
+    from features.houdini_work import autosave, backup_cleaner
 
     return {
         "conform_tx": switch.conform_tx_enabled,
@@ -65,13 +67,14 @@ def _current(name: str) -> Any:
         "flows_hooks": flows_events.hooks_enabled,
         "flows_scheduler": flows_scheduler.enabled,
         "houdini_autosave_minutes": autosave.interval_minutes,
+        "houdini_backup_keep_days": backup_cleaner.keep_days,
     }[name]()
 
 
 def _to_env(kind: str, value: Any) -> str:
     if kind == "bool":
         return "1" if value else "0"
-    if kind in ("count", "minutes"):
+    if kind in ("count", "minutes", "days"):
         return str(int(value))
     return repr(float(value))
 
@@ -95,6 +98,10 @@ def _check(name: str, value: Any) -> Any:
     if kind == "minutes":
         if int(value) != value or not 0 <= value <= 120:
             raise ValueError(f"{name} : entier entre 0 (desactive) et 120 minutes attendu")
+        return int(value)
+    if kind == "days":
+        if int(value) != value or not 0 <= value <= 365:
+            raise ValueError(f"{name} : entier entre 0 (desactive) et 365 jours attendu")
         return int(value)
     if kind == "mbps":
         if not 0.0 <= float(value) <= 10000.0:
