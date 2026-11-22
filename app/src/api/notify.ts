@@ -5,12 +5,15 @@
 import { apiCall } from './client'
 
 export type NotifyChannel = 'none' | 'discord'
+/** Event types a person can turn off (ADR 0091), as backend events.EVENT_TYPES. */
+export type NotifyType = 'mention' | 'task' | 'retake' | 'calendar' | 'publish'
 
 export interface NotifyPrefs {
   channel: NotifyChannel
   discord_id: string
   discord_linked_at: string  // set by a /link code (ADR 0073), '' when typed by hand
   discord_name: string       // Discord display name given with the /link code, '' when unknown
+  muted: NotifyType[]        // types this person does not receive
 }
 
 export interface NotifyMe {
@@ -56,7 +59,7 @@ const q = (project: string | null | undefined) => (project ? `?project=${enc(pro
 
 export const notifyApi = {
   me: (project?: string | null) => apiCall<NotifyMe>('GET', `/notify/me${q(project)}`),
-  setMe: (patch: { channel?: NotifyChannel; discord_id?: string }, project?: string | null) =>
+  setMe: (patch: { channel?: NotifyChannel; discord_id?: string; muted?: NotifyType[] }, project?: string | null) =>
     apiCall<{ prefs: NotifyPrefs; has_channel: boolean }>('PUT', `/notify/me${q(project)}`, patch),
   test: (project?: string | null) =>
     apiCall<{ ok: boolean; status?: number; reason?: string; channel?: NotifyChannel }>('POST', `/notify/me/test${q(project)}`),

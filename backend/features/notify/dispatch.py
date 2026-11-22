@@ -57,7 +57,9 @@ def enqueue(event: dict, *, now: float | None = None, start_worker: bool = True)
         delay = 0.0
         if event.get("type") not in IMMEDIATE:
             delay = store.read_project(event.get("project", "")).get("digest_minutes", 5) * 60.0
-        items = [outbox.new_item(event, who, now=t, delay_s=delay) for who in recipients_of(event)]
+        # Per type opt-out (ADR 0091): a muted type is never queued for that person.
+        who_wants = [w for w in recipients_of(event) if store.wants(store.read_user(w), event.get("type", ""))]
+        items = [outbox.new_item(event, who, now=t, delay_s=delay) for who in who_wants]
         if items and outbox.add(items):
             if start_worker:
                 kick()
@@ -69,12 +71,13 @@ def enqueue(event: dict, *, now: float | None = None, start_worker: bool = True)
 
 # ── flush ─────────────────────────────────────────────────────────────────────
 
-def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float):
-    """Private message through the project's bot (ADR 0073) for a linked account.
+def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float, components: list | None = None):
+    """Private message through the project's bot (ADR 0073) for a linked account, with the
+    action buttons of *components* (ADR 0091, dm_actions).
 
     This PC hosts the bot: send now. Another PC hosts it and is online: leave the DM in
     the shared queue (the host sends it). Bot offline: None = use the webhook if there is
-    one, else retry later. Not linked or no bot: None.
+    one (no buttons there), else retry later. Not linked or no bot: None.
     """
     if not cfg.get("discord_bot") or not store.is_linked(prefs):
         return None
@@ -82,11 +85,13 @@ def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float):
     from features.notify.channels import SendResult
     token = discord_bot.hosted_token(project)
     if token:
-        return discord_bot.send_dm(token, prefs["discord_id"], text)
+        return discord_bot.send_dm(token, prefs["discord_id"], text, components)
     if store.bot_alive(project, now):
         from core import config
         item = {"id": outbox.new_item({}, "", now=now)["id"], "discord_id": prefs["discord_id"],
                 "text": text, "created": now}
+        if components:
+            item["components"] = components
         ok = store.bot_queue_add(project, config.get_current_user() or "", item, now)
         return SendResult(ok, 200 if ok else 0)
     if cfg.get("discord_webhook"):
@@ -104,7 +109,11 @@ def _send_group(project: str, who: str, items: list[dict], now: float) -> str:
     text = format_digest(events, cfg.get("include_project", False),
                          include_text=cfg.get("include_text", True))
     channel = "discord"
-    result = _via_bot(project, cfg, prefs, text, now)
+    components = []
+    if cfg.get("discord_bot") and store.is_linked(prefs):
+        from features.notify import dm_actions
+        components = dm_actions.components_for(events, who)
+    result = _via_bot(project, cfg, prefs, text, now, components)
     if result is not None:
         channel = "discord bot"
     else:

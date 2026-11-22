@@ -180,7 +180,7 @@ class ViaBotTests(_SharedFolder):
              mock.patch.object(discord_bot, "send_dm", return_value=SendResult(True, 200)) as dm:
             result = dispatch._via_bot("P", self.cfg, self.prefs, "hello", NOW)
         self.assertTrue(result.ok)
-        dm.assert_called_once_with("TOK", "111", "hello")
+        dm.assert_called_once_with("TOK", "111", "hello", None)
 
     def test_other_pc_leaves_it_in_the_shared_queue(self):
         store.write_alive("P", "HOST", NOW)

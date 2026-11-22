@@ -92,8 +92,9 @@ def register_commands(token: str, app_id: str) -> bool:
 _dm_channels: dict[str, str] = {}
 
 
-def send_dm(token: str, discord_id: str, text: str) -> SendResult:
-    """One private message. Never raises; SendResult like the other relays."""
+def send_dm(token: str, discord_id: str, text: str, components: list | None = None) -> SendResult:
+    """One private message, with the action rows of *components* (ADR 0091). Never raises;
+    SendResult like the other relays."""
     if not token or not str(discord_id).isdigit():
         return SendResult(False, 0, 0.0, permanent=True)
     channel = _dm_channels.get(discord_id)
@@ -105,8 +106,10 @@ def send_dm(token: str, discord_id: str, text: str) -> SendResult:
         channel = str(json.loads(body or b"{}").get("id") or "")
         _dm_channels[discord_id] = channel
     content = text if len(text) <= MAX_CHARS else text[: MAX_CHARS - 3] + "..."
-    status, headers, body = request_json("POST", f"{API}/channels/{channel}/messages",
-                                         {"content": content, "allowed_mentions": {"parse": []}},
+    payload = {"content": content, "allowed_mentions": {"parse": []}}
+    if components:
+        payload["components"] = components
+    status, headers, body = request_json("POST", f"{API}/channels/{channel}/messages", payload,
                                          headers=_auth(token))
     if status == 404:
         _dm_channels.pop(discord_id, None)
@@ -124,7 +127,7 @@ def cmd_link(project: str, discord_id: str, now: float, discord_name: str = "") 
     if not store.add_link_code(project, code, discord_id, now, discord_name):
         return "FLUX n'a pas pu enregistrer le code, reessaie."
     return (f"Ton code : **{code}** (valable 10 minutes, une seule fois).\n"
-            f"Colle-le dans FLUX : Parametres > User > Notifications telephone > Lier Discord.")
+            f"Colle-le dans FLUX : Parametres > User > Notifications Discord > Lier.")
 
 
 def _one_line(text, size: int = 300) -> str:
@@ -241,7 +244,8 @@ def pump(project: str, token: str, sent: _Sent, now: float) -> int:
     for item in store.bot_queue_items(project, now):
         if item["id"] in sent.ids:
             continue
-        result = send_dm(token, str(item.get("discord_id") or ""), str(item.get("text") or ""))
+        components = item.get("components") if isinstance(item.get("components"), list) else None
+        result = send_dm(token, str(item.get("discord_id") or ""), str(item.get("text") or ""), components)
         if result.ok or result.permanent:
             sent.ids[item["id"]] = now
             count += result.ok
@@ -434,6 +438,8 @@ class BotRunner:
             log.info("discord bot %s online (commands %s)", self.project, "ok" if ok else "not registered")
         elif kind == "INTERACTION_CREATE" and data.get("type") == 2:
             asyncio.create_task(self._interaction(data))
+        elif kind == "INTERACTION_CREATE" and data.get("type") == 3:     # a DM button / menu (ADR 0091)
+            asyncio.create_task(self._component(data))
 
     async def _interaction(self, data: dict) -> None:
         iid, itoken = data.get("id"), data.get("token")
@@ -455,6 +461,44 @@ class BotRunner:
                                 f"{API}/webhooks/{self.app_id}/{itoken}/messages/@original",
                                 {"content": text, "allowed_mentions": {"parse": []}})
         log.info("discord bot /%s answered", name)
+
+    async def _component(self, data: dict) -> None:
+        """A click under a DM (ADR 0091, dm_actions): acknowledge at once (3 s limit), write
+        the change as the linked FLUX account, then show the result in the DM (buttons gone)
+        or, when refused, answer in a message only the clicker sees (buttons kept)."""
+        iid, itoken = data.get("id"), data.get("token")
+        user = (data.get("member") or {}).get("user") or data.get("user") or {}
+        info = data.get("data") or {}
+        await asyncio.to_thread(request_json, "POST", f"{API}/interactions/{iid}/{itoken}/callback", {"type": 6})
+        try:
+            text, done = await asyncio.to_thread(component_answer, self.project, str(user.get("id") or ""),
+                                                 str(info.get("custom_id") or ""), list(info.get("values") or []))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("discord bot button failed: %s", exc)
+            text, done = "FLUX n'a pas pu enregistrer, reessaie.", False
+        if done:
+            original = str((data.get("message") or {}).get("content") or "")
+            await asyncio.to_thread(request_json, "PATCH",
+                                    f"{API}/webhooks/{self.app_id}/{itoken}/messages/@original",
+                                    {"content": _with_result(original, text), "components": [],
+                                     "allowed_mentions": {"parse": []}})
+        else:
+            await asyncio.to_thread(request_json, "POST", f"{API}/webhooks/{self.app_id}/{itoken}",
+                                    {"content": text, "flags": EPHEMERAL, "allowed_mentions": {"parse": []}})
+        log.info("discord bot button answered (%s)", "done" if done else "refused")
+
+
+def component_answer(project: str, discord_id: str, custom_id: str, values: list) -> tuple[str, bool]:
+    from features.notify import dm_actions
+    return dm_actions.handle(project, discord_id, custom_id, values)
+
+
+def _with_result(original: str, result: str) -> str:
+    """The DM text followed by what the click did, within Discord's 2000 characters."""
+    line = "\n> " + result
+    room = MAX_CHARS - len(line)
+    head = original if len(original) <= room else original[: max(0, room - 3)] + "..."
+    return (head + line)[:MAX_CHARS]
 
 
 # ── manager ───────────────────────────────────────────────────────────────────

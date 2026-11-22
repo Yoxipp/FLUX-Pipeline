@@ -48,6 +48,7 @@ async def _io(fn):
 class UserPatch(BaseModel):
     channel: str | None = None
     discord_id: str | None = None
+    muted: list[str] | None = None        # event types turned off (ADR 0091)
 
 
 @router.get("/me")

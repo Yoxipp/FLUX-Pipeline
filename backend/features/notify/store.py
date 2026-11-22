@@ -5,7 +5,8 @@
 #               "include_project", "include_text", "discord_bot"}, "updated_by", "updated_at"}
 #   Edited by a lead / supervisor only (role "project_settings"), rarely: one document
 #   is acceptable here, like roles.json.
-# User.json "notify": {"channel": none | discord, "discord_id", "discord_linked_at", "discord_name"}
+# User.json "notify": {"channel": none | discord, "discord_id", "discord_linked_at", "discord_name",
+#                      "muted": [event types this person does not want, ADR 0091]}
 #   ADR 0091: ntfy is gone; an old "ntfy" channel reads as "none" (old keys are left in the file).
 #   Written by its owner only (one file per author).
 # Secrets come out masked through public_*(); the raw values never leave the backend.
@@ -18,6 +19,7 @@ from core import paths
 from core.constants import JSON_COLLAB
 from core.json_manager import read_json, write_json
 from core.project_setup import setup_path
+from features.notify.events import EVENT_TYPES
 from features.notify.relay_secrets import is_masked, mask
 from utils.user_utils import read_user_data, write_user_data
 
@@ -117,7 +119,19 @@ def read_user(name: str) -> dict:
         prefs.update({k: str(stored.get(k) or "") for k in USER_DEFAULTS if k in stored})
     if prefs["channel"] not in CHANNELS:
         prefs["channel"] = "none"
+    prefs["muted"] = _clean_muted(stored.get("muted") if isinstance(stored, dict) else None)
     return prefs
+
+
+def _clean_muted(value) -> list[str]:
+    """Known event types only, in EVENT_TYPES order (a typo never mutes anything)."""
+    wanted = {str(v) for v in value} if isinstance(value, (list, tuple)) else set()
+    return [t for t in EVENT_TYPES if t in wanted]
+
+
+def wants(prefs: dict, event_type: str) -> bool:
+    """False when the person turned this event type off (Parametres > User, ADR 0091)."""
+    return event_type not in (prefs.get("muted") or [])
 
 
 def write_user(name: str, patch: dict) -> dict:
@@ -135,6 +149,11 @@ def write_user(name: str, patch: dict) -> dict:
             prefs["discord_linked_at"] = ""     # typed by hand: never trusted by the bot
             prefs["discord_name"] = ""
         prefs["discord_id"] = value
+    if patch.get("muted") is not None:
+        unknown = [t for t in patch["muted"] if t not in EVENT_TYPES]
+        if unknown:
+            raise ValueError(f"Type de notification inconnu : {', '.join(map(str, unknown))}")
+        prefs["muted"] = _clean_muted(patch["muted"])
     data["notify"] = prefs
     if not write_user_data(name, data):
         raise OSError("Ecriture de User.json impossible")

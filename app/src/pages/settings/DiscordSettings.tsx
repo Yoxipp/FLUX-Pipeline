@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { BellRing, Bot, ChevronRight, Send, UserPlus, Users } from 'lucide-react'
 import { toast } from 'sonner'
-import { notifyApi, type NotifyBot, type NotifyChannel, type NotifyMe, type NotifyProject } from '../../api/notify'
+import { notifyApi, type NotifyBot, type NotifyChannel, type NotifyMe, type NotifyProject, type NotifyType } from '../../api/notify'
 import { Btn, SecTitle } from '../../components/shared/ui'
 import { DiscordLink } from './DiscordLink'
 
@@ -23,6 +23,11 @@ const selectStyle = { height: 24, fontSize: 11, background: 'var(--paper-2)', co
 const SHARED_NOTE = 'Le texte envoyé : type, entité, auteur, et le message du chat ou le titre du calendrier si le projet l\'autorise. Jamais de chemin.'
 const DEV_PORTAL = 'https://discord.com/developers/applications'
 const err = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e))
+// Per type opt-out (ADR 0091): what a DM can be about. Buttons: tasks, retakes, calendar proposals.
+const TYPES: { id: NotifyType; label: string }[] = [
+  { id: 'task', label: 'Tâches assignées' }, { id: 'retake', label: 'Retakes' }, { id: 'calendar', label: 'Calendrier' },
+  { id: 'mention', label: 'Mentions' }, { id: 'publish', label: 'Publishs suivis' },
+]
 
 export function DiscordUser({ project }: { project: string | null }) {
   const [me, setMe] = useState<NotifyMe | null>(null)
@@ -32,7 +37,7 @@ export function DiscordUser({ project }: { project: string | null }) {
   const load = (data: NotifyMe) => { setMe(data); setDiscordId(data.prefs.discord_id) }
   useEffect(() => { notifyApi.me(project).then(load).catch(err) }, [project])
 
-  const save = async (patch: { channel?: NotifyChannel; discord_id?: string }, ok?: string) => {
+  const save = async (patch: { channel?: NotifyChannel; discord_id?: string; muted?: NotifyType[] }, ok?: string) => {
     setBusy(true)
     try {
       const res = await notifyApi.setMe(patch, project)
@@ -79,6 +84,27 @@ export function DiscordUser({ project }: { project: string | null }) {
               {!me.project_has_webhook && <> <b style={{ color: 'var(--warn)' }}>Le projet n'a pas encore de bot ni de webhook</b> (Paramètres &gt; Projet, lead ou supervisor).</>}
             </div>
           </>
+        )}
+
+        {on && (
+          <div style={{ ...row, flexWrap: 'wrap', gap: 10 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>Recevoir :</span>
+            {TYPES.map(t => {
+              const muted = me.prefs.muted ?? []
+              const checked = !muted.includes(t.id)
+              return (
+                <label key={t.id} style={{ ...row, gap: 4, fontSize: 11, color: 'var(--ink-2)' }}>
+                  <input type="checkbox" checked={checked} disabled={busy}
+                    onChange={() => void save({ muted: checked ? [...muted, t.id] : muted.filter(m => m !== t.id) })} />
+                  {t.label}
+                </label>
+              )
+            })}
+          </div>
+        )}
+        {on && me.project_has_bot && (
+          <div style={hint}>Sous un message de tâche, de retake ou de proposition du calendrier : Valider, Refuser, Décaler, Donner à.
+            Le clic est enregistré par le PC qui héberge le bot ; bot hors ligne = « l'application n'a pas répondu ».</div>
         )}
 
         {on && (
