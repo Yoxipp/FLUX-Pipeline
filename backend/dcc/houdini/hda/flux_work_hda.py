@@ -592,6 +592,19 @@ def _autosave_once(st):
         hou.hipFile.save(slot["path"], save_to_recent_files=False)
     finally:
         hou.hipFile.setName(current)
+    _keep_dirty(node)
+
+def _keep_dirty(node):
+    """The scene had unsaved changes before the autosave copy: it must still have them,
+    or Houdini would close without asking and the real wNNN would never be written. A
+    harmless re-set of a hidden parm (same value) marks it modified again if the copy
+    cleared the flag."""
+    import hou
+    if hou.hipFile.hasUnsavedChanges():
+        return
+    p = node.parm("loaded_version")
+    if p is not None:
+        p.set(p.eval())
 
 def _offer_recovery(node, ref, version):
     """Opening a work: an autosave newer than its file is proposed (2026-11-21: here

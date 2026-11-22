@@ -206,7 +206,7 @@ class HdaWiring(unittest.TestCase):
 
         compile(MODULE_FUNCTIONS, "<flux_work_module>", "exec")
         for token in ("autosave/config", "autosave/slot", "autosave/candidate", "autosave/recover",
-                      "addEventLoopCallback", "setName"):
+                      "addEventLoopCallback", "setName", "_keep_dirty"):
             self.assertIn(token, MODULE_FUNCTIONS)
 
 
