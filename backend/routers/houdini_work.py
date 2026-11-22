@@ -275,6 +275,55 @@ async def work_unlock(req: LockRequest) -> dict:
         folder, author=_author(req.author), host=req.host))}
 
 
+# ── Autosave and recovery (features/houdini_work/autosave.py, ADR 0090 point 6) ───
+
+class SlotRequest(TaskRef):
+    ext: str = ".hip"
+
+
+@router.get("/autosave/config")
+async def autosave_config() -> dict:
+    """Interval of this machine (advanced switch, 0 = off) and the local autosave folder."""
+    from features.houdini_work import autosave
+
+    return {"minutes": autosave.interval_minutes(), "dir": str(autosave.autosave_root()).replace("\\", "/")}
+
+
+@router.post("/autosave/slot")
+async def autosave_slot(req: SlotRequest) -> dict:
+    """Local file the next autosave of this work is written to (3 rotating copies)."""
+    from features.houdini_work import autosave
+
+    def _go():
+        directory = autosave.autosave_dir(autosave.autosave_root(), req.project, req.seq.upper(),
+                                          req.shot.upper(), req.task.upper())
+        return {"path": str(autosave.next_slot_path(directory, req.ext)).replace("\\", "/")}
+
+    return await _run(_go)
+
+
+@router.get("/autosave/candidate")
+async def autosave_candidate(project: str, seq: str, task: str, shot: str = "") -> dict:
+    """Autosave newer than the newest version of the work, to propose at opening."""
+    from features.houdini_work import autosave
+
+    ref = TaskRef(project=project, seq=seq, shot=shot, task=task)
+    folder = _folder(ref)
+    return {"candidate": await _run(lambda: autosave.candidate(
+        autosave.autosave_root(), folder, project, seq.upper(), shot.upper(), task.upper()))}
+
+
+@router.post("/autosave/recover")
+async def autosave_recover(req: LockRequest) -> dict:
+    """The newest autosave becomes the next version wNNN+1 (never an overwrite)."""
+    from features.houdini_work import autosave
+
+    folder = _folder(req)
+    return await _run(lambda: autosave.recover(
+        autosave.autosave_root(), folder, project=req.project, seq=req.seq.upper(),
+        shot=req.shot.upper(), task=req.task.upper(), author=_author(req.author), host=req.host))
+
+
 # ── RENDER <-> Production Timeline (features/houdini_work/render_sync.py) ─────────
 
 @router.post("/render-sync/plan")

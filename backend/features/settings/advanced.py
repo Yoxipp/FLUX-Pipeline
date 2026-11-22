@@ -37,6 +37,9 @@ SWITCHES: dict[str, tuple[str, str]] = {
     # background scheduler of the active flows (read at backend start).
     "flows_hooks":             ("FLUX_FLOWS_HOOKS", "bool"),
     "flows_scheduler":         ("FLUX_FLOWS_SCHEDULER", "bool"),
+    # FLUX Work Houdini autosave interval of this machine, minutes, 0 = off (ADR 0090 point 6;
+    # read by the HDA through /dcc/houdini/work/autosave/config at each autosave).
+    "houdini_autosave_minutes": ("FLUX_HOUDINI_AUTOSAVE_MINUTES", "minutes"),
 }
 
 # Env vars present when the backend started (dev .bat, CI): restored when a saved value is cleared.
@@ -49,6 +52,7 @@ def _current(name: str) -> Any:
     from flux_actions import switch
     from flux_flows import events as flows_events
     from flux_flows import scheduler as flows_scheduler
+    from features.houdini_work import autosave
 
     return {
         "conform_tx": switch.conform_tx_enabled,
@@ -60,13 +64,14 @@ def _current(name: str) -> Any:
         "publish_max_mbps": copy_limits.max_mbps,
         "flows_hooks": flows_events.hooks_enabled,
         "flows_scheduler": flows_scheduler.enabled,
+        "houdini_autosave_minutes": autosave.interval_minutes,
     }[name]()
 
 
 def _to_env(kind: str, value: Any) -> str:
     if kind == "bool":
         return "1" if value else "0"
-    if kind == "count":
+    if kind in ("count", "minutes"):
         return str(int(value))
     return repr(float(value))
 
@@ -86,6 +91,10 @@ def _check(name: str, value: Any) -> Any:
     if kind == "count":
         if int(value) != value or not 1 <= value <= 64:
             raise ValueError(f"{name} : entier entre 1 et 64 attendu")
+        return int(value)
+    if kind == "minutes":
+        if int(value) != value or not 0 <= value <= 120:
+            raise ValueError(f"{name} : entier entre 0 (desactive) et 120 minutes attendu")
         return int(value)
     if kind == "mbps":
         if not 0.0 <= float(value) <= 10000.0:
