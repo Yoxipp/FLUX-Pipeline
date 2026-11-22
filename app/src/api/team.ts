@@ -1,6 +1,6 @@
-// team.ts - Team page (ADR 0077): the project team chat with channels, threads and files,
-// channels / reactions / pins (per author journals), presence (one file per artist).
-// Messages go through /activity/chat (the same chat as the home page).
+// team.ts - chat TOOL widget (ADR 0077, 0091): the project team chat with channels, threads
+// and files, channels / reactions / pins (per author journals).
+// Messages go through /activity/chat.
 
 import { BASE_URL, apiCall } from './client'
 import type { PageDataOp, PageRecord } from '../pages/flow_editor/types'
@@ -11,15 +11,14 @@ export interface TeamMessage {
   channel?: string; reply_to?: string; attachments?: TeamAttachment[]
   via?: string   // a FLUX answer to a chat command: the artist who typed it (ADR 0081)
   edited?: string   // date time of the last edit (ADR 0084)
-  discord?: string  // id of the Discord message this one copies (bridge)
 }
 export type TeamEmoji = 'like' | 'love' | 'laugh' | 'question' | 'check'
 export interface TeamRecord extends PageRecord {
   kind?: 'channel' | 'group' | 'reaction' | 'pin'
-  name?: string; topic?: string; call_link?: string; archived?: boolean
+  name?: string; topic?: string; archived?: boolean
   title?: string | null   // channel: name shown when the key has a suffix (lighting-2 shows lighting)
   access?: string | null   // who sees the channel: JSON {users, roles}, empty = everyone
-  type?: TeamChannelType | null    // channel: a voice channel's call link is its Join button (ADR 0084)
+  type?: TeamChannelType | null    // channel type (ADR 0084)
   read_only?: boolean | null       // channel: only leads / supervisors post (P5)
   user_limit?: number | null       // voice channel: people at most, 0 = no limit
   voice_status?: string | null     // voice channel: what is going on, one line
@@ -32,10 +31,6 @@ export interface TeamMutes { channels: string[]; groups: string[] }
 export type TeamMetaRead =
   | { etag: string; unchanged: true; lead: boolean; files_dir: string }
   | { etag: string; unchanged: false; records: TeamRecord[]; lead: boolean; files_dir: string }
-// Live Discord bridge (ADR 0084): keys are channel rids, or 'general'.
-export interface TeamDiscord { on: boolean; guild: string; links: Record<string, string>; voice: Record<string, string[]> }
-export type PresenceStatus = 'available' | 'away' | 'meeting' | 'dnd'
-export interface Presence { user: string; status: PresenceStatus | 'offline'; text: string; at: string; online: boolean }
 
 const p = (project: string) => encodeURIComponent(project)
 
@@ -55,24 +50,7 @@ export const teamApi = {
     apiCall<{ success: boolean }>('PATCH', `/activity/chat/${encodeURIComponent(id)}`, { project, message }),
   deleteMessage: (project: string, id: string) =>
     apiCall<{ success: boolean }>('DELETE', `/activity/chat/${encodeURIComponent(id)}?project=${p(project)}`),
-  discord: (project: string) => apiCall<TeamDiscord>('GET', `/team/${p(project)}/discord`),
   // Muted channels / groups of this artist (P5): kept in USER/<artist>/team_mutes.json.
   mutes: (project: string) => apiCall<TeamMutes>('GET', `/team/${p(project)}/mutes`),
   setMutes: (project: string, mutes: TeamMutes) => apiCall<TeamMutes>('PUT', `/team/${p(project)}/mutes`, mutes),
-  presence: () => apiCall<{ people: Presence[] }>('GET', '/team/presence'),
-  setPresence: (status: PresenceStatus, text = '') => apiCall<{ status: string }>('POST', '/team/presence', { status, text }),
-}
-
-// -- presence of this artist (kept on this machine, re-sent every minute by the app shell) --
-const KEY = 'flux.presence'
-export function myPresence(): { status: PresenceStatus; text: string } {
-  try {
-    const v = JSON.parse(localStorage.getItem(KEY) || '{}')
-    return { status: ['available', 'away', 'meeting', 'dnd'].includes(v.status) ? v.status : 'available', text: String(v.text || '') }
-  } catch { return { status: 'available', text: '' } }
-}
-export function setMyPresence(status: PresenceStatus, text = '') {
-  try { localStorage.setItem(KEY, JSON.stringify({ status, text })) } catch { /* private mode */ }
-  window.dispatchEvent(new Event('flux:presence'))
-  return teamApi.setPresence(status, text).catch(() => undefined)
 }

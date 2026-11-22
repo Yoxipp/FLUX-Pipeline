@@ -326,26 +326,12 @@ ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
 })
 
-// Team page call links (ADR 0077): opened in the system browser, https only (no file:,
+// Links of the shared chat / pages: opened in the system browser, https only (no file:,
 // javascript: or custom protocol from a link typed in the shared chat).
 ipcMain.handle('shell:openExternal', async (_event, url: string) => {
   if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url) || url.length > 500) return false
   await shell.openExternal(url)
   return true
-})
-
-// Team voice channel (P5, 2026-10-31): open the Discord APP, not the browser. Only a
-// discord.com/channels/<guild>/<channel> link is turned into discord://; when no app handles
-// discord:// on this machine, the https link opens in the browser. Returns 'app' | 'web' | false.
-ipcMain.handle('shell:openDiscord', async (_event, url: string) => {
-  const m = typeof url === 'string' ? /^https:\/\/discord\.com\/channels\/(\d{1,25})\/(\d{1,25})$/.exec(url) : null
-  if (!m) return false
-  if (app.getApplicationNameForProtocol('discord://')) {
-    await shell.openExternal(`discord://-/channels/${m[1]}/${m[2]}`)
-    return 'app'
-  }
-  await shell.openExternal(url)
-  return 'web'
 })
 
 // Board paste (ADR 0074): the clipboard image written as a temp PNG, its path returned, so the

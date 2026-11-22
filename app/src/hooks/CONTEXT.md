@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__hooks.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Hooks de donnees : `useFlowsWs` (WS `/flows/ws` des Flows, modele `useDccStatus` : reconnexion 3 s, `onReconnect` pour relire le run), `useDccStatus`, `useActiveInstances`, `useBackendStatus`, `useActivity`, `useMentions`, `useFeeds`, `usePresence` (presence d'equipe, une lecture partagee 30 s, `PresenceDot`, ADR 0077), `usePresenceHeartbeat`, `useCommentReadState`, `useProduction`, `useSettings`, `useFavorites`, `useEnabledDccs`.
+Hooks de donnees : `useFlowsWs` (WS `/flows/ws` des Flows, modele `useDccStatus` : reconnexion 3 s, `onReconnect` pour relire le run), `useDccStatus`, `useActiveInstances`, `useBackendStatus`, `useActivity`, `useMentions`, `useFeeds`, `useCommentReadState`, `useProduction`, `useSettings`, `useFavorites`, `useEnabledDccs`.
 
 `useEnabledDccs` (V8 U10) : DCC actives par utilisateur (`/settings/enabled-dccs`, `USER/<user>/UserSettings/User.json` cle `enabled_dccs`). `null` = toutes. Evenement `flux:enabled-dccs`. Liste DCC partagee : `lib/dccs.ts`.
 `useVisibleDccs` : DCC affichees = `useEnabledDccs` restreint par la pref de profil `softwares` (ADR 0042, vide = toutes ; si le profil ne garde aucune DCC active, toutes les actives restent visibles). Utilise par Sidebar, StatusBar, Publisher, ShelfManager ; Settings > Logiciels reste sur `useEnabledDccs`.

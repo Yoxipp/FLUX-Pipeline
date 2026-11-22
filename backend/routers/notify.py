@@ -1,5 +1,5 @@
-# notify.py - phone notification settings (ADR 0062). Secrets come out masked;
-# the ntfy topic is shown in full to its owner only (QR code).
+# notify.py - notification settings (ADR 0062, Discord only since ADR 0091). The webhook
+# comes out masked.
 
 from __future__ import annotations
 
@@ -48,7 +48,6 @@ async def _io(fn):
 class UserPatch(BaseModel):
     channel: str | None = None
     discord_id: str | None = None
-    regenerate_topic: bool = False
 
 
 @router.get("/me")
@@ -56,10 +55,10 @@ async def get_me(project: str = "") -> dict:
     user = _user()
     cfg = await _io(lambda: store.read_project(project)) if project else dict(store.PROJECT_DEFAULTS)
     prefs = await _io(lambda: store.read_user(user))
-    return {"user": user, "prefs": store.public_user(prefs, cfg["ntfy_server"]),
+    return {"user": user, "prefs": store.public_user(prefs),
             "project_has_webhook": bool(cfg.get("discord_webhook")),
             "project_has_bot": bool(cfg.get("discord_bot")), "discord_linked": store.is_linked(prefs),
-            "has_channel": store.has_channel(prefs, cfg), **dispatch.quota_status()}
+            "has_channel": store.has_channel(prefs, cfg)}
 
 
 class LinkRequest(BaseModel):
@@ -79,7 +78,7 @@ async def link_discord(req: LinkRequest, project: str) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
     log.info("discord account linked for %s", user)
     cfg = await _io(lambda: store.read_project(project))
-    return {"prefs": store.public_user(prefs, cfg["ntfy_server"]), "has_channel": store.has_channel(prefs, cfg)}
+    return {"prefs": store.public_user(prefs), "has_channel": store.has_channel(prefs, cfg)}
 
 
 @router.put("/me")
@@ -92,7 +91,7 @@ async def put_me(patch: UserPatch, project: str = "") -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     cfg = await _io(lambda: store.read_project(project)) if project else dict(store.PROJECT_DEFAULTS)
-    return {"prefs": store.public_user(prefs, cfg["ntfy_server"]), "has_channel": store.has_channel(prefs, cfg)}
+    return {"prefs": store.public_user(prefs), "has_channel": store.has_channel(prefs, cfg)}
 
 
 @router.post("/me/test")
@@ -107,12 +106,9 @@ async def test_me(project: str = "") -> dict:
 
 class ProjectPatch(BaseModel):
     discord_webhook: str | None = None
-    ntfy_server: str | None = None
     digest_minutes: int | None = None
     include_project: bool | None = None
     include_text: bool | None = None
-    discord_sync: bool | None = None      # live Team <-> Discord bridge (ADR 0084)
-    discord_guild: str | None = None
 
 
 def _without_channel(cfg: dict) -> list[str]:
@@ -148,17 +144,7 @@ def _bot_status(project: str, cfg: dict) -> dict:
             "this_pc": discord_bot.host_name(),
             "candidates": [h for h in store.bot_candidates(project, now) if h != host_now],
             "invite_url": discord_bot.invite_url(info.get("app_id", "")),
-            "bridge": _bridge_status(project),
             **bot_host.status()}
-
-
-def _bridge_status(project: str) -> dict:
-    """Last pass of the Team <-> Discord bridge (ADR 0084), written by the bot host."""
-    from features.notify import discord_map
-    data = discord_map.load(project)
-    status = data.get("status") or {}
-    return {"at": str(status.get("at") or ""), "error": str(status.get("error") or ""),
-            "guild": data.get("guild") or "", "guilds": [str(g) for g in status.get("guilds") or []][:20]}
 
 
 class BotRequest(BaseModel):
@@ -262,4 +248,4 @@ async def put_project(project: str, patch: ProjectPatch) -> dict:
 @router.get("/status")
 async def status() -> dict:
     items = await _io(outbox.load)
-    return {"queued": len(items), "enabled": dispatch.enabled(), **dispatch.quota_status()}
+    return {"queued": len(items), "enabled": dispatch.enabled()}

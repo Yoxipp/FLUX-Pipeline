@@ -1,4 +1,4 @@
-# test_team.py - Team page (ADR 0077): channels / reactions / pins journals, presence
+# test_team.py - chat TOOL widget (ADR 0077, 0091): channels / reactions / pins journals
 # files, attachments copied by the backend, chat messages with channel / thread / files.
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 import core.json_manager as jm
 from features.activity import chat_manager as cm
-from features.team import files, mutes, presence, team_meta
+from features.team import files, mutes, team_meta
 from flux_flows.store import FlowStoreError
 from routers import team as team_router
 
@@ -168,29 +168,6 @@ class TeamMeta(unittest.TestCase):
             self.assertEqual(team_meta.hidden_channels("ALPHA", "BOB"), {"synced", "own"})
             self._w([{"op": "put", "rid": grp, "fields": {"archived": True}}], lead=True)
             self.assertEqual(team_meta.hidden_channels("ALPHA", "BOB"), {"own"})       # archived group: no longer inherited
-
-
-class Presence(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="flux_presence_"))
-        for u in ("ADAM", "BOB", "CLEO"):
-            (self.tmp / u).mkdir()
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_own_file_and_online_window(self) -> None:
-        presence.write("ADAM", "meeting", "revue lighting", root=self.tmp)
-        old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(timespec="seconds")
-        (self.tmp / "BOB" / presence.FILE).write_text(json.dumps({"status": "available", "at": old}), encoding="utf-8")
-        people = {p["user"]: p for p in presence.read_all(root=self.tmp)}
-        self.assertEqual((people["ADAM"]["status"], people["ADAM"]["online"], people["ADAM"]["text"]), ("meeting", True, "revue lighting"))
-        self.assertEqual((people["BOB"]["status"], people["BOB"]["online"]), ("offline", False))
-        self.assertNotIn("CLEO", people)
-        with self.assertRaises(ValueError):
-            presence.write("ADAM", "busy", root=self.tmp)
-        with self.assertRaises(FileNotFoundError):
-            presence.write("NOBODY", "away", root=self.tmp)
 
 
 class Attachments(unittest.TestCase):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from features.notify import relay_secrets
-from features.notify.channels import discord, ntfy
+from features.notify.channels import discord
 from features.notify.events import format_digest, format_text, make_event, production_changes
 from tests.notify._relay import FakeRelay, dead_url
 
@@ -27,13 +27,6 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(payload["allowed_mentions"]["users"], ["42"])
         self.assertLessEqual(len(payload["content"]), discord.MAX_CHARS)
 
-    def test_ntfy_json_and_4096_bytes(self):
-        result = ntfy.send(self.relay.url, "flux_topic", "e" * 3000 + "é" * 2000)
-        self.assertTrue(result.ok)
-        payload = self.relay.requests[0]["json"]
-        self.assertEqual(payload["topic"], "flux_topic")
-        self.assertLessEqual(len(payload["message"].encode("utf-8")), ntfy.MAX_BYTES)
-
     def test_rate_limit_is_retried_with_retry_after(self):
         self.relay.status, self.relay.headers = 429, {"Retry-After": "7"}
         result = discord.send(self.relay.url, "t", [])
@@ -46,7 +39,7 @@ class ChannelTests(unittest.TestCase):
         self.assertTrue(discord.send(self.relay.url, "t", []).permanent)
 
     def test_relay_down_is_retried(self):
-        result = ntfy.send(dead_url(), "topic", "t")
+        result = discord.send(dead_url(), "t", [])
         self.assertEqual((result.ok, result.status, result.permanent), (False, 0, False))
 
 
@@ -55,11 +48,6 @@ class SecretTests(unittest.TestCase):
         self.assertEqual(relay_secrets.mask("https://discord.com/api/webhooks/1/abcdWXYZ"), "****WXYZ")
         self.assertEqual(relay_secrets.mask(""), "")
         self.assertTrue(relay_secrets.is_masked("****WXYZ"))
-
-    def test_topics_are_random(self):
-        a, b = relay_secrets.new_topic(), relay_secrets.new_topic()
-        self.assertNotEqual(a, b)
-        self.assertGreaterEqual(len(a), 20)
 
 
 class TextTests(unittest.TestCase):

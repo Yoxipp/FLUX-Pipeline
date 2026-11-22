@@ -8,8 +8,6 @@ import { Avatar } from './ui'
 import { FluxLogo } from './Logo'
 import { Console } from './Console'
 import { SlideToConfirm } from './SlideToConfirm'
-import { PresenceIndicator } from './PresenceIndicator'
-import { PresenceDot } from '../../hooks/usePresence'
 import { runCloseGuards } from './closeGuard'
 import { useI18n } from '../../i18n'
 import { useShareLatency } from '../../lib/adaptivePoll'
@@ -104,9 +102,6 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
 
       <div style={{ flex: 1 }} />
-
-      {/* team presence: "N online", click = who is there + my status (ADR 0077) */}
-      <PresenceIndicator username={username} />
 
       {/* slow file share: median of the feed polls above 1 s (hidden under 0.7 s) */}
       {share.slow && (
@@ -261,7 +256,6 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       >
         <span style={{ position: 'relative', display: 'inline-flex' }}>
           <Avatar ch={user[0].toUpperCase()} size={20} />
-          {username && <PresenceDot user={username} size={7} overlay />}
         </span>
         <ChevronDown size={10} strokeWidth={2} color="var(--ink-3)" />
       </div>

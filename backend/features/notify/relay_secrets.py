@@ -1,12 +1,10 @@
-# relay_secrets.py - the relay secrets (Discord webhook URL, ntfy topic).
+# relay_secrets.py - the relay secret (Discord webhook URL).
 #
 # They sit in the shared folder (2026-10-30, readable by the team that has access),
 # so they are masked in every API answer and log line, and regenerable. Not named
 # secrets.py so it never shadows the stdlib module.
 
 from __future__ import annotations
-
-import secrets
 
 MASK = "****"
 
@@ -17,11 +15,6 @@ def mask(value: str | None) -> str:
     if not value:
         return ""
     return MASK + value[-4:] if len(value) > 8 else MASK
-
-
-def new_topic() -> str:
-    """A random ntfy topic (about 128 bits): unguessable, so private by its name only."""
-    return "flux_" + secrets.token_urlsafe(16).replace("-", "x").replace("_", "y")
 
 
 def is_masked(value: str | None) -> bool:

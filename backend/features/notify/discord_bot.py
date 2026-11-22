@@ -3,13 +3,13 @@
 # Hosted by ONE PC at a time among those that hold the token (bot_secret, DPAPI): they elect
 # the host through a lock on the share and another one takes over when it leaves (ADR 0082).
 # FLUX opens an outgoing Gateway WebSocket to Discord, nothing listens on the network.
-#   - slash commands /link, /mentions, /chat [n] and /calendar, answered ephemerally
+#   - slash commands /link, /mentions and /calendar, answered ephemerally
 #     (only the caller sees); all but /link need an account linked by /link;
-#   - private messages (DM) for the phone notifications of linked accounts;
+#   - private messages (DM) for the notifications of linked accounts, with action buttons
+#     (ADR 0091, features/notify/dm_actions.py);
 #   - DMs left by the other PCs in _flux_setup/notify_bot/ are sent from here.
-# No intent is requested (0) unless the project turned on the live Team bridge (ADR 0084,
-# features/notify/discord_sync.py): then GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT and
-# GUILD_VOICE_STATES, for the project's server only. Never DIRECT_MESSAGES: no DM is read.
+# No intent is requested (0): slash commands and button clicks reach a bot without any.
+# Never DIRECT_MESSAGES: no DM is read. The Team <-> Discord bridge is gone (ADR 0091).
 # REST in urllib (channels.request_json), Gateway with websockets (BSD-3, already a dep).
 
 from __future__ import annotations
@@ -34,28 +34,18 @@ ENV = "FLUX_DISCORD_BOT"
 EPHEMERAL = 64
 PUMP_S = 5.0
 ALIVE_S = 30.0
-INTENTS_RETRY_S = 900.0     # refused intents (close 4014) are asked again after this
 BEAT_S = 20.0               # core.host_lock beat of the project lock (ADR 0082)
 CANDIDATE_EVERY_S = 300.0   # a waiting PC says it is ready (store.CANDIDATE_S keeps it 10 min)
 MAX_CHARS = 2000
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O/1/I
-CHAT_DEFAULT = 10
-CHAT_MAX = 20
 LIST_MAX = 10
 NOT_LINKED = "Ce compte Discord n'est pas lie a FLUX : tape /link."
-BRIDGE_EVENTS = {"READY", "GUILD_CREATE", "MESSAGE_CREATE", "VOICE_STATE_UPDATE", "CHANNEL_CREATE",
-                 "CHANNEL_UPDATE", "CHANNEL_DELETE", "GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE",
-                 "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK", "THREAD_CREATE"}
 
 COMMANDS = [
     {"name": "link", "type": 1, "description": "Lier ton compte Discord a ton compte FLUX (code a coller dans FLUX)",
      "contexts": [0, 1]},
     {"name": "mentions", "type": 1, "description": "Tes mentions FLUX non lues dans ce projet",
      "contexts": [0, 1]},
-    {"name": "chat", "type": 1, "description": "Les derniers messages du chat du projet",
-     "contexts": [0, 1],
-     "options": [{"name": "n", "type": 4, "description": f"Nombre de messages ({CHAT_DEFAULT} par defaut, {CHAT_MAX} max)",
-                  "required": False, "min_value": 1, "max_value": CHAT_MAX}]},
     {"name": "calendar", "type": 1, "description": "Tes elements du calendrier et les propositions a valider",
      "contexts": [0, 1]},
 ]
@@ -89,11 +79,9 @@ def check_token(token: str) -> dict:
 
 
 def invite_url(app_id: str) -> str:
-    # DMs alone need no permission; the Team bridge (ADR 0084) manages channels, roles and
-    # webhooks of the project's server: one link asks for both, a re-invite updates them.
-    from features.notify.discord_sync import invite_permissions
-    return (f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot%20applications.commands"
-            f"&permissions={invite_permissions()}")
+    # DMs, slash commands and buttons need no channel permission (ADR 0091): the bot only
+    # has to share a server with the artists it writes to.
+    return f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot%20applications.commands&permissions=0"
 
 
 def register_commands(token: str, app_id: str) -> bool:
@@ -173,30 +161,6 @@ def cmd_mentions(project: str, discord_id: str, limit: int = 10) -> str:
     return _fit(lines)
 
 
-def cmd_chat(project: str, discord_id: str, n: int = CHAT_DEFAULT) -> str:
-    """The last *n* messages of the project's chat, oldest first. When they do not
-    fit in one Discord message, the oldest ones are left out (never cut mid-line)."""
-    if not store.user_for_discord(discord_id):
-        return NOT_LINKED
-    n = max(1, min(int(n or CHAT_DEFAULT), CHAT_MAX))
-    from features.activity.chat_manager import get_messages
-    messages = get_messages(limit=n, project=project)
-    if not messages:
-        return f"Aucun message dans le chat de {project}."
-    head = f"Chat de {project}, {len(messages)} dernier(s) message(s) :"
-    lines: list[str] = []
-    size = len(head)
-    for m in reversed(messages):            # newest first, so the newest always fit
-        line = f"- {m.get('date', '')} {m.get('time', '')} **{m.get('user', '?')}** : " \
-               f"{_one_line(m.get('message') or m.get('text'))}"
-        if size + 1 + len(line) > MAX_CHARS - 40:
-            lines.append(f"- ({len(messages) - len(lines)} plus ancien(s) dans FLUX)")
-            break
-        lines.append(line)
-        size += 1 + len(line)
-    return "\n".join([head, *reversed(lines)])
-
-
 def _span(item: dict) -> str:
     start, end = str(item.get("start") or ""), str(item.get("end") or "")
     return start if start == end or not end else f"{start} > {end}"
@@ -244,12 +208,6 @@ def answer(project: str, name: str, discord_id: str, now: float, options: dict |
         return cmd_link(project, discord_id, now, discord_name)
     if name == "mentions":
         return cmd_mentions(project, discord_id)
-    if name == "chat":
-        try:
-            n = int(options.get("n") or CHAT_DEFAULT)
-        except (TypeError, ValueError):
-            n = CHAT_DEFAULT
-        return cmd_chat(project, discord_id, n)
     if name == "calendar":
         return cmd_calendar(project, discord_id, time.strftime("%Y-%m-%d", time.localtime(now)))
     return "Commande inconnue."
@@ -310,10 +268,6 @@ class BotRunner:
         self.online = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ws = None
-        self.bridge = None              # discord_sync.Bridge, made at the first Gateway session
-        self._sync = False              # this session asked for the bridge's intents
-        self._intents_refused = False   # MESSAGE_CONTENT not ticked in the portal: back to 0
-        self._refused_at = 0.0
 
     def start(self) -> None:
         self._thread.start()
@@ -418,11 +372,7 @@ class BotRunner:
 
     async def _session(self) -> None:
         from websockets.asyncio.client import connect
-        from features.notify import discord_sync
-        if self.bridge is None:
-            self.bridge = discord_sync.Bridge(self.project, self.token)
-        self._sync = not self._intents_refused and await asyncio.to_thread(self.bridge.wanted)
-        intents = discord_sync.INTENTS if self._sync else 0
+        intents = 0
         async with connect(GATEWAY, max_size=2 ** 22) as ws:
             self._ws = ws
             hello = json.loads(await ws.recv())
@@ -449,11 +399,6 @@ class BotRunner:
             finally:
                 for t in tasks:
                     t.cancel()
-                if ws.close_code == discord_sync.DISALLOWED_INTENTS and self._sync:
-                    # MESSAGE_CONTENT not ticked: the bot comes back without the bridge (DMs keep working)
-                    self._intents_refused, self._refused_at = True, time.time()
-                    log.warning("discord bot %s: intents refused, Team bridge off", self.project)
-                    await asyncio.to_thread(self.bridge.refused)
 
     async def _heartbeat(self, ws, interval: float, state: dict) -> None:
         await asyncio.sleep(interval * 0.5)
@@ -479,30 +424,9 @@ class BotRunner:
                 last_alive = now
             if self.online:
                 await asyncio.to_thread(pump, self.project, self.token, sent, now)
-            if self.online and self.bridge is not None:
-                await self._bridge_tick(now)
             await asyncio.sleep(PUMP_S)
 
-    async def _bridge_tick(self, now: float) -> None:
-        """Team bridge (ADR 0084). Turned on / off in the settings: reconnect with the
-        intents it needs (or without them)."""
-        try:
-            wanted = await asyncio.to_thread(self.bridge.wanted)
-            if self._intents_refused and wanted and now - self._refused_at >= INTENTS_RETRY_S:
-                self._intents_refused = False       # the intent may be ticked since: try again
-            if wanted != self._sync and not (wanted and self._intents_refused):
-                log.info("discord bot %s: Team bridge %s, reconnecting", self.project, "on" if wanted else "off")
-                if self._ws is not None:
-                    await self._ws.close()
-                return
-            if self._sync:
-                await asyncio.to_thread(self.bridge.tick, now)
-        except Exception as exc:  # noqa: BLE001 - the bridge never stops the bot
-            log.warning("discord bridge %s: %s", self.project, exc)
-
     async def _dispatch(self, kind: str | None, data: dict) -> None:
-        if self._sync and self.bridge is not None and kind in BRIDGE_EVENTS:
-            asyncio.create_task(self._bridge_event(kind, data))
         if kind == "READY":
             self.app_id = str((data.get("application") or {}).get("id") or "")
             ok = await asyncio.to_thread(register_commands, self.token, self.app_id)
@@ -510,28 +434,6 @@ class BotRunner:
             log.info("discord bot %s online (commands %s)", self.project, "ok" if ok else "not registered")
         elif kind == "INTERACTION_CREATE" and data.get("type") == 2:
             asyncio.create_task(self._interaction(data))
-
-    async def _bridge_event(self, kind: str, data: dict) -> None:
-        bridge = self.bridge
-        try:
-            if kind == "READY":
-                await asyncio.to_thread(bridge.on_ready, data)
-            elif kind == "GUILD_CREATE":
-                await asyncio.to_thread(bridge.on_guild, data)
-            elif kind == "MESSAGE_CREATE":
-                await asyncio.to_thread(bridge.on_message, data)
-            elif kind == "VOICE_STATE_UPDATE":
-                await asyncio.to_thread(bridge.on_voice, data)
-            elif kind == "MESSAGE_UPDATE":
-                await asyncio.to_thread(bridge.on_update, data)
-            elif kind in ("MESSAGE_DELETE", "MESSAGE_DELETE_BULK"):
-                await asyncio.to_thread(bridge.on_delete, data)
-            elif kind == "THREAD_CREATE":
-                await asyncio.to_thread(bridge.on_thread, data)
-            else:
-                bridge.on_structure(data)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("discord bridge %s %s: %s", self.project, kind, exc)
 
     async def _interaction(self, data: dict) -> None:
         iid, itoken = data.get("id"), data.get("token")

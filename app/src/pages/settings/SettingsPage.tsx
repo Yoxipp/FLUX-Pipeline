@@ -30,7 +30,7 @@ import { DocTab } from './DocTab'
 import { AdvancedConfirm, UninstallConfirm } from './SettingsDialogs'
 import { UserSettings } from './UserSettings'
 import { ProjectRoles } from './ProjectRoles'
-import { NotifyProjectSettings } from './NotifySettings'
+import { DiscordProjectSettings } from './DiscordSettings'
 
 type Tab = 'user' | 'project' | 'advanced' | 'doc'
 type Sub = 'settings' | 'disk' | 'templates'
@@ -121,7 +121,7 @@ function ProjectTab({ currentUser }: { currentUser: string }) {
         <Btn sm ghost onClick={() => navigate('/production')}>Production</Btn>
       </div>
       <ProjectRoles project={project} />
-      <NotifyProjectSettings project={project} />
+      <DiscordProjectSettings project={project} />
       <SecTitle>Artistes du pipe</SecTitle>
       <NewArtist />
       <OtherUsers currentUser={currentUser} />

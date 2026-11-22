@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2, Unplug,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench, MessagesSquare,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench,
   Box, Clapperboard,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
@@ -872,7 +872,6 @@ export function Sidebar({ dccStatus }: Props) {
       ],
       [
         item('calendar', CalendarDays, t('nav.calendar'), 'Team', '/calendar'),
-        item('team', MessagesSquare, t('nav.team'), 'Team', '/team'),
         ...(toolVisible ? [item('tool', Wrench, t('nav.tool'), 'Team', '/tool', { active: pathname === '/tool' || pathname.startsWith('/tool/') })] : []),
       ],
       [
@@ -911,8 +910,6 @@ export function Sidebar({ dccStatus }: Props) {
 
       <NavGroup title="TEAM">
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
-        {/* Team chat of the project, channels on the left (built-in, 2026-10-30, ADR 0077). */}
-        <NavItem icon={MessagesSquare} label={t('nav.team')}           active={pathname === '/team'}      indent route="/team" onClick={() => navigate('/team')} />
         {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one.
             The board stays a TOOL widget, no entry of its own (2026-11-06). */}
         {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
