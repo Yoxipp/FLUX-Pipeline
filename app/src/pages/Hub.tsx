@@ -4,11 +4,10 @@ import { useProduction } from '../hooks/useProduction'
 import { useI18n, useTr } from '../i18n'
 import { MyTasks } from './home/MyTasks'
 import { MyRetakes } from './home/MyRetakes'
-import { TeamChat } from './home/TeamChat'
 
 
-// Home page: three columns "Tes tâches" | "Tes retakes" | team chat (one production load
-// shared by both), team chat on the right. The shortcut grid repeated the sidebar
+// Home page: two columns "Tes tâches" | "Tes retakes" (one production load shared by both).
+// The team chat left the home page (ADR 0091): it is a TOOL widget now. The shortcut grid repeated the sidebar
 // (ADR 0044); the recent activity feed lives in the title bar bell.
 export function Hub() {
   const { t }         = useI18n()
@@ -35,16 +34,13 @@ export function Hub() {
       {/* body */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
-        {/* ── three columns (2026-10-09): tes tâches | tes retakes | team chat, each scrolls ── */}
+        {/* ── two columns: tes tâches | tes retakes, each scrolls ── */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--rule)' }}>
           <MyTasks project={project} username={username} prod={prod} />
         </div>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--rule)' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <MyRetakes project={project} username={username} prod={prod} />
         </div>
-
-        {/* ── team chat ── */}
-        <TeamChat project={project} user={user} />
 
       </div>
     </div>

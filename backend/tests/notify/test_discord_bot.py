@@ -114,7 +114,7 @@ class CommandTests(_SharedFolder):
 
 
 class Step2Tests(_SharedFolder):
-    """/chat [n] and /calendar (ADR 0073 step 2)."""
+    """/calendar (ADR 0073 step 2; /chat removed by ADR 0091)."""
 
     def _link(self, user="LEA", discord_id="111"):
         store.add_link_code("P", "ABCD2345", discord_id, NOW)
@@ -122,46 +122,13 @@ class Step2Tests(_SharedFolder):
 
     def test_commands_are_registered(self):
         names = {c["name"]: c for c in discord_bot.COMMANDS}
-        self.assertTrue({"link", "mentions", "chat", "calendar"} <= set(names))
-        self.assertEqual(names["chat"]["options"][0]["max_value"], discord_bot.CHAT_MAX)
+        self.assertEqual({"link", "mentions", "calendar"}, set(names))      # /chat removed (ADR 0091)
 
-    def test_chat_and_calendar_refused_when_not_linked(self):
-        with mock.patch("features.activity.chat_manager.get_messages") as get:
-            self.assertEqual(discord_bot.cmd_chat("P", "999"), discord_bot.NOT_LINKED)
-        get.assert_not_called()
+    def test_calendar_refused_when_not_linked(self):
         self.assertEqual(discord_bot.cmd_calendar("P", "999", "2026-10-30"), discord_bot.NOT_LINKED)
         prefs = store.write_user("LEA", {"discord_id": "222"})    # typed by hand, never linked
         self.assertFalse(store.is_linked(prefs))
-        self.assertEqual(discord_bot.cmd_chat("P", "222"), discord_bot.NOT_LINKED)
-
-    def test_chat_last_n_of_this_project(self):
-        self._link()
-        rows = [{"user": "TOM", "message": "salut\nla team", "date": "2026-10-30", "time": "10:00"},
-                {"user": "LEA", "message": "yo", "date": "2026-10-30", "time": "10:01"}]
-        with mock.patch("features.activity.chat_manager.get_messages", return_value=rows) as get:
-            text = discord_bot.answer("P", "chat", "111", NOW, {"n": 5})
-        get.assert_called_once_with(limit=5, project="P")
-        self.assertIn("**TOM** : salut la team", text)
-        self.assertLess(text.index("TOM"), text.index("**LEA**"))     # oldest first
-
-    def test_chat_n_is_clamped(self):
-        self._link()
-        with mock.patch("features.activity.chat_manager.get_messages", return_value=[]) as get:
-            discord_bot.answer("P", "chat", "111", NOW, {"n": 500})
-            discord_bot.answer("P", "chat", "111", NOW, {"n": "x"})
-        self.assertEqual([c.kwargs["limit"] for c in get.call_args_list],
-                         [discord_bot.CHAT_MAX, discord_bot.CHAT_DEFAULT])
-
-    def test_chat_keeps_newest_within_2000_chars(self):
-        self._link()
-        rows = [{"user": "TOM", "message": f"msg{i:02d} " + "x" * 290, "date": "2026-10-30", "time": "10:00"}
-                for i in range(20)]
-        with mock.patch("features.activity.chat_manager.get_messages", return_value=rows):
-            text = discord_bot.cmd_chat("P", "111", 20)
-        self.assertLessEqual(len(text), discord_bot.MAX_CHARS)
-        self.assertIn("msg19", text)
-        self.assertNotIn("msg00", text)
-        self.assertIn("plus ancien(s) dans FLUX", text)
+        self.assertEqual(discord_bot.cmd_calendar("P", "222", "2026-10-30"), discord_bot.NOT_LINKED)
 
     def test_calendar_mine_and_proposals(self):
         self._link()
@@ -206,14 +173,14 @@ class ViaBotTests(_SharedFolder):
     def setUp(self):
         super().setUp()
         self.cfg = {**store.PROJECT_DEFAULTS, "discord_bot": {"app_id": "9"}, "discord_webhook": ""}
-        self.prefs = {"channel": "discord", "discord_id": "111", "discord_linked_at": "x", "ntfy_topic": ""}
+        self.prefs = {"channel": "discord", "discord_id": "111", "discord_linked_at": "x"}
 
     def test_host_sends_the_dm_itself(self):
         with mock.patch.object(discord_bot, "hosted_token", return_value="TOK"), \
              mock.patch.object(discord_bot, "send_dm", return_value=SendResult(True, 200)) as dm:
             result = dispatch._via_bot("P", self.cfg, self.prefs, "hello", NOW)
         self.assertTrue(result.ok)
-        dm.assert_called_once_with("TOK", "111", "hello")
+        dm.assert_called_once_with("TOK", "111", "hello", None)
 
     def test_other_pc_leaves_it_in_the_shared_queue(self):
         store.write_alive("P", "HOST", NOW)
@@ -268,12 +235,11 @@ class RestTests(unittest.TestCase):
         self.assertTrue(discord_bot.send_dm("TOK", "not-an-id", "x").permanent)
         self.assertEqual(self.relay.requests, [])
 
-    def test_invite_url_asks_the_bridge_permissions_only(self):
-        # ADR 0084: channels, roles, webhooks, messages of the project's server; never admin.
+    def test_invite_url_asks_no_permission(self):
+        # ADR 0091: DMs, slash commands and buttons need no channel permission.
         url = discord_bot.invite_url("9")
-        self.assertIn("permissions=", url)
-        self.assertNotIn("permissions=0&", url + "&")
-        self.assertFalse(int(url.rsplit("permissions=", 1)[1]) & 8)
+        self.assertTrue(url.endswith("permissions=0"))
+        self.assertIn("client_id=9", url)
 
 
 @unittest.skipUnless(sys.platform == "win32", "DPAPI is Windows only")

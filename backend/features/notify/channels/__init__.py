@@ -1,4 +1,4 @@
-# channels - outgoing push relays (Discord webhook, ntfy). Stdlib HTTP only.
+# channels - outgoing push relay (Discord webhook) and the bot's REST calls. Stdlib HTTP only.
 #
 # Every send returns a SendResult and never raises: the dispatcher decides from it
 # whether the item leaves the queue, is retried later or is dropped.

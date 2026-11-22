@@ -3,7 +3,8 @@
 # Stable format (the future Flows event.notify node plugs here, ADR 0062):
 #   {"type": mention | task | retake | calendar | publish, "project": str,
 #    "author": str, "entity": str, "detail": str, "recipients": [str], "at": float,
-#    "text": str}
+#    "text": str, "ref": {"id": entity id, "task": task detail key}  (task / retake only, ADR 0091:
+#    the DM buttons act on it)}
 # entity = "SEQ/SHOT", "CLASS/NAME", "chat" or a date span; detail = task name,
 # calendar answer... text = the chat message or the calendar title, shown only when
 # the project allows it (include_text, ADR 0072). Never a path.
@@ -22,12 +23,15 @@ _CALENDAR_WORDS = {"proposal": "te propose un creneau", "accept": "a accepte ton
 
 def make_event(type_: str, project: str, author: str, entity: str = "", detail: str = "",
                recipients: list[str] | tuple[str, ...] = (), at: float | None = None,
-               text: str = "") -> dict:
+               text: str = "", ref: dict | None = None) -> dict:
     if type_ not in EVENT_TYPES:
         raise ValueError(f"unknown notify event type: {type_}")
-    return {"type": type_, "project": project or "", "author": (author or "").upper(),
-            "entity": entity or "", "detail": detail or "", "recipients": list(recipients),
-            "at": time.time() if at is None else at, "text": _clip(text)}
+    event = {"type": type_, "project": project or "", "author": (author or "").upper(),
+             "entity": entity or "", "detail": detail or "", "recipients": list(recipients),
+             "at": time.time() if at is None else at, "text": _clip(text)}
+    if ref:
+        event["ref"] = {"id": str(ref.get("id") or ""), "task": str(ref.get("task") or "")}
+    return event
 
 
 def _clip(text: str) -> str:
@@ -95,25 +99,41 @@ def _assignees(detail: dict) -> list[str]:
     return [a.strip().upper() for a in str(detail.get("assignee") or "").split(",") if a.strip()]
 
 
+def _new_retakes(old: dict, detail: dict) -> bool:
+    """A new retake: a "retakes" record (old store) or a comment marked retake (task panel,
+    MyRetakes, ADR 0083), by id."""
+    for field, keep in (("retakes", lambda r: True), ("comments", lambda c: c.get("kind") == "retake")):
+        old_ids = {r.get("id") for r in old.get(field) or [] if isinstance(r, dict)}
+        if any(isinstance(r, dict) and r.get("id") and r["id"] not in old_ids and keep(r)
+               for r in detail.get(field) or []):
+            return True
+    return False
+
+
 def production_changes(previous: dict, new: dict, *, project: str, author: str) -> list[dict]:
-    """task events (new assignee on a task) and retake events (new retake id, sent to the
-    task's assignees). Recipients are raw names; the dispatcher resolves aliases and
-    drops the author."""
+    """task events (new assignee on a task) and retake events (new retake, sent to the task's
+    assignees; on a parent task without one, to the assignees of its subtasks, like the home
+    "Tes retakes"). Recipients are raw names; the dispatcher resolves aliases and drops the
+    author. Each event carries a ref (entity id + detail key) for the DM buttons."""
     before = _entities(previous or {})
     events: list[dict] = []
     for ent_id, (label, entity) in _entities(new or {}).items():
         old_details = (before.get(ent_id, ("", {}))[1].get("task_details") or {})
-        for task, detail in (entity.get("task_details") or {}).items():
+        details = entity.get("task_details") or {}
+        for task, detail in details.items():
             if not isinstance(detail, dict):
                 continue
             old = old_details.get(task) if isinstance(old_details.get(task), dict) else {}
+            ref = {"id": ent_id, "task": str(task)}
             added = [a for a in _assignees(detail) if a not in _assignees(old)]
             if added:
-                events.append(make_event("task", project, author, label, str(task).upper(), added))
-            old_ids = {r.get("id") for r in old.get("retakes") or [] if isinstance(r, dict)}
-            fresh = [r for r in detail.get("retakes") or []
-                     if isinstance(r, dict) and r.get("id") and r["id"] not in old_ids]
-            if fresh and _assignees(detail):
-                events.append(make_event("retake", project, author, label, str(task).upper(),
-                                         _assignees(detail)))
+                events.append(make_event("task", project, author, label, str(task).upper(), added, ref=ref))
+            if _new_retakes(old, detail):
+                who = _assignees(detail)
+                if not who and "|" not in str(task):
+                    prefix = f"{str(task).upper()}|"
+                    who = sorted({a for k, d in details.items() if str(k).upper().startswith(prefix)
+                                  and isinstance(d, dict) for a in _assignees(d)})
+                if who:
+                    events.append(make_event("retake", project, author, label, str(task).upper(), who, ref=ref))
     return events

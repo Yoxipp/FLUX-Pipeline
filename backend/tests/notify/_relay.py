@@ -1,4 +1,4 @@
-# _relay.py - a local HTTP server standing in for Discord / ntfy (no real network).
+# _relay.py - a local HTTP server standing in for Discord (no real network).
 
 from __future__ import annotations
 

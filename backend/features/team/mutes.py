@@ -1,7 +1,7 @@
-# mutes.py — channels and groups an artist muted on the Team page (P5, 2026-10-31).
+# mutes.py — channels and groups an artist muted in the team chat (P5, 2026-10-31).
 # Personal, never in the shared journal: each FLUX writes ITS OWN file
 # USER/<artist>/team_mutes.json = {project: {"channels": [keys], "groups": [rids]}}
-# (same rule as presence.py, ADR 0062). A muted channel (or a channel of a muted group) no
+# (one file per author, ADR 0062). A muted channel (or a channel of a muted group) no
 # longer rings the phone for "Prevenir l'equipe" and shows no unread count; an @mention of
 # the artist still notifies (chat_manager._record_mentions is not filtered).
 

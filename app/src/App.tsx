@@ -17,8 +17,6 @@ import { useActivity }   from './hooks/useActivity'
 import { SupEntryBanner } from './components/shared/SupEntryBanner'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
-import { usePresenceHeartbeat } from './hooks/usePresenceHeartbeat'
-import { PresenceProvider } from './hooks/usePresence'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
@@ -31,7 +29,6 @@ import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
 import { Production }    from './pages/Production/Production'
 import { Calendar }      from './pages/Calendar'
-import { Team }          from './pages/Team'
 import { Render }        from './pages/Render'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
@@ -178,7 +175,6 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/templates" element={<Navigate to="/settings?tab=advanced&sub=templates" replace />} />
               <Route path="/production" element={<Production />} />
               <Route path="/calendar"  element={<Calendar />} />
-              <Route path="/team"      element={<Team />} />
               <Route path="/render"    element={<Render />} />
               <Route path="/settings"  element={<SettingsPage />} />
               <Route path="/advanced"  element={<Navigate to="/settings?tab=advanced" replace />} />
@@ -257,9 +253,6 @@ function BackendDownScreen() {
 
 export function App() {
   const { settings, loading } = useSettings()
-  // Team presence (ADR 0077): this artist's own file, rewritten every minute while FLUX runs.
-  usePresenceHeartbeat(!!settings?.username)
-
   // Apply theme CSS vars from settings
   useEffect(() => {
     if (!settings?.theme) return
@@ -296,9 +289,7 @@ export function App() {
 
   return (
     <FeedsProvider>
-      <PresenceProvider>
-        <AppShell settings={settings} />
-      </PresenceProvider>
+      <AppShell settings={settings} />
     </FeedsProvider>
   )
 }

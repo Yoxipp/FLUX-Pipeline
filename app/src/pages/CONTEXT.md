@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Team` (route `/team`, groupe PIPELINE sous Calendrier : `ChatWidget` du projet actif en pleine hauteur, `fill`, meme UI que la page TOOL Team), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -34,8 +34,8 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   (Tes taches, projet actif, pages de 30, clic = la tache dans Production, shots compris via
   `openFavorite`) puis `home/MyRetakes.tsx` (Tes retakes : commentaires `kind: 'retake'` ecrits par
   un autre sur une tache / sous-tache assignee a moi, ou sur la tache parente d'une sous-tache a moi,
-  plus recent d'abord, lus grises via `useCommentReadState`) ; chat d'equipe a droite
-  (`home/TeamChat.tsx`). Le flux "Activite recente" a quitte l'accueil (page Activite).
+  plus recent d'abord, lus grises via `useCommentReadState`). Le chat d'equipe a quitte l'accueil (ADR 0091 : widget
+  TOOL `chat`). Le flux "Activite recente" a quitte l'accueil (page Activite).
   Commentaire de tache : case Retake dans `TaskDetail` (`ProductionComment.kind`, absent = note).
 * `CreateMenu.tsx` (retake 05) : un bouton Create en haut du tableau et de la Timeline, menu
   Shot / Sequence (ou Asset / Groupe) qui ouvre `NewProductionDialog` sur ce type ; Shot grise
@@ -263,22 +263,13 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   image extraite par `board/frameGrab.ts` (video hors ecran, `ImageBitmap` 480 px, LRU 150, 2 a la fois) ; slider en
   direct, ecrit au lacher ; bouton Retake -> `api.addShotRetake` (`POST /production/<p>/retake`) ; retakes de Production
   listees ; taille de l'objet recalee sur la grille ; export (`drawShotboard`).
-* `ChatWidget.tsx` (ADR 0077) : widget officiel `chat` de la page Team = le chat d'equipe du projet (le meme que l'accueil,
-  `api/team.ts`) par canaux (general + canaux d'un lead, archives), fils, reactions (une par auteur), messages epingles
-  (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus par
-  canal (localStorage). Appels par lien : lien permanent du canal (lead) ouvert par `electronAPI.openExternal` (https
-  seulement), "Nouvelle reunion" = lien Jitsi genere ou page Meet / Teams ouverte puis lien colle, poste dans le canal,
-  "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". ADR 0080 : clic droit sur un canal (leads) = Qui voit (`AccessPicker` de `PageAccess.tsx`, champ `access`), Lien d'appel, Archiver ; cadenas sur un canal restreint ; lien d'appel du canal aussi dans le menu Nouvelle reunion. `hooks/usePresenceHeartbeat.ts`
-  (monte dans `App.tsx`) reecrit le fichier de presence de l'artiste toutes les 60 s. Presence visible (P2b) : une seule
-  lecture `GET /team/presence` toutes les 30 s pour toute l'app (`hooks/usePresence.tsx`, `PresenceProvider` dans `App.tsx`,
-  relue apres `flux:presence`), `PresenceDot` = couleur du statut quand connecte (fichier de moins de 150 s) : vert disponible,
-  jaune en reunion, orange ne pas deranger, gris plein absent ; anneau gris vide = hors ligne ; texte en info-bulle. Ronds : auteurs du chat Team et de l'accueil (`home/TeamChat.tsx`), autocompletion @nom
-  (les deux), `Members` (selecteur de son statut), auteurs du fil `feed`, commentaires du board, avatar de la barre du haut.
-  `components/shared/PresenceIndicator.tsx` dans `TitleBar` : "N en ligne", au clic tous les artistes (`everyone` du
-  provider : dossiers `USER/` + fichiers de presence ; connectes d'abord) avec rond, nom, statut, texte, et
-  son propre statut + message. `components/shared/PeoplePanel.tsx` : colonne repliable a droite du chat de l'accueil et du
-  widget `chat` (tous les artistes de `USER/`, ordre alphabetique, rond vert / gris, ouvert / ferme memorise par chat).
-  Pas encore : assignee Production, calendrier (filtre par personne), Login.
+* `ChatWidget.tsx` (ADR 0077, 0091) : widget TOOL `chat` (palette du PageBuilder) = le chat d'equipe du projet
+  (`api/team.ts`) par canaux (general + canaux d'un lead, groupes, archives), fils, reactions (une par auteur), messages
+  epingles (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus
+  par canal (localStorage). ADR 0080 : clic droit sur un canal (leads) = Qui voit (`AccessPicker` de `PageAccess.tsx`,
+  champ `access`), Archiver ; cadenas sur un canal restreint. "Copier le lien" = `/tool?page=<id>&channel=..&message=..`
+  (le widget lit `channel` / `message` dans l'URL) ; un ancien lien `/team?channel=..` ouvre le canal dans le widget qui
+  l'affiche. ADR 0091 : page Team, presence, liens d'appel / reunion, pont Discord retires (aucun lien Discord).
   ADR 0081 : `/` en debut de message liste les commandes du canal (`flowsApi.teamCommands`), Entree complete, aide
   sous la saisie, `confirm` = barre Lancer / Annuler, envoi `flowsApi.runTeamCommand` (le backend poste le message et lance
   les flows sur ce poste) ; `/inconnu` n'est pas envoye ; une reponse FLUX affiche "pour <artiste>" (`via`).

@@ -19,7 +19,7 @@ import { useProject } from '../../ProjectContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
 import { openWelcome } from '../../components/shared/WelcomeDialog'
 import { BridgesInstall } from './BridgesInstall'
-import { NotifyUser } from './NotifySettings'
+import { DiscordUser } from './DiscordSettings'
 import { FLOW_RIGHTS_EVENT } from '../../api/flows'
 
 // Console log levels the user can recolor + a theme-neutral swatch default shown
@@ -105,7 +105,7 @@ export function UserSettings({ username }: { username: string }) {
         <ChevronRight size={12} strokeWidth={1.75} color="var(--ink-4)" />
       </div>
 
-      <NotifyUser project={project} />
+      <DiscordUser project={project} />
 
       <SecTitle>Flows</SecTitle>
       <FlowBoxes />

@@ -1,4 +1,4 @@
-# test_dispatch.py - queue, grouping, retries, 24 h expiry, ntfy quota, secrets out of logs,
+# test_dispatch.py - queue, grouping, retries, 24 h expiry, secrets out of logs,
 # publish recipients (ADR 0045 filter), settings store and router roles. No real network:
 # the relay is tests/notify/_relay.FakeRelay; accounts and settings are patched.
 
@@ -15,7 +15,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from features.notify import dispatch, hooks, outbox, store
-from features.notify.channels import ntfy
 from features.notify.events import make_event
 from tests.notify._relay import FakeRelay, dead_url
 
@@ -33,10 +32,9 @@ class _Queue(unittest.TestCase):
         dispatch._discord_cooldown.clear()
         self.relay = FakeRelay()
         self.addCleanup(self.relay.close)
-        self.project_cfg = {**store.PROJECT_DEFAULTS, "discord_webhook": self.relay.url + "/api/webhooks/1/SECRETabcd",
-                            "ntfy_server": self.relay.url}
-        self.users = {"LEA": {"channel": "discord", "discord_id": "111", "ntfy_topic": ""},
-                      "TOM": {"channel": "ntfy", "discord_id": "", "ntfy_topic": "flux_topicTHEO"},
+        self.project_cfg = {**store.PROJECT_DEFAULTS, "discord_webhook": self.relay.url + "/api/webhooks/1/SECRETabcd"}
+        self.users = {"LEA": {"channel": "discord", "discord_id": "111"},
+                      "TOM": {"channel": "discord", "discord_id": "222"},
                       "NOCHAN": dict(store.USER_DEFAULTS)}
         patches = [
             mock.patch.dict(os.environ, {"FLUX_NOTIFY": "1"}),
@@ -83,7 +81,7 @@ class FlushTests(_Queue):
         stats = dispatch.flush(now=T0 + 301)
         self.assertEqual(stats["sent"], 2)
         self.assertEqual(len(self.relay.requests), 1)
-        self.assertTrue(self.relay.requests[0]["json"]["message"].startswith("2 notifications FLUX"))
+        self.assertTrue(self.relay.requests[0]["json"]["content"].startswith("<@222> 2 notifications FLUX"))
         self.assertEqual(outbox.load(), [])
 
     def test_digest_waits_its_delay(self):
@@ -126,35 +124,14 @@ class FlushTests(_Queue):
             dispatch.flush(now=T0)
         text = "\n".join(logs.output)
         self.assertNotIn("SECRETabcd", text)
-        self.assertNotIn("flux_topicTHEO", text)
         self.assertNotIn(self.relay.url, text)
-
-
-class QuotaTests(_Queue):
-    def test_limit_holds_until_tomorrow(self):
-        with mock.patch.object(dispatch, "ntfy_count", return_value=ntfy.DAILY_LIMIT):
-            self.enqueue("mention", ["TOM"])
-            self.assertEqual(dispatch.flush(now=T0)["held"], 1)
-        self.assertEqual(self.relay.requests, [])
-        self.assertGreater(outbox.load()[0]["next_try"], T0 + 60)
-
-    def test_near_limit_degrades_immediate_to_digest(self):
-        with mock.patch.object(dispatch, "ntfy_count", return_value=dispatch.WARN_AT):
-            self.enqueue("mention", ["TOM"])
-            self.assertEqual(dispatch.flush(now=T0)["held"], 1)
-            self.assertEqual(dispatch.flush(now=T0 + 301)["sent"], 1)
-
-    def test_counter_counts_sends(self):
-        self.enqueue("mention", ["TOM"])
-        dispatch.flush(now=T0)
-        self.assertEqual(dispatch.ntfy_count(), 1)
 
 
 class PublishRecipientsTests(unittest.TestCase):
     def test_followers_with_a_channel_only(self):
         data = {
             "LEA": {"notify": {"channel": "discord"}, "production": {"favorites": ["PROJ|SQ010/SH010|*"]}},
-            "TOM": {"notify": {"channel": "ntfy"}, "production": {"favorites": []}},
+            "TOM": {"notify": {"channel": "discord"}, "production": {"favorites": []}},
             "MAX": {"notify": {"channel": "none"}, "production": {"favorites": ["PROJ|SQ010/SH010|*"]}},
         }
         with mock.patch("utils.user_utils.list_users", return_value=list(data)), \
@@ -174,7 +151,7 @@ class MentionHookTests(unittest.TestCase):
         from features.activity import chat_manager
         with mock.patch.object(chat_manager, "get_user_list", return_value=["LEA", "ADAM"]), \
              mock.patch.object(chat_manager, "load_aliases", return_value={}), \
-             mock.patch.object(chat_manager, "append_events", return_value=True), \
+             mock.patch.object(chat_manager, "append_events", return_value=True),              mock.patch.object(chat_manager, "get_mentions_path", return_value=Path("unused.json")), \
              mock.patch.object(hooks, "on_mentions") as on_mentions:
             chat_manager._record_mentions(*args, **kwargs)
         return on_mentions
@@ -210,16 +187,16 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.write_project("P", {"discord_webhook": "http://evil"}, "ADAM")
 
-    def test_user_topic_created_and_regenerated(self):
-        blob: dict = {}
-        with mock.patch.object(store, "read_user_data", side_effect=lambda n: dict(blob)), \
-             mock.patch.object(store, "write_user_data", side_effect=lambda n, d: blob.update(d) or True):
-            first = store.write_user("LEA", {"channel": "ntfy"})["ntfy_topic"]
-            again = store.write_user("LEA", {"regenerate_topic": True})["ntfy_topic"]
+    def test_old_ntfy_channel_reads_as_none_and_is_refused(self):
+        # ADR 0091: ntfy is gone; an account that chose it receives nothing until it links Discord.
+        blob: dict = {"notify": {"channel": "ntfy", "ntfy_topic": "flux_old"}}
+        with mock.patch.object(store, "read_user_data", side_effect=lambda n: dict(blob)),              mock.patch.object(store, "write_user_data", side_effect=lambda n, d: blob.update(d) or True):
+            self.assertEqual(store.read_user("LEA")["channel"], "none")
+            self.assertNotIn("ntfy_topic", store.read_user("LEA"))
+            with self.assertRaises(ValueError):
+                store.write_user("LEA", {"channel": "ntfy"})
             with self.assertRaises(ValueError):
                 store.write_user("LEA", {"discord_id": "abc"})
-        self.assertTrue(first.startswith("flux_"))
-        self.assertNotEqual(first, again)
 
 
 class RouterTests(unittest.TestCase):

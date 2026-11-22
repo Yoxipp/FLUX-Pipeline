@@ -1,9 +1,6 @@
-// ChatWidget.tsx — the Team page chat, Teams-like (ADR 0077): the project team chat (the same
-// messages as the home page) by channels, threads, reactions, pinned messages, attached files
-// (copied by the backend) and calls by link (no media server, ADR 0062): a channel's call
-// link opens in the system browser; "Nouvelle reunion" makes a Jitsi link or opens Meet /
-// Teams to paste one, posts it in the channel and can notify everyone's phone.
-// Channels, call links and pins: leads. A reaction belongs to its author.
+// ChatWidget.tsx — the project team chat as a TOOL widget (ADR 0077, 0091): channels, threads,
+// reactions, pinned messages, attached files (copied by the backend). No Discord link, no call
+// link, no presence (ADR 0091). Channels and pins: leads. A reaction belongs to its author.
 // ADR 0081: a message starting with /name runs the active flows with a TeamCommand node of
 // that name, on this workstation; `/` completes the commands allowed in the channel.
 // P5 (Discord-like options, 2026-10-31): right click on a channel / group for everyone
@@ -12,13 +9,11 @@
 // A forum lists its posts (the first line of a root message is the post title).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Archive, Bell, BellOff, CheckCheck, ChevronDown, ChevronRight, Copy, Eye, FolderPlus, Hash, Link2, Lock, Megaphone, MessageSquareReply, MessagesSquare, Paperclip, Pencil, Phone, Pin, PinOff, Plus, Send, Trash2, Users, Video, Volume2, X } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Archive, Bell, BellOff, CheckCheck, ChevronDown, ChevronRight, Copy, Eye, FolderPlus, Hash, Link2, Lock, Megaphone, MessageSquareReply, MessagesSquare, Paperclip, Pencil, Pin, PinOff, Plus, Send, Trash2, Users, Volume2, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { setMyPresence, teamApi, type TeamAttachment, type TeamChannelType, type TeamDiscord, type TeamEmoji, type TeamMessage, type TeamMutes, type TeamRecord } from '../../api/team'
+import { teamApi, type TeamAttachment, type TeamChannelType, type TeamEmoji, type TeamMessage, type TeamMutes, type TeamRecord } from '../../api/team'
 import { flowsApi } from '../../api/flows'
-import { PresenceDot } from '../../hooks/usePresence'
-import { PeoplePanel } from '../../components/shared/PeoplePanel'
 import type { PageAccess, PageDataOp, TeamCommand } from '../flow_editor/types'
 import { AccessPicker, cleanAccess, isEveryone } from './PageAccess'
 import { useTr } from '../flow_editor/useTr'
@@ -38,26 +33,36 @@ export function openLink(url: string) {
   else window.open(url, '_blank', 'noopener')
 }
 const chanOf = (m: TeamMessage) => m.channel || GENERAL
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'flux'
-// Same order as the Discord bridge (discord_sync._by_order): order, then the name without case.
+// Channel order: order, then the name without case.
 const byOrder = (a: TeamRecord, b: TeamRecord) => ((a.order ?? Infinity) - (b.order ?? Infinity)) || (String(a.name).toLowerCase() < String(b.name).toLowerCase() ? -1 : String(a.name).toLowerCase() > String(b.name).toLowerCase() ? 1 : 0)
-// Discord always lists the text channels of a category before its voice ones: Team does the same.
+// The text channels of a group come before its voice ones.
 const textFirst = (a: TeamRecord, b: TeamRecord) => Number(a.type === 'voice') - Number(b.type === 'voice')
 const sizeTxt = (n: number) => n > 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`
 
-// Internal link of a channel / message (P5 "Copier le lien"): opens the Team page there.
-export const teamLink = (channel: string, message?: string) =>
-  `/team?channel=${encodeURIComponent(channel)}${message ? `&message=${encodeURIComponent(message)}` : ''}`
-const TEAM_LINK_RE = /(\/team\?channel=[a-z0-9_-]+(?:&message=[A-Za-z0-9_.:%-]+)?)/g
+// Internal link of a channel / message (P5 "Copier le lien"): opens the TOOL page of the chat
+// widget there (ADR 0091). An old /team?channel=.. link (Team page, removed) opens the channel
+// in the chat widget it is shown in.
+export const teamLink = (page: string, channel: string, message?: string) =>
+  `/tool?page=${encodeURIComponent(page)}&channel=${encodeURIComponent(channel)}${message ? `&message=${encodeURIComponent(message)}` : ''}`
+const TEAM_LINK_RE = /(\/(?:tool\?page=[A-Za-z0-9_.-]+&|team\?)channel=[a-z0-9_-]+(?:&message=[A-Za-z0-9_.:%-]+)?)/g
 
 function Text({ text, users }: { text: string; users: Set<string> }) {
-  // Links open in the system browser; FLUX /team links open the Team page; @names of real artists stand out.
+  // Links open in the system browser; FLUX chat links open the TOOL page; @names of real artists stand out.
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const go = (seg: string) => {
+    if (seg.startsWith('/tool')) { navigate(seg); return }
+    // Old /team?channel=..&message=.. link: same channel in the widget showing it.
+    const q = new URLSearchParams(seg.slice(seg.indexOf('?') + 1))
+    const next = new URLSearchParams(params)
+    for (const k of ['channel', 'message']) { const v = q.get(k); if (v) next.set(k, v); else next.delete(k) }
+    setParams(next)
+  }
   const parts = text.split(URL_RE)
   return <>{parts.map((part, i) => i % 2
     ? <a key={i} href={part} onClick={e => { e.preventDefault(); openLink(part) }} style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>{part}</a>
     : part.split(TEAM_LINK_RE).map((seg, k) => k % 2
-      ? <a key={`${i}-${k}`} href={seg} onClick={e => { e.preventDefault(); navigate(seg) }} style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>{seg}</a>
+      ? <a key={`${i}-${k}`} href={seg} onClick={e => { e.preventDefault(); go(seg) }} style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>{seg}</a>
       : seg.split(/(@[A-Za-z0-9_.-]+)/g).map((bit, j) => bit.startsWith('@') && users.has(bit.slice(1).toUpperCase())
         ? <b key={`${i}-${k}-${j}`} style={{ color: 'var(--accent)' }}>{bit}</b> : <span key={`${i}-${k}-${j}`}>{bit}</span>)))}</>
 }
@@ -74,7 +79,7 @@ const TYPE_LABEL: Record<TeamChannelType, [string, string]> = {
   forum: ['Forum', 'Forum'], announcement: ['Annonces', 'Announcements'],
 }
 const readOnly = (r?: TeamRecord) => !!r && (!!r.read_only || r.type === 'announcement')
-// A forum post: the first line of its root message is its title (a Discord thread copied in starts "Fil : ").
+// A forum post: the first line of its root message is its title (an old Discord thread copied in starts "Fil : ").
 const postTitle = (m: TeamMessage) => (m.message.split('\n')[0] || '').replace(/^Fil : /, '').slice(0, 120)
 function ChanIcon({ rec, size = 12 }: { rec?: TeamRecord; size?: number }) {
   const st = { opacity: 0.6, flex: 'none' as const }
@@ -84,26 +89,22 @@ function ChanIcon({ rec, size = 12 }: { rec?: TeamRecord; size?: number }) {
   return accessOf(rec) ? <Lock size={size - 1} style={st} /> : <Hash size={size} style={st} />
 }
 
-// fill: the built-in Team page (/team) shows it at the full height of the window.
-// focus: open a channel (and a message) from a /team?channel=..&message=.. link (P5).
-export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWidgetProps & { fill?: boolean; focus?: { channel?: string; message?: string } }) {
+// A chat link (?channel=..&message=.. on the TOOL page URL) opens that channel and message (P5).
+export function ChatWidget({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr } = useTr()
+  const [params] = useSearchParams()
+  const focus = { channel: params.get('channel') ?? undefined, message: params.get('message') ?? undefined }
   const [messages, setMessages] = useState<TeamMessage[]>([])
   const [users, setUsers] = useState<string[]>([])
   const [records, setRecords] = useState<TeamRecord[]>([])
   const [lead, setLead] = useState(false)
   const [filesDir, setFilesDir] = useState('')
-  const [discord, setDiscord] = useState<TeamDiscord | null>(null)   // ADR 0084: Join link + who is in a voice channel
   const [me, setMe] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [channel, setChannel] = useState(() => { try { return localStorage.getItem(`flux.team.channel.${project}`) || GENERAL } catch { return GENERAL } })
   const [thread, setThread] = useState<string | null>(null)
   const [newChannel, setNewChannel] = useState<{ name: string; type: TeamChannelType; group: string } | null>(null)
   const [groupEdit, setGroupEdit] = useState<{ rid?: string; name: string } | null>(null)   // new group (no rid) or rename
-  const [callMenu, setCallMenu] = useState(false)
-  const [paste, setPaste] = useState<{ label: string } | null>(null)
-  const [notifyAll, setNotifyAll] = useState(true)
-  const [linkEdit, setLinkEdit] = useState<string | null>(null)
   // Who sees a channel or a group (leads). inherit: a channel of a restricted group follows it.
   const [accessEdit, setAccessEdit] = useState<{ value: PageAccess | undefined; kind: 'channel' | 'group'; rid?: string; name: string; inherit?: boolean } | null>(null)
   // One line edits of a channel (leads): name shown, topic, voice status, voice limit.
@@ -136,7 +137,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
       setFilesDir(r.files_dir)
       if (!r.unchanged) setRecords(r.records)
     }).catch(() => undefined)
-    teamApi.discord(project).then(d => setDiscord(d.on ? d : null)).catch(() => setDiscord(null))
   }, [project, preview])
   useEffect(() => {
     etag.current = undefined
@@ -291,7 +291,7 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
     teamApi.setMutes(project, next).then(setMutes).catch(fail)
   }
   const copyLink = (channelKey: string, message?: string) => {
-    navigator.clipboard.writeText(teamLink(channelKey, message))
+    navigator.clipboard.writeText(teamLink(page.id, channelKey, message))
       .then(() => toast.success(tr('Lien copie : colle-le dans un message', 'Link copied: paste it in a message')))
       .catch(fail)
   }
@@ -383,11 +383,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
     else if (before?.group) moveGroup(drag.name, before.group)
     endDrag()
   }
-  const saveLink = (url: string) => {
-    const link = url.trim() || null
-    void meta(chanRec ? [{ op: 'put', rid: chanRec.rid, fields: { call_link: link } }] : [{ op: 'put', fields: { kind: 'channel', name: current, call_link: link } }])
-    setLinkEdit(null)
-  }
   // Who sees the channel (leads): people, roles, like a TOOL page (ADR 0078, 0085).
   // A group's access goes to its channels without their own (Discord "synced", P5); a channel
   // of a restricted group open to everyone stores {} (its own access: everyone).
@@ -407,32 +402,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
     setChannel(key); setThread(null)
     setAccessEdit({ value: accessOf(r) ?? groupAccess(key), kind: 'channel', rid: r?.rid, name: key, inherit: !!groupAccess(key) && !r?.access })
   }
-  const join = (url: string) => { openLink(url); void setMyPresence('meeting') }
-  // Voice on Discord opens the Discord app when installed, else the browser (P5).
-  const joinDiscord = (url: string) => {
-    void setMyPresence('meeting')
-    if (!window.electronAPI?.openDiscord) { openLink(url); return }
-    window.electronAPI.openDiscord(url).then(how => { if (!how) openLink(url) }).catch(() => openLink(url))
-  }
-  const discordKey = current === GENERAL ? GENERAL : chanRec?.rid ?? ''
-  const discordLink = discord?.links[discordKey] ?? ''
-  const voiceIn = discord?.voice[discordKey] ?? []
-  const postCall = (label: string, url: string) => {
-    if (!/^https:\/\/\S+$/.test(url)) { toast.error(tr('Colle un lien https://', 'Paste an https:// link')); return }
-    setPaste(null); setCallMenu(false)
-    send({ message: `\u{1F4DE} ${label} : ${url}`, notify_all: notifyAll }).catch(fail)
-  }
-  const newMeeting = (kind: 'jitsi' | 'meet' | 'teams') => {
-    if (kind === 'jitsi') {
-      const url = `https://meet.jit.si/FLUX-${slug(project ?? '')}-${current}-${Math.random().toString(36).slice(2, 8)}`
-      postCall(tr('Reunion Jitsi', 'Jitsi meeting'), url)
-      join(url)
-      return
-    }
-    openLink(kind === 'meet' ? 'https://meet.google.com/new' : 'https://teams.microsoft.com/l/meeting/new')
-    setPaste({ label: kind === 'meet' ? 'Google Meet' : 'Teams' })
-  }
-
   if (!project) return <div className="tp-note" style={{ padding: 12 }}>{tr('Ouvre un projet : le chat est celui de son equipe.', 'Open a project: the chat is its team’s.')}</div>
   if (preview) return <div className="tp-note" style={{ padding: 12 }}>{tr('Apercu : le chat d’equipe du projet s’affiche ici.', 'Preview: the project team chat shows here.')}</div>
 
@@ -448,10 +417,9 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
     setFlash(id)
     setPanel(false)
   }
-  const height = fill ? undefined : w.height ?? 560
+  const height = w.height ?? 560
   return (
-    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', display: 'flex', height, overflow: 'hidden', position: 'relative',
-                  ...(fill ? { flex: 1, minHeight: 0 } : {}) }}>
+    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', display: 'flex', height, overflow: 'hidden', position: 'relative' }}>
       {/* channels */}
       <div style={{ width: 170, flex: 'none', borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', background: 'var(--paper-2)' }}>
         <div className="cap" style={{ padding: '8px 10px 4px' }}>{w.label || tr('Canaux', 'Channels')}</div>
@@ -501,10 +469,7 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{shownName(n)}</span>
                       {(voice || rec?.type === 'forum' || rec?.type === 'announcement') && accessOf(rec) && <Lock size={10} style={{ opacity: 0.5 }} />}
                       {quiet && <BellOff size={10} style={{ opacity: 0.5 }} />}
-                      {voice && rec && ((discord?.voice[rec.rid]?.length ?? 0) > 0 || !!rec.user_limit) &&
-                        <span className="tag" style={{ fontSize: 10 }} title={discord?.voice[rec.rid]?.join(', ')}>
-                          {discord?.voice[rec.rid]?.length ?? 0}{rec.user_limit ? `/${rec.user_limit}` : ''}</span>}
-                      {!voice && rec?.call_link && <Phone size={11} style={{ opacity: 0.6 }} />}
+                      {voice && !!rec?.user_limit && <span className="tag" style={{ fontSize: 10 }}>{rec.user_limit}</span>}
                       {n !== current && unread[n] > 0 && <span className="tag" style={{ fontSize: 10 }}>{unread[n]}</span>}
                       {lead && n !== GENERAL && n === current && (
                         <button type="button" title={tr('Archiver le canal', 'Archive the channel')} onClick={e => { e.stopPropagation(); setAskArchive({ label: `#${shownName(n)}`, run: () => { void meta([{ op: 'put', rid: rec!.rid, fields: { archived: true } }]); setChannel(GENERAL) } }) }}
@@ -557,11 +522,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
             <ChanIcon rec={chanRec} size={13} /> {shownName(current)}</b>
           {readOnly(chanRec) && <span className="tag" style={{ fontSize: 10 }} title={tr('Seuls les leads et superviseurs ecrivent ici', 'Only leads and supervisors post here')}>
             {tr('lecture seule', 'read only')}</span>}
-          {chanRec?.type === 'voice' && voiceIn.length > 0 && <span className="tp-note" style={{ color: 'var(--ink-3)' }}>
-            {tr('En vocal : ', 'In voice: ')}{voiceIn.join(', ')}</span>}
-          {chanRec?.type === 'voice' && !chanRec.call_link && !discordLink && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>
-            {lead ? tr('Canal vocal sans lien : clic droit > Lien d’appel', 'Voice channel without a link: right click > Call link')
-                  : tr('Canal vocal sans lien pour l’instant', 'Voice channel without a link yet')}</span>}
           {(accessOf(chanRec) ?? groupAccess(current)) && <span className="tag" style={{ fontSize: 10 }} title={accessLabel((accessOf(chanRec) ?? groupAccess(current))!)}>
             <Lock size={9} /> {accessOf(chanRec) ? tr('restreint', 'restricted') : tr('restreint (groupe)', 'restricted (group)')}</span>}
           <span style={{ flex: 1 }} />
@@ -570,13 +530,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
                     title={tr('Messages epingles et fils actifs', 'Pinned messages and active threads')}>
               <Pin size={12} /> {pinned.length} <MessageSquareReply size={12} /> {threads.length}</button>
           )}
-          {chanRec?.call_link && <button type="button" className="btn sm" onClick={() => join(chanRec.call_link!)}
-                                         title={chanRec.call_link}><Phone size={12} /> {tr('Rejoindre l’appel', 'Join the call')}</button>}
-          {!chanRec?.call_link && discordLink && (chanRec?.type === 'voice'
-            ? <button type="button" className="btn sm" onClick={() => joinDiscord(discordLink)} title={tr('Ouvre l’app Discord (le navigateur si elle n’est pas installee)', 'Opens the Discord app (the browser when it is not installed)')}><Volume2 size={12} /> {tr('Rejoindre sur Discord', 'Join on Discord')}</button>
-            : <button type="button" className="btn ghost sm" onClick={() => openLink(discordLink)} title={discordLink}>{tr('Ouvrir dans Discord', 'Open in Discord')}</button>)}
-          <button type="button" className="btn ghost sm" onClick={() => setCallMenu(s => !s)} style={{ background: callMenu ? 'var(--paper-2)' : undefined }}>
-            <Video size={12} /> {tr('Nouvelle reunion', 'New meeting')}</button>
         </div>
         {(chanRec?.topic || (lead && !fieldEdit)) && chanRec?.type !== 'voice' && (
           <div className="tp-note" onClick={() => { if (lead) editField(current, 'topic') }}
@@ -615,31 +568,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
               <button type="button" className="btn sm" onClick={() => saveAccess(accessEdit)}>{tr('Enregistrer', 'Save')}</button>
               <button type="button" className="btn ghost sm" onClick={() => setAccessEdit(null)}><X size={12} /></button>
             </div>
-          </div>
-        )}
-        {(callMenu || paste || linkEdit !== null) && (
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
-            {linkEdit !== null ? <>
-              <input autoFocus defaultValue={linkEdit} placeholder="https://..." style={{ ...input, flex: 1, minWidth: 200 }}
-                     onKeyDown={e => { if (e.key === 'Enter') saveLink((e.target as HTMLInputElement).value); if (e.key === 'Escape') setLinkEdit(null) }} id="flux-team-link" />
-              <button type="button" className="btn sm" onClick={() => saveLink((document.getElementById('flux-team-link') as HTMLInputElement).value)}>{tr('Enregistrer', 'Save')}</button>
-              <button type="button" className="btn ghost sm" onClick={() => setLinkEdit(null)}><X size={12} /></button>
-            </> : paste ? <>
-              <span className="cap">{tr(`Cree la reunion ${paste.label} dans le navigateur, puis colle son lien :`, `Create the ${paste.label} meeting in the browser, then paste its link:`)}</span>
-              <input autoFocus placeholder="https://..." style={{ ...input, flex: 1, minWidth: 200 }} id="flux-team-paste"
-                     onKeyDown={e => { if (e.key === 'Enter') postCall(paste.label, (e.target as HTMLInputElement).value.trim()); if (e.key === 'Escape') setPaste(null) }} />
-              <button type="button" className="btn sm" onClick={() => postCall(paste.label, (document.getElementById('flux-team-paste') as HTMLInputElement).value.trim())}>{tr('Poster', 'Post')}</button>
-              <button type="button" className="btn ghost sm" onClick={() => setPaste(null)}><X size={12} /></button>
-            </> : <>
-              <button type="button" className="btn sm" onClick={() => newMeeting('jitsi')} title={tr('Lien genere tout de suite, sans compte (le premier arrive se connecte sur meet.jit.si)', 'Link made at once, no account')}>Jitsi</button>
-              <button type="button" className="btn sm" onClick={() => newMeeting('meet')}>Google Meet</button>
-              <button type="button" className="btn sm" onClick={() => newMeeting('teams')}>Teams</button>
-              {lead && <button type="button" className="btn ghost sm" title={tr('Lien d’appel permanent du canal (Discord, Teams, Meet, Jitsi) : bouton Rejoindre', 'Permanent call link of the channel: Join button')}
-                               onClick={() => { setCallMenu(false); setLinkEdit(chanRec?.call_link ?? '') }}><Phone size={12} /> {tr('Lien d’appel du canal', 'Channel call link')}</button>}
-              <label className="cap" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
-                <input type="checkbox" checked={notifyAll} onChange={e => setNotifyAll(e.target.checked)} />
-                {tr('Prevenir l’equipe (telephone)', 'Notify the team (phone)')}</label>
-            </>}
           </div>
         )}
         {panel && (
@@ -749,8 +677,6 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
                 )}
                 {!general && <MenuItem close={() => setMenu(null)} icon={<Copy size={12} />} label={tr('Dupliquer', 'Duplicate')} title={tr('Meme type, groupe, acces, sujet ; sans les messages', 'Same type, group, access, topic; no messages')} run={() => duplicate(name)} />}
                 {!general && <MenuItem close={() => setMenu(null)} icon={<Eye size={12} />} label={tr('Qui voit ce canal...', 'Who sees this channel...')} run={() => editAccess(name)} />}
-                <MenuItem close={() => setMenu(null)} icon={<Phone size={12} />} label={tr('Lien d’appel du canal...', 'Channel call link...')}
-                          run={() => { setChannel(name); setThread(null); setLinkEdit(r?.call_link ?? '') }} />
                 {!general && <MenuItem close={() => setMenu(null)} icon={<Archive size={12} />} label={tr('Archiver', 'Archive')}
                           run={() => setAskArchive({ label: `#${shownName(name)}`, note: tr('Les messages restent. Il revient depuis Projets > Archives du projet ; un nouveau canal du meme nom part vierge.', 'Messages stay. It comes back from Projects > Archived; a new channel with the same name starts empty.'), run: () => { void meta([{ op: 'put', rid: r!.rid, fields: { archived: true } }]); if (current === name) setChannel(GENERAL) } })} />}
               </>}
@@ -799,21 +725,18 @@ export function ChatWidget({ widget: w, project, preview, fill, focus }: DataWid
                         onSend={(message, attachments) => send({ message, attachments, reply_to: root.id })} />}
         </div>
       )}
-
-      {/* everyone of the pipeline, online or not (collapsible) */}
-      <PeoplePanel storageKey="flux.people.team" />
     </div>
   )
 }
 
-// Edit / delete (ADR 0084): the author edits and deletes, a lead deletes any message; the
-// Discord bridge forwards both. "(modifie)" marks an edited message.
+// Edit / delete (ADR 0084): the author edits and deletes, a lead deletes any message.
+// "(modifie)" marks an edited message.
 function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, onReact, onReply, onPin, me, moderator, onChanged, flash, onCopyLink }: {
   m: TeamMessage; users: Set<string>; reacts?: Map<TeamEmoji, { n: number; mine?: TeamRecord; who: string[] }>
   replies: number; pinned: boolean; lead: boolean; project: string; filesDir: string
   onReact: (msg: string, e: TeamEmoji) => void; onReply?: () => void; onPin?: () => void
   me?: string; moderator?: boolean; onChanged?: () => void
-  flash?: boolean; onCopyLink?: () => void   // opened from a /team link: scrolled to and highlighted
+  flash?: boolean; onCopyLink?: () => void   // opened from a chat link: scrolled to and highlighted
 }) {
   const { tr } = useTr()
   const [hover, setHover] = useState(false)
@@ -836,7 +759,7 @@ function Message({ m, users, reacts, replies, pinned, lead, project, filesDir, o
          style={{ position: 'relative', padding: '5px 8px', borderRadius: 6, background: hover || flash ? 'var(--paper-2)' : undefined,
                   boxShadow: flash ? 'inset 3px 0 0 var(--accent)' : undefined }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 12 }}>
-        <PresenceDot user={m.user} style={{ alignSelf: 'center' }} /><b>{m.user}</b>
+        <b>{m.user}</b>
         {m.via && <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{tr(`pour ${m.via}`, `for ${m.via}`)}</span>}<span style={{ color: 'var(--ink-4)', fontSize: 11 }}>{m.date} {m.time}</span>
         {m.edited && <span style={{ color: 'var(--ink-4)', fontSize: 11 }} title={m.edited}>{tr('(modifie)', '(edited)')}</span>}
         {pinned && <Pin size={10} style={{ color: 'var(--accent)' }} />}
@@ -971,7 +894,7 @@ function Composer({ users, project, placeholder, commands, onCommand, onSend }: 
         <div style={{ position: 'absolute', bottom: '100%', left: 8, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.15)', zIndex: 3 }}>
           {suggest.map(u => <div key={u} onMouseDown={e => { e.preventDefault(); setText(text.slice(0, at!.index) + `@${u} `) }}
                                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>
-                                 <PresenceDot user={u} />@{u}</div>)}
+                                 @{u}</div>)}
         </div>
       )}
       {cmdSuggest.length > 0 && (

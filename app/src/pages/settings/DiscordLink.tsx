@@ -1,6 +1,6 @@
 // DiscordLink.tsx - link the artist's Discord account with a /link code (ADR 0073).
 // Linked: a check, the Discord account, Changer / Délier. Not linked: two short steps.
-// Used by Paramètres > User > Notifications téléphone and the first-run dialog (WelcomeDialog).
+// Used by Paramètres > User > Notifications Discord and the first-run dialog (WelcomeDialog).
 
 import { useState } from 'react'
 import { CircleCheck, Copy, Link2, Unlink } from 'lucide-react'

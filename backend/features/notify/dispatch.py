@@ -5,30 +5,25 @@
 # flush(): every ready item of one person goes out as ONE message on that person's
 # channel. A worker thread (started on demand, ends when the queue is empty) calls it.
 # Nothing here ever raises into the action of the artist (ADR 0062).
-#
-# ntfy.sh quota (250 / day per IP, shared by the school): a local daily counter. From
-# WARN_AT the person's messages wait the digest delay even when immediate; at the limit
-# they wait for the next day (and expire after 24 h like any item).
+# Channel (ADR 0091): the project's bot DM for a linked account, the webhook as fallback
+# while the bot is offline (ADR 0073).
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
-from datetime import date
 
 from core.logger import get_logger
 from features.accounts.aliases import load_aliases, resolve_user, same_user
 from features.notify import outbox, store
-from features.notify.channels import discord, ntfy
+from features.notify.channels import discord
 from features.notify.events import IMMEDIATE, format_digest
 
 log = get_logger(__name__)
 
 ENV = "FLUX_NOTIFY"
 _FALSE = {"0", "false", "no", "off"}
-WARN_AT = 200
 IDLE_POLL_S = 60.0
 
 _worker: threading.Thread | None = None
@@ -62,7 +57,9 @@ def enqueue(event: dict, *, now: float | None = None, start_worker: bool = True)
         delay = 0.0
         if event.get("type") not in IMMEDIATE:
             delay = store.read_project(event.get("project", "")).get("digest_minutes", 5) * 60.0
-        items = [outbox.new_item(event, who, now=t, delay_s=delay) for who in recipients_of(event)]
+        # Per type opt-out (ADR 0091): a muted type is never queued for that person.
+        who_wants = [w for w in recipients_of(event) if store.wants(store.read_user(w), event.get("type", ""))]
+        items = [outbox.new_item(event, who, now=t, delay_s=delay) for who in who_wants]
         if items and outbox.add(items):
             if start_worker:
                 kick()
@@ -72,49 +69,15 @@ def enqueue(event: dict, *, now: float | None = None, start_worker: bool = True)
     return 0
 
 
-# ── ntfy daily counter (local, per PC) ────────────────────────────────────────
-
-def _counter_path():
-    return outbox.queue_path().with_name("notify_counter.json")
-
-
-def ntfy_count(today: str | None = None) -> int:
-    today = today or date.today().isoformat()
-    try:
-        data = json.loads(_counter_path().read_text(encoding="utf-8"))
-        return int(data.get("count", 0)) if data.get("date") == today else 0
-    except (OSError, ValueError, AttributeError):
-        return 0
-
-
-def _ntfy_bump(today: str | None = None) -> None:
-    today = today or date.today().isoformat()
-    try:
-        path = _counter_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"date": today, "count": ntfy_count(today) + 1}), encoding="utf-8")
-    except OSError:
-        pass
-
-
-def quota_status() -> dict:
-    count = ntfy_count()
-    return {"ntfy_sent_today": count, "ntfy_limit": ntfy.DAILY_LIMIT, "warn": count >= WARN_AT}
-
-
-def _seconds_to_midnight(now: float) -> float:
-    lt = time.localtime(now)
-    return 86400 - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) + 1
-
-
 # ── flush ─────────────────────────────────────────────────────────────────────
 
-def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float):
-    """Private message through the project's bot (ADR 0073) for a linked account.
+def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float, components: list | None = None):
+    """Private message through the project's bot (ADR 0073) for a linked account, with the
+    action buttons of *components* (ADR 0091, dm_actions).
 
     This PC hosts the bot: send now. Another PC hosts it and is online: leave the DM in
     the shared queue (the host sends it). Bot offline: None = use the webhook if there is
-    one, else retry later. Not linked or no bot: None.
+    one (no buttons there), else retry later. Not linked or no bot: None.
     """
     if not cfg.get("discord_bot") or not store.is_linked(prefs):
         return None
@@ -122,11 +85,13 @@ def _via_bot(project: str, cfg: dict, prefs: dict, text: str, now: float):
     from features.notify.channels import SendResult
     token = discord_bot.hosted_token(project)
     if token:
-        return discord_bot.send_dm(token, prefs["discord_id"], text)
+        return discord_bot.send_dm(token, prefs["discord_id"], text, components)
     if store.bot_alive(project, now):
         from core import config
         item = {"id": outbox.new_item({}, "", now=now)["id"], "discord_id": prefs["discord_id"],
                 "text": text, "created": now}
+        if components:
+            item["components"] = components
         ok = store.bot_queue_add(project, config.get_current_user() or "", item, now)
         return SendResult(ok, 200 if ok else 0)
     if cfg.get("discord_webhook"):
@@ -143,36 +108,23 @@ def _send_group(project: str, who: str, items: list[dict], now: float) -> str:
     events = sorted((i["event"] for i in items), key=lambda e: e.get("at", 0))
     text = format_digest(events, cfg.get("include_project", False),
                          include_text=cfg.get("include_text", True))
-    channel = prefs["channel"]
-    if channel == "ntfy":
-        count = ntfy_count()
-        if count >= ntfy.DAILY_LIMIT:
-            wait = _seconds_to_midnight(now)
-            for i in items:
-                i["next_try"] = now + wait
-            return "held"
-        if count >= WARN_AT:
-            oldest = min(float(i.get("created", now)) for i in items)
-            if oldest + cfg.get("digest_minutes", 5) * 60.0 > now:
-                for i in items:
-                    i["due"] = oldest + cfg.get("digest_minutes", 5) * 60.0
-                return "held"
-        result = ntfy.send(cfg["ntfy_server"], prefs["ntfy_topic"], text)
-        if result.ok:
-            _ntfy_bump()
+    channel = "discord"
+    components = []
+    if cfg.get("discord_bot") and store.is_linked(prefs):
+        from features.notify import dm_actions
+        components = dm_actions.components_for(events, who)
+    result = _via_bot(project, cfg, prefs, text, now, components)
+    if result is not None:
+        channel = "discord bot"
     else:
-        result = _via_bot(project, cfg, prefs, text, now)
-        if result is not None:
-            channel = "discord bot"
-        else:
-            hook = cfg["discord_webhook"]
-            if _discord_cooldown.get(hook, 0.0) > now:
-                for i in items:
-                    i["next_try"] = _discord_cooldown[hook]
-                return "held"
-            result = discord.send(hook, text, [prefs["discord_id"]])
-            if result.retry_after:
-                _discord_cooldown[hook] = now + result.retry_after
+        hook = cfg["discord_webhook"]
+        if _discord_cooldown.get(hook, 0.0) > now:
+            for i in items:
+                i["next_try"] = _discord_cooldown[hook]
+            return "held"
+        result = discord.send(hook, text, [prefs["discord_id"]])
+        if result.retry_after:
+            _discord_cooldown[hook] = now + result.retry_after
     types = ",".join(sorted({e.get("type", "?") for e in events}))
     if result.ok:
         log.info("notify %s via %s: sent (%d)", types, channel, len(items))
@@ -220,15 +172,10 @@ def send_test(project: str, who: str) -> dict:
     prefs = store.read_user(who)
     if not store.has_channel(prefs, cfg):
         return {"ok": False, "reason": "no_channel"}
-    text = "Test FLUX : les notifications arrivent sur ce telephone."
-    if prefs["channel"] == "ntfy":
-        result = ntfy.send(cfg["ntfy_server"], prefs["ntfy_topic"], text)
-        if result.ok:
-            _ntfy_bump()
-    else:
-        result = _via_bot(project, cfg, prefs, text, time.time()) if project else None
-        if result is None:
-            result = discord.send(cfg["discord_webhook"], text, [prefs["discord_id"]])
+    text = "Test FLUX : les notifications arrivent ici."
+    result = _via_bot(project, cfg, prefs, text, time.time()) if project else None
+    if result is None:
+        result = discord.send(cfg["discord_webhook"], text, [prefs["discord_id"]])
     log.info("notify test via %s: %s", prefs["channel"], "sent" if result.ok else f"HTTP {result.status}")
     return {"ok": result.ok, "status": result.status, "channel": prefs["channel"]}
 

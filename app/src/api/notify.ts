@@ -1,17 +1,19 @@
-// notify.ts - phone notifications (ADR 0062): Discord webhook per project, ntfy topic per person.
-// Secrets come back masked ("****" + 4 chars); sending the mask back keeps the stored value.
+// notify.ts - Discord notifications (ADR 0062, 0073, 0091): bot DMs for linked accounts, the
+// project webhook as fallback while the bot is offline. The webhook comes back masked
+// ("****" + 4 chars); sending the mask back keeps the stored value.
 
 import { apiCall } from './client'
 
-export type NotifyChannel = 'none' | 'discord' | 'ntfy'
+export type NotifyChannel = 'none' | 'discord'
+/** Event types a person can turn off (ADR 0091), as backend events.EVENT_TYPES. */
+export type NotifyType = 'mention' | 'task' | 'retake' | 'calendar' | 'publish'
 
 export interface NotifyPrefs {
   channel: NotifyChannel
   discord_id: string
-  ntfy_topic: string
-  ntfy_url: string           // server + topic, for the QR code (owner only)
   discord_linked_at: string  // set by a /link code (ADR 0073), '' when typed by hand
   discord_name: string       // Discord display name given with the /link code, '' when unknown
+  muted: NotifyType[]        // types this person does not receive
 }
 
 export interface NotifyMe {
@@ -21,27 +23,14 @@ export interface NotifyMe {
   project_has_bot: boolean
   discord_linked: boolean
   has_channel: boolean
-  ntfy_sent_today: number
-  ntfy_limit: number
-  warn: boolean
 }
 
 export interface NotifyProjectSettings {
   discord_webhook: string    // masked
   has_webhook: boolean
-  ntfy_server: string
   digest_minutes: number
   include_project: boolean
   include_text: boolean      // chat message / calendar title in the text (ADR 0072)
-  discord_sync: boolean      // live Team <-> Discord server bridge (ADR 0084)
-  discord_guild: string      // the project's Discord server id, '' = the only server the bot is on
-}
-
-export interface NotifyBridge {
-  at: string                 // last pass of the bridge on the host
-  error: string
-  guild: string              // server in use
-  guilds: string[]           // servers the bot is on
 }
 
 export interface NotifyBot {
@@ -56,7 +45,6 @@ export interface NotifyBot {
   invite_url?: string
   background?: boolean       // this PC keeps its bots online when FLUX is closed (ADR 0076)
   runs_in?: '' | 'app' | 'headless'
-  bridge?: NotifyBridge
 }
 
 export interface NotifyProject {
@@ -71,7 +59,7 @@ const q = (project: string | null | undefined) => (project ? `?project=${enc(pro
 
 export const notifyApi = {
   me: (project?: string | null) => apiCall<NotifyMe>('GET', `/notify/me${q(project)}`),
-  setMe: (patch: { channel?: NotifyChannel; discord_id?: string; regenerate_topic?: boolean }, project?: string | null) =>
+  setMe: (patch: { channel?: NotifyChannel; discord_id?: string; muted?: NotifyType[] }, project?: string | null) =>
     apiCall<{ prefs: NotifyPrefs; has_channel: boolean }>('PUT', `/notify/me${q(project)}`, patch),
   test: (project?: string | null) =>
     apiCall<{ ok: boolean; status?: number; reason?: string; channel?: NotifyChannel }>('POST', `/notify/me/test${q(project)}`),
