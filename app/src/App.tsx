@@ -15,6 +15,7 @@ import { useBackendStatus } from './hooks/useBackendStatus'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { SupEntryBanner } from './components/shared/SupEntryBanner'
+import { HoudiniBackupsReminder } from './components/shared/HoudiniBackupsReminder'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
 import { Hub }           from './pages/Hub'
@@ -187,6 +188,7 @@ function AppShell({ settings }: { settings: Settings }) {
         {!DETACHED && <StatusBar dccStatus={dccStatus} />}
         {!DETACHED && <MentionWatcher />}
         {!DETACHED && <FavoriteWatcher />}
+        {!DETACHED && <HoudiniBackupsReminder />}
         <WorkProfileDialog />
         {!DETACHED && <WelcomeDialog />}
       </div>

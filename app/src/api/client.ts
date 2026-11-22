@@ -146,6 +146,13 @@ export interface CleanupItem {
 }
 export interface CleanupScan { scope: string; items: CleanupItem[]; unknown: string[] }
 
+// Houdini backups / autosave copies to delete (backend features/houdini_work/backup_cleaner.py, ADR 0092).
+export interface HoudiniBackupItem {
+  id: string; where: 'projet' | 'autosave'; scene: string; name: string; path: string
+  size: number; mtime: number; age_days: number
+}
+export interface HoudiniBackupScan { enabled: boolean; days: number; items: HoudiniBackupItem[]; kept: number; total_size: number }
+
 // One DCC of "Installer tous les bridges" (backend features/launcher/bridges.py).
 export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'error'; message: string }
 
@@ -841,6 +848,11 @@ export const api = {
   applyCleanup: (project: string, ids: string[], asset?: string) =>
     apiCall<{ done: number; moved: number; dropped: number; errors: string[]; journal: string }>(
       'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup`, { asset: asset || null, ids }, 300000),
+  scanHoudiniBackups: (project: string) =>
+    apiCall<HoudiniBackupScan>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup/houdini-backups`, undefined, 300000),
+  applyHoudiniBackups: (project: string, ids: string[]) =>
+    apiCall<{ deleted: number; freed: number; errors: string[]; journal: string }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup/houdini-backups`, { ids }, 300000),
   getCleanupBackups: (project: string) =>
     apiCall<{ backups: { id: string; files: number }[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup/backups`),
   restoreCleanup: (project: string, journal_id: string) =>
