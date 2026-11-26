@@ -50,7 +50,7 @@ class _StaleSave:
             mock.patch.object(router, "_refresh_changed_shot_stages", return_value=[]),
             mock.patch("features.notify.hooks.on_production"),
             mock.patch("features.roles.project_roles.can", return_value=True),
-            mock.patch("features.roles.project_roles.role_of", return_value="artist"),
+            mock.patch("features.roles.project_roles.role_of", return_value="lead"),
         ):
             patch.start()
             self.addCleanup(patch.stop)
