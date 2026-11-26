@@ -1,7 +1,7 @@
 # Flows : documentation du graph
 
 Documentation utilisateur de l'editeur de flows de FLUX (Parametres avances > Actions (YAML) > Ouvrir le graph).
-Les specs de build restent dans `docs/notes/prompts/flows_refonte/` ; cette doc decrit ce qui existe pour celui qui s'en sert.
+Elle decrit ce qui existe, pour celui qui s'en sert.
 
 | Fichier | Contenu |
 |---|---|

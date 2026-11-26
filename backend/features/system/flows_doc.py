@@ -276,7 +276,7 @@ def build_html(docs_dir: Path = DOCS_DIR, manual_dir: Path = MANUAL_DIR) -> str:
         '  <div class="go"><a class="pill-link" href="#global">1. Global</a><a class="pill-link" href="#dispo">2. Dispo et a venir</a>'
         '<a class="pill-link" href="#nodes">3. Index des nodes</a></div>\n'
         '  <div class="meta">Genere depuis <code>docs/user/flows/</code> · le bouton (i) d\'un node dans l\'editeur affiche la meme '
-        "description · Licence Apache-2.0</div>\n</section>")
+        "description · Licence MPL-2.0</div>\n</section>")
     return (
         '<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n'
         f"<title>{TITLE}</title>\n<style>{css}{EXTRA_CSS}</style>\n</head>\n"

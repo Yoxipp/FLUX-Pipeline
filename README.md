@@ -1,43 +1,56 @@
-# FLUX
+<p align="center">
+  <img src="public/flux_logo.png" alt="FLUX" width="120">
+</p>
 
-Desktop 3D / VFX pipeline for ESMA student teams: project tree from naming tokens, immutable versioned publishes
-(`vNNN` + `LAST`), one-click import into the DCCs, USD assembly (assets, sets, shots), production tracking,
-render farm submission, node-based Flows, team activity, chat and calendar.
+<h1 align="center">FLUX</h1>
 
-* Windows only, local-first (local folder, OneDrive or school server).
-* Apache-2.0, permissive dependencies only, no DCC license token consumed by any step.
-* DCCs: Maya, Houdini, ZBrush (validated); Nuke, Substance Painter / Designer, Mari, Marvelous, Photoshop (bridges).
+<p align="center">
+  A desktop pipeline for 3D animation and VFX teams: folders, versions, publishes, USD and tracking in one app.
+</p>
 
-This file is the entry point of the repository: what FLUX is, how to run it, where everything lives and what to read
-for each kind of work.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/license-MPL--2.0-blue"></a>
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-lightgrey">
+  <img alt="Status: in development" src="https://img.shields.io/badge/status-in%20development-orange">
+</p>
 
-## 1. Who reads what
+---
 
-| You are | Start with |
+FLUX is built by students. One of its goals is to run in production at ESMA. It is local-first: a project lives in a
+plain folder (local disk, OneDrive or a file server), FLUX keeps it organised, and no step of the pipeline consumes a
+DCC license.
+
+<!-- Screenshots: docs/images/*.png -->
+
+## What FLUX does
+
+* **Project tree from naming rules.** Define your tokens once, FLUX creates and names every asset, shot and task folder.
+* **Safe, versioned publishes.** Every publish is an immutable `vNNN` folder plus a `LAST` pointer. Nothing is overwritten.
+* **One-click import into your software.** Load the right version of an asset in Maya, Houdini and the other DCCs.
+* **USD assembly.** Assets, sets and shots are assembled as USD layers automatically after each publish.
+* **Production tracking.** Tasks, statuses, reviews, team activity, chat and calendar in the same app.
+* **Render farm submission** and **Flows**, a node editor to automate pipeline tasks without writing code.
+
+### Supported software
+
+| Status | Software |
 |---|---|
-| Artist using FLUX | The manual `backend/resources/manual/FLUX_Manuel.html` (French). FLUX copies it into `<workspace>/FLUX_DOC/` at every start and shows it in Settings > Doc. Flows: Settings > Doc > Flows, source in `docs/user/flows/`. |
-| TD / pipeline developer | Section 3 (quick start), then `docs/architecture/OVERVIEW.md` (systems), `docs/architecture/` (pipeline logic, USD), `docs/decisions/` (ADR). |
-| Contributor | [CONTRIBUTING.md](CONTRIBUTING.md), `docs/development/BUILD.md`, `docs/development/STRUCTURE.md` (build-sensitive paths). |
-| local tool session | [NOTES.md](NOTES.md): reading order, rules, risky zones. |
+| Validated in production use | Maya, Houdini, ZBrush |
+| Bridges (working, less tested) | Nuke, Substance 3D Painter / Designer, Mari, Marvelous Designer, Photoshop |
 
-## 2. Architecture
+## Install
 
-```
-app/electron (Electron main)  --spawn-->  backend/main.py  FastAPI on 127.0.0.1:8765 (per-launch X-Flux-Token)
-app/src      (React + TS)     --HTTP-->   backend/routers  ->  features/*        domain logic
-                                                           ->  flux_actions + flux_core   YAML action engine (publish)
-                                                           ->  flux_flows        Flows engine (nodes, runs, pages)
-                                                           ->  core/*            config, paths, metadata repository, storage
-                                                           ->  dcc/<soft>        backend clients + in-DCC plugins
-Metadata: MetadataRepository (JSON default | SQLite | remote)     Bytes: filesystem only, never through the API
-```
+**Windows 10 / 11 only** for now.
 
-Packaged app: the backend is frozen by PyInstaller (`scripts/backend.spec`) and shipped inside the Electron
-installer (`scripts/electron-builder.yml`, NSIS). Details: `docs/development/BUILD.md`.
+### Installer
 
-## 3. Quick start (dev)
+Download `FLUX-Setup-<version>.exe` from the Releases page of this repository and run it. It installs for the current
+user, no admin rights needed. To update a whole team, drop the new installer in the `FLUX_UPDATE/` folder of the shared
+workspace: FLUX offers the update on start.
 
-Requirements: Windows, Node.js + npm, Python 3.13.
+### From source
+
+Requirements: [Node.js](https://nodejs.org/) (with npm) and Python 3.13.
 
 ```bash
 pip install -r backend/requirements.txt
@@ -45,74 +58,49 @@ npm install
 npm run dev
 ```
 
-Or double-click `INSTALL_DEV.bat` once, then `FLUX_DEV.bat`. Electron starts Vite and spawns the Python backend
-(an already running backend on port 8765 is reused). Optional Rez launch: `package.py`, `docs/development/REZ.md`.
+On Windows you can also double-click `INSTALL_DEV.bat` once, then `FLUX_DEV.bat` to start.
+Electron opens the app and starts the Python backend for you.
 
-| Task | Command |
+## First steps
+
+1. **Pick a workspace folder and your user name.** On first launch FLUX asks for the root folder of your team (local,
+   OneDrive or a studio server). Projects, per-user settings and team config all go inside it.
+2. **Create a project.** Choose a name and a naming template. FLUX builds the folder tree.
+3. **Add assets and shots**, then open a task in your DCC from FLUX.
+4. **Publish** from inside the DCC. The new version shows up in FLUX, ready to be imported by the rest of the team.
+
+The full user manual (in French) is built into the app: **Settings > Doc**.
+
+## Documentation
+
+| I want to | Read |
 |---|---|
-| Backend tests (from `backend/`) | `python tests/run_tests.py` (expects `verdict: PASS`) |
-| One test suite (from `backend/`) | `python -m unittest discover -s tests/<suite> -t .` |
-| Front-end logic tests | `npm run test:js` |
-| Front-end types | `npx tsc --noEmit -p tsconfig.json` |
-| Electron types | `npx tsc --noEmit -p tsconfig.electron.json` |
-| Installer | `BUILD_INSTALLER.bat` or `npm run build`, output in `INSTALLEURS/` |
+| Use FLUX as an artist | The manual in the app (Settings > Doc), source `backend/resources/manual/FLUX_Manuel.html` |
+| Automate with Flows | [docs/user/flows/](docs/user/flows/) (French) |
+| Understand the architecture | [docs/architecture/](docs/architecture/) and the decision records in [docs/decisions/](docs/decisions/) |
+| Build or package FLUX | [docs/development/BUILD.md](docs/development/BUILD.md), [docs/development/STRUCTURE.md](docs/development/STRUCTURE.md) |
+| Find anything else | [docs/README.md](docs/README.md) |
 
-Never run a global `python -m unittest`: `usd-core` aborts at teardown on Windows, `run_tests.py` works around it.
-
-## 4. Repository map
+### Architecture at a glance
 
 ```
-README.md  NOTES.md  CONTRIBUTING.md  LICENSE  NOTICE
-package.py                         Rez package of FLUX
-FLUX_DEV.bat  INSTALL_DEV.bat  BUILD_INSTALLER.bat
-index.html  vite / tsconfig / tailwind / postcss configs  package.json   (tooling, must stay at the root)
-app/
-  electron/                        Electron main process: windows, sidecar launch, API token, updater
-  src/                             React UI: pages/, components/shared/, api/client.ts, i18n.tsx
-backend/
-  main.py                          FastAPI entry (routers + token middleware)
-  routers/                         HTTP layer
-  features/                        domain: publisher, importer, production, render, usd_assembler, usd_export, ...
-  core/                            config, paths, constants, metadata repository (JSON / SQLite / remote), storage
-  flux_core/  flux_actions/        YAML action engine and its commands (publish, proxy, textures)
-  flux_flows/                      Flows v2: model, engine, runs, scheduler, bridges, nodes, pages
-  dcc/<soft>/                      per-DCC backend client + plugin copied into the DCC preferences
-  resources/                       bundled assets: manuals, shelves, scene templates, rigs
-  tests/                           run_tests.py + one suite per folder
-scripts/                           build: build.cjs, backend.spec, electron-builder.yml, NSIS, HDA build, JS tests
-tools/                             standalone scripts outside the app (loadtest/: server load test, cross_platform/: path audit)
-public/                            static Vite assets
-docs/                              documentation, index in docs/README.md
+app/electron (Electron main)  --spawn-->  backend/main.py   FastAPI on 127.0.0.1 (per-launch token)
+app/src      (React + TS)     --HTTP-->   backend/routers  ->  features/*          domain logic
+                                                           ->  flux_actions        YAML action engine (publish)
+                                                           ->  flux_flows          Flows engine
+                                                           ->  dcc/<software>      backend clients + in-DCC plugins
+Metadata: JSON (default) or SQLite        File bytes: filesystem only, never through the API
 ```
 
-Every important code folder has a short `CONTEXT.md` (role and pitfalls). Full tree and the paths the build depends
-on: `docs/development/STRUCTURE.md`.
+## Contributing
 
-## 5. Documentation map
+Bug reports, ideas and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in
+[SECURITY.md](SECURITY.md).
 
-| Folder | Content |
-|---|---|
-| `docs/architecture/` | Living system docs: pipeline logic, USD strategy and assembler, Houdini Work, school environment. |
-| `docs/decisions/` | Architecture Decision Records. An accepted ADR is only changed by a new ADR. |
-| `docs/development/` | Build, repository structure, Rez, publish rollback, bridge notes. |
-| `docs/user/flows/` | User doc of the Flows editor (French); `03_INDEX_NODES.md` is bundled in the app. |
-| `docs/history/` | What happened and what must not be redone (`HISTORY_ANALYSIS.md` section 4), dated audits. |
-| `docs/notes/` | Living project memory: context, current state, next steps, issues backlog; `prompts/` = open work briefs. |
-| `docs/archive/` | Read-only: finished studies and analyses (`studies/`), finished prompts (`prompts/`). Never a current spec. |
+## License
 
-Anything removed before the 2026-11 cleanup is still readable at the git tag `archive/pre-cleanup`.
-
-## 6. Runtime data (not in git)
-
-FLUX works inside a workspace folder (`FLUX_ROOT`; in dev, the repository root) that holds `USER/` (per-user
-settings), `DOSSIER_PROJETS/` (projects), `CONFIG/` (team config and extensions), `FLUX_UPDATE/` and `FLUX_DOC/`.
-`config.json` is the machine config. All of these are ignored by git.
-
-## 7. Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md): conventional commits, one logical unit per commit, permissive licenses only,
-tests before merge. Architecture decisions go to `docs/decisions/` as a new ADR.
-
-## 8. License
-
-Apache-2.0, see `LICENSE` and `NOTICE`.
+FLUX is licensed under the [Mozilla Public License 2.0](LICENSE). In short: you can use FLUX freely, including inside a
+studio, and modify it. If you distribute FLUX or a modified version, the FLUX files you ship (and your changes to them)
+must stay open under the MPL-2.0. Your own separate code can keep its own license.
+Third-party components keep their own licenses, see [NOTICE](NOTICE).
