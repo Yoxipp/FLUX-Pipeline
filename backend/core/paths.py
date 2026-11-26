@@ -25,8 +25,24 @@ def _get_exe_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+# Moves every per-user file out of the install dir and %APPDATA% (Rez, read-only
+# installs). Unset = historical locations.
+USER_DIR_ENV = "FLUX_USER_DIR"
+
+
+def _user_dir_override() -> Path | None:
+    value = (os.environ.get(USER_DIR_ENV) or "").strip()
+    return Path(value) if value else None
+
+
 def _frozen_appdata_dir() -> Path:
-    """Return %APPDATA%/FluxPipeline/, the user-writable data dir of the installed app."""
+    """Return the user-writable data dir of the installed app.
+
+    $FLUX_USER_DIR when set, else %APPDATA%/FluxPipeline/.
+    """
+    override = _user_dir_override()
+    if override:
+        return override
     appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     return Path(appdata) / "FluxPipeline"
 
@@ -37,8 +53,9 @@ def get_config_json_path() -> Path:
     Prod (frozen exe): %APPDATA%/FluxPipeline/config.json — user-writable even when
     the app is installed in Program Files (which is read-only without admin rights).
     Dev (non-frozen):  project root / config.json (existing behaviour).
+    $FLUX_USER_DIR set: $FLUX_USER_DIR/config.json in both modes.
     """
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) or _user_dir_override():
         return _frozen_appdata_dir() / "config.json"
     return _get_exe_dir() / "config.json"
 
@@ -48,8 +65,9 @@ def get_prefs_path() -> Path:
 
     Prod (frozen exe): %APPDATA%/FluxPipeline/prefs.json
     Dev (non-frozen):  config.json next-to-project-root (existing behavior)
+    $FLUX_USER_DIR set: $FLUX_USER_DIR/prefs.json in both modes.
     """
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) or _user_dir_override():
         return _frozen_appdata_dir() / "prefs.json"
     return get_config_json_path()
 

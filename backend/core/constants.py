@@ -24,6 +24,30 @@ DCC_PORT_RANGES: dict[str, tuple[int, int]] = {
     "Houdini":     (48884, 8),   # 48884..48891 — flux_houdini_server HTTP port
 }
 
+# Env override of a range's base port (Rez, several FLUX setups on one machine).
+# Only the DCCs whose bridge AND client both follow the value are listed. The Mari,
+# Designer and Painter names are the ones their bridge scripts already read.
+DCC_PORT_ENV: dict[str, str] = {
+    "Maya":       "FLUX_MAYA_PORT",
+    "SubstanceP": "FLUX_SUBSTANCE_PORT",
+    "SubstanceD": "FLUX_DESIGNER_PORT",
+    "Mari":       "FLUX_MARI_PORT",
+}
+
+
+def _apply_port_env(ranges: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
+    """Return *ranges* with the base ports set in the environment (bad values ignored)."""
+    out = dict(ranges)
+    for name, var in DCC_PORT_ENV.items():
+        value = (_os.environ.get(var) or "").strip()
+        base, count = out[name]
+        if value.isdecimal() and 0 < int(value) <= 65536 - count:
+            out[name] = (int(value), count)
+    return out
+
+
+DCC_PORT_RANGES = _apply_port_env(DCC_PORT_RANGES)
+
 # Legacy single-instance port map: the base port of each range. Kept so existing
 # code that targets "the DCC port" (probes, default connect) keeps working; the
 # instance-aware paths use DCC_PORT_RANGES / dcc_port_range() instead.
@@ -132,7 +156,33 @@ def _patterns_for_root(pf: str, pf86: str, lad: str) -> dict[str, list[list[str]
         "Unreal":     [[rf"{pf}\Epic Games\UE_*\Engine\Binaries\Win64\UnrealEditor.exe"]],
     }
 
-DCC_EXE_PATTERN_GROUPS: dict[str, list[list[str]]] = _build_dcc_pattern_groups()
+# Env override of a DCC executable: FLUX_<NAME>_EXE replaces the default search
+# patterns of that DCC when it names an existing file (else the defaults stay).
+DCC_EXE_ENV: dict[str, str] = {
+    "Maya":       "FLUX_MAYA_EXE",
+    "Houdini":    "FLUX_HOUDINI_EXE",
+    "Nuke":       "FLUX_NUKE_EXE",
+    "SubstanceP": "FLUX_SUBSTANCE_PAINTER_EXE",
+    "SubstanceD": "FLUX_SUBSTANCE_DESIGNER_EXE",
+    "ZBrush":     "FLUX_ZBRUSH_EXE",
+    "Marvelous":  "FLUX_MARVELOUS_EXE",
+    "Photoshop":  "FLUX_PHOTOSHOP_EXE",
+    "Mari":       "FLUX_MARI_EXE",
+    "Unreal":     "FLUX_UNREAL_EXE",
+}
+
+
+def _apply_exe_env(groups: dict[str, list[list[str]]]) -> dict[str, list[list[str]]]:
+    out = dict(groups)
+    for name, var in DCC_EXE_ENV.items():
+        value = (_os.environ.get(var) or "").strip().strip('"')
+        if value and _os.path.isfile(value):
+            # Callers glob these: "[" is the only wildcard a Windows path can hold.
+            out[name] = [[value.replace("[", "[[]")]]
+    return out
+
+
+DCC_EXE_PATTERN_GROUPS: dict[str, list[list[str]]] = _apply_exe_env(_build_dcc_pattern_groups())
 # Flat view (priority order), for callers that only need "every pattern".
 DCC_EXE_PATTERNS: dict[str, list[str]] = {
     key: [p for group in groups for p in group] for key, groups in DCC_EXE_PATTERN_GROUPS.items()

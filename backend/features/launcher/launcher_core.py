@@ -10,7 +10,9 @@ import subprocess
 from pathlib import Path
 
 from core import config
-from core.constants import DCC_EXE_PATTERN_GROUPS, DEFAULT_FRAME_END, DEFAULT_FRAME_START
+from core.constants import (
+    DCC_EXE_ENV, DCC_EXE_PATTERN_GROUPS, DEFAULT_FRAME_END, DEFAULT_FRAME_START,
+)
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -104,11 +106,15 @@ def list_dcc_candidates(dcc_key: str) -> list[str]:
     Sources: the Windows registry (Maya, Photoshop) then the glob patterns of
     DCC_EXE_PATTERN_GROUPS (all Program Files roots). Only existing files are kept.
     Order: priority group first (registry entries join the first group), then the
-    newest version inside a group.
+    newest version inside a group. FLUX_<DCC>_EXE naming an existing file is the only
+    candidate (registry and Epic launcher included).
     """
     internal = _FRONTEND_KEY_MAP.get(dcc_key)
     if not internal:
         return []
+    forced = _env_exe(internal)
+    if forced:
+        return [forced]
     seen: set[str] = set()
 
     def _collect(paths: list[str], into: list[str]) -> None:
@@ -234,7 +240,9 @@ def find_dcc_exe(dcc_key: str) -> str | None:
     candidates = list_dcc_candidates(dcc_key)
     if candidates:
         path = candidates[0]
-        config.set_dcc_exe(dcc_key, path)
+        # An env-forced exe is not persisted: it must stop applying with the variable.
+        if not _env_exe(internal):
+            config.set_dcc_exe(dcc_key, path)
         others = f" (autres versions : {', '.join(candidates[1:])})" if len(candidates) > 1 else ""
         log.info("Auto-found %s → %s%s", dcc_key, path, others)
         return path
@@ -281,6 +289,21 @@ def _valid_custom_exe(dcc_key: str) -> str | None:
         _warned_missing.add(custom)
         log.warning("Chemin configure introuvable pour %s : %s (detection automatique utilisee)",
                     dcc_key, custom)
+    return None
+
+
+def _env_exe(internal: str) -> str | None:
+    """The exe named by FLUX_<DCC>_EXE when set and existing; a missing file is logged
+    once and ignored, so the usual detection takes over."""
+    var = DCC_EXE_ENV.get(internal, "")
+    value = (os.environ.get(var) or "").strip().strip('"')
+    if not value:
+        return None
+    if os.path.isfile(value):
+        return os.path.normpath(value)
+    if f"{var}={value}" not in _warned_missing:
+        _warned_missing.add(f"{var}={value}")
+        log.warning("%s introuvable : %s (detection automatique utilisee)", var, value)
     return None
 
 
