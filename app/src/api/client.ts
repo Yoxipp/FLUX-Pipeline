@@ -1225,6 +1225,10 @@ export const api = {
       'GET', `/production/${encodeURIComponent(project)}/entity-folder?${qs}`)
   },
 
+  // Open the project's production.json in the system editor (409: not a file backend).
+  openProductionJson: (project: string) =>
+    apiCall<{ ok: boolean }>('POST', `/production/${encodeURIComponent(project)}/open-json`),
+
   // Move an entity folder into <project>/ARCHIVE/<timestamp>/ (never hard-delete).
   // The caller removes the logical entity from production.json after this resolves.
   archiveEntity: (project: string, relPath: string) =>

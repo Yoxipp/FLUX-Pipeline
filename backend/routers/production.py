@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import re
 from typing import Any
 
@@ -18,8 +19,10 @@ from pydantic import BaseModel
 from core import config
 from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
 from core.executors import HEAVY
+from core.json_repository import JsonFileRepository
 from core.logger import get_logger
-from core.paths import get_project_path
+from core.paths import get_project_path, get_project_production_path
+from core.repository_factory import get_repository
 from features.accounts.alias_views import alias_etag, resolve_production_doc
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
@@ -475,6 +478,35 @@ async def entity_folder(
         return prod_archive.inspect_folder(project_path, rel, count=count)
 
     return await loop.run_in_executor(None, _do)
+
+
+@router.post("/{project}/open-json")
+def open_production_json(project: str) -> dict:
+    """Open the project's production.json in the system editor. The path is
+    resolved here, never sent by the client."""
+    _ensure_project(project)
+    # Only the file backend keeps production metadata in that file: with SQLite or
+    # remote, a leftover production.json would be stale, so refuse instead.
+    if not isinstance(get_repository(), JsonFileRepository):
+        raise HTTPException(
+            status_code=409,
+            detail="Pas de fichier JSON à ouvrir : les données de production sont dans la base (SQLite ou serveur).",
+        )
+    path = get_project_production_path(project)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"production.json introuvable pour {project}")
+    opener = getattr(os, "startfile", None)  # Windows only
+    if opener is None:
+        raise HTTPException(status_code=409, detail="Ouverture du fichier disponible sous Windows uniquement.")
+    try:
+        opener(str(path))
+    except OSError as exc:
+        log.warning("Cannot open %s: %s", path, exc)
+        raise HTTPException(
+            status_code=409,
+            detail="Windows n'a pas pu ouvrir le fichier : associez un éditeur aux fichiers .json.",
+        )
+    return {"ok": True}
 
 
 @router.post("/{project}/archive")

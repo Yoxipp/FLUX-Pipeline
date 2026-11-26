@@ -2,7 +2,7 @@ import { useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Plus, Trash2, Upload, UserRound, X } from 'lucide-react'
+import { ArrowDown, Check, ChevronRight, FileJson, Flag, FolderOpen, Plus, Trash2, Upload, UserRound, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -15,6 +15,7 @@ import { expandFluxPath } from './util'
 import './tracking.css'
 import { viewportRect } from '../../components/shared/tooltipPosition'
 import { PRIORITIES, PRIORITY_LABEL, priorityOf } from './taskPriority'
+import { openProductionJson } from './openProductionJson'
 
 interface Props {
   project: string; state: ProductionState; setState: (patch: (prev: ProductionState) => ProductionState) => void
@@ -144,7 +145,8 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
             </Menu.Item>)}
           </Menu.SubContent></Menu.Portal></Menu.Sub>
         {!multiple && <><Menu.Item className="production-menu-item" onSelect={() => navigate('/publisher', { state: { prefill: taskPublisherPrefill(project, state, entity, task) } })}><Upload size={14} />Publish here</Menu.Item>
-        <Menu.Item className="production-menu-item" onSelect={() => void folder()}><FolderOpen size={14} />Folder manager</Menu.Item></>}
+        <Menu.Item className="production-menu-item" onSelect={() => void folder()}><FolderOpen size={14} />Folder manager</Menu.Item>
+        <Menu.Item className="production-menu-item" onSelect={() => void openProductionJson(project)}><FileJson size={14} />Ouvrir le JSON</Menu.Item></>}
         {(multiple ? targets.some(target => target.status) : status) && <><Menu.Separator className="production-menu-separator" /><Menu.Item className="production-menu-item production-menu-delete" onSelect={() => setRemoveOpen(true)}><Trash2 size={14} />{multiple ? 'Supprimer les badges' : 'Supprimer le badge'}</Menu.Item></>}
       </Menu.Content></Menu.Portal>
     </Menu.Root>
