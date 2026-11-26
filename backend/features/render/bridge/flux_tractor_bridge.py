@@ -7,7 +7,7 @@ stdout:  {"ok": true, "result": {...}}  or  {"ok": false, "error": "..."}.
 
 Must stay valid Python 2.7 AND 3 (no f-strings, no annotations).
 
-TO VERIFY AT SCHOOL (phase 0, docs/architecture/ESMA_ENV.md): every Tractor call
+TO VERIFY ON THE REAL FARM (phase 0, ADR 0015): every Tractor call
 is in the TRACTOR section below (query API names, job columns, tractor-spool
 output). Nothing here was run against a real engine yet.
 """

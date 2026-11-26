@@ -1,7 +1,7 @@
 # CONTEXT - `app/src/pages/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar). Projet > Artistes du pipe : renommer un autre artiste = Prenom / Nom (nom facultatif) + apercu de l'identifiant (`RenameFields`, `POST /settings/users/rename-preview`, `PUT /settings/users/rename-by-name`), lead ou sup (`rename_accounts`, ADR 0079) ; supprimer = sup.
 
@@ -158,7 +158,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 
 ## Editeur de Flows (`flow_editor/`, chantier Flows P0 2026-10-22)
 
-Specs : `docs/notes/prompts/flows_refonte/03_EDITEUR.md` (disposition, familles, ports, fichiers), ADR 0057. P0 = lecture seule.
+Specs : ADR 0057 et 0058 (disposition, familles, ports, fichiers). P0 = lecture seule.
 * `FlowEditor.tsx` : coque (route `/action-graph`, lien profond `?flow=<nom>`) : `TopBar` (choix du flow, badges, recherche,
   Cadrer, "Ancien editeur"), `ShelfBar` (onglet par famille), `NetworkPane` (@xyflow/react, Tab, F, Echap, MiniMap par famille),
   `ParamsPane` (node selectionne ou flow).

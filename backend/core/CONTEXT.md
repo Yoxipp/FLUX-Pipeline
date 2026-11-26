@@ -1,7 +1,7 @@
 # CONTEXT - `backend/core/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Socle : `config.py`, `paths.py` (FLUX_ROOT, mode frozen, `$FLUX`), `constants.py` (plages de ports DCC), `api_auth.py` (S1), `logger.py`, `dcc_instances.py`, `socket_manager.py`, frontiere metadonnees (`json_repository`, `sqlite_repository`, `remote_repository` squelette, `repository_factory` avec garde-fou SQLite hors OneDrive/reseau, `migrate_json_to_sqlite`, `export_sqlite_to_json`, `doc_keys` = cles logiques + wrapper SQLite/remote, ADR 0016), stockage (`local_storage`, `object_storage` squelette), `json_manager.py` (I/O atomiques bas niveau), `host_lock.py` (`HostLock` : un seul poste titulaire via un fichier JSON du partage, battement 20 s, TTL 60 s ; flows partages `flux_flows/hosts.py` et bot Discord d'un projet, ADR 0082).
 

@@ -1,7 +1,7 @@
 # CONTEXT - `app/src/components/shared/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC connectes), `Console` (logs `/logs`), `BackendBanner` (reconnexion), `ExportOptions` + `SoftwareSelector` (Publisher), `ActionForm` + `ParamWidget`, `closeGuard`, `ui.tsx`, `Logo`.
 

@@ -1,7 +1,7 @@
 # CONTEXT - `app/src/hooks/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Hooks de donnees : `useFlowsWs` (WS `/flows/ws` des Flows, modele `useDccStatus` : reconnexion 3 s, `onReconnect` pour relire le run), `useDccStatus`, `useActiveInstances`, `useBackendStatus`, `useActivity`, `useMentions`, `useFeeds`, `useCommentReadState`, `useProduction`, `useSettings`, `useFavorites`, `useEnabledDccs`.
 
