@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-FLUX is in active development. Only the latest release gets security fixes.
+FLUX is in active development. Fixes go into the latest release.
 
 ## Reporting a vulnerability
 
@@ -13,9 +13,6 @@ Report it privately through GitHub: on the repository page, open **Security > Re
 * what an attacker can do, and the FLUX version (Settings) where you saw it;
 * the steps to reproduce, or a proof of concept;
 * whether it needs local access, access to the shared workspace folder, or only the network.
-
-You will get an answer within 7 days. Once a fix is released, the report is made public with credit to you, unless
-you prefer to stay anonymous.
 
 ## Scope
 
