@@ -1,5 +1,6 @@
 // client.ts — HTTP client vers FastAPI Python backend (127.0.0.1:8765).
 
+import { toast } from 'sonner'
 import type {
   ActionFormResponse,
   CalendarItem,
@@ -124,6 +125,60 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
   const newEtag = response.headers.get('ETag') ?? undefined
   const data = (await response.json()) as T
   return { notModified: false, data, etag: newEtag }
+}
+
+// ── Production optimistic concurrency ───────────────────────────────────────────
+// The version travels with the loaded document under a symbol key: object spreads
+// ({ ...prev }) keep it, JSON.stringify never sends it, and a GET made elsewhere
+// cannot move the version of a copy that is still being edited.
+const REVISION = Symbol('productionRevision')
+
+interface ProductionRevision {
+  version: string
+  /** JSON of the document as last loaded / saved: tells a user edit from an echo save. */
+  synced: string
+  queue: Promise<unknown>
+}
+
+type TrackedProduction = ProductionState & { [REVISION]?: ProductionRevision }
+
+function trackProduction(production: ProductionState, version?: string): void {
+  if (!version) return
+  const revision: ProductionRevision = { version, synced: JSON.stringify(production), queue: Promise.resolve() }
+  ;(production as TrackedProduction)[REVISION] = revision
+}
+
+function saveProduction(project: string, production: ProductionState) {
+  const revision = (production as TrackedProduction)[REVISION]
+  const send = async () => {
+    const sent = JSON.stringify(production)
+    try {
+      const result = await apiCall<{ success: boolean; production_version?: string
+                                     synced?: Record<string, number>; locked_kept?: string[] }>(
+        'PUT', `/production/${encodeURIComponent(project)}`, { production, base_version: revision?.version })
+      if (revision && result.production_version) {
+        revision.version = result.production_version
+        revision.synced = sent
+      }
+      return result
+    } catch (error) {
+      if (revision && (error as { status?: number }).status === 409) {
+        // No message for an unchanged copy (the save that follows every load).
+        if (sent !== revision.synced) {
+          toast.warning('Production modifiée ailleurs (Discord ou autre fenêtre). Vos derniers changements '
+            + 'ne sont pas enregistrés : la page est rechargée, refaites-les.',
+            { id: 'production-stale', duration: 15000 })
+        }
+        window.dispatchEvent(new Event('flux:refresh'))
+      }
+      throw error
+    }
+  }
+  if (!revision) return send()
+  // One save at a time per loaded copy, else our own previous save looks like a conflict.
+  const next = revision.queue.then(send, send)
+  revision.queue = next.catch(() => {})
+  return next
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -1127,15 +1182,18 @@ export const api = {
   getProduction: (project: string) =>
     apiCall<ProductionPayload>('GET', `/production/${encodeURIComponent(project)}`),
   // Conditional variant used by useProduction: 304 when the server store is unchanged.
-  getProductionConditional: (project: string, etag?: string) =>
-    apiGetConditional<ProductionPayload>(`/production/${encodeURIComponent(project)}`, etag),
+  getProductionConditional: async (project: string, etag?: string) => {
+    const result = await apiGetConditional<ProductionPayload & { production_version?: string }>(
+      `/production/${encodeURIComponent(project)}`, etag)
+    if (result.data) trackProduction(result.data.production, result.data.production_version)
+    return result
+  },
 
   // Saving production.json also mirrors the planning to disk (create-only) on the
   // backend — there is no separate "materialize" call any more; structure is kept
   // in sync automatically in both directions.
-  setProduction: (project: string, production: ProductionState) =>
-    apiCall<{ success: boolean; synced?: Record<string, number>; locked_kept?: string[] }>(
-      'PUT', `/production/${encodeURIComponent(project)}`, { production }),
+  // Refused with 409 when the store moved since this document was loaded.
+  setProduction: (project: string, production: ProductionState) => saveProduction(project, production),
 
   // Fan out a "comment" activity event so favorited-task subscribers see it in
   // Activity. Persistence of the comment itself is already in production.json
