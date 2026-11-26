@@ -63,6 +63,8 @@ backend/resources/shelves/houdini/backup/
 # FLUX-owned skills (USD knowledge, VFX USD Survival Guide adapted, Apache-2.0) are versioned.
 !.local/skills/flux-usd-pipeline/
 !.local/skills/usd-*/
+!.local/skills/flux-doc-cleanup/
+!.local/skills/flux-integrate-branch/
 .local/worktrees/
 state/
 
