@@ -80,7 +80,7 @@ class HandleTests(unittest.TestCase):
             mock.patch("features.production.production_store.load_production", side_effect=lambda p: copy.deepcopy(self.prod)),
             mock.patch("features.production.production_store.save_production",
                        side_effect=lambda p, d: self.saved.append(d) or True),
-            mock.patch("features.roles.project_roles.role_of", return_value="artist"),
+            mock.patch("features.roles.project_roles.role_of", return_value="lead"),
             mock.patch("utils.user_utils.list_users", return_value=["LEA", "TOM", "MAX"]),
             mock.patch("features.notify.hooks.on_production"),
         ]
