@@ -12,7 +12,8 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "node scripts/build.cjs",
     "dist": "npm run build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:js": "node --test \"scripts/tests/*.test.cjs\""
   },
   "keywords": [],
   "author": "FLUX Pipeline",
