@@ -1,10 +1,10 @@
-// DiskUsage — heaviest files under DOSSIER_PROJETS (or a single project).
-// A simple readable table, on-demand refresh. No fancy visualisation:
-// see which files weigh the most on the drive.
+// DiskUsage: heaviest files under DOSSIER_PROJETS (or a single project).
+// A simple readable table read from the pipeline index (ADR 0093): opening the
+// page never walks the disk, "Recharger" does. No fancy visualisation.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { RotateCcw, FolderOpen } from 'lucide-react'
-import { api } from '../api/client'
+import { apiCall } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
 import { toast } from 'sonner'
@@ -28,32 +28,46 @@ function humanDate(t: number): string {
 
 type Row = { rel: string; project: string; size: number; mtime: number }
 type ProjRow = { project: string; size: number; file_count: number }
+type Usage = {
+  root: string; total_bytes: number; file_count: number
+  top_files: Row[]; by_project: ProjRow[]
+  scanned_at: number | null; scanned_by: string; not_indexed: string[]; errors: string[]
+}
+
+const scanDate = (t: number): string =>
+  new Date(t * 1000).toLocaleString('fr', { dateStyle: 'short', timeStyle: 'short' })
 
 export function DiskUsage() {
   const { project: activeProject } = useProject()
   const [scope, setScope] = useState<'all' | 'active'>('all')
   const [limit, setLimit] = useState(200)
-  const [rows, setRows] = useState<Row[]>([])
-  const [byProject, setByProject] = useState<ProjRow[]>([])
-  const [total, setTotal] = useState(0)
-  const [fileCount, setFileCount] = useState(0)
-  const [root, setRoot] = useState('')
+  const [data, setData] = useState<Usage | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const request = useRef(0)   // only the latest request may update the page
 
-  const load = useCallback(() => {
+  // rescan=false reads the index; rescan=true walks the disk and rewrites it.
+  const load = useCallback((rescan: boolean) => {
+    const id = ++request.current
     setBusy(true); setError('')
     const p = scope === 'active' ? (activeProject || undefined) : undefined
-    api.getDiskUsage(p, limit)
-      .then(r => {
-        setRows(r.top_files); setByProject(r.by_project)
-        setTotal(r.total_bytes); setFileCount(r.file_count); setRoot(r.root)
-      })
-      .catch(e => setError(errMsg(e)))
-      .finally(() => setBusy(false))
+    const query = `?limit=${limit}${p ? `&project=${encodeURIComponent(p)}` : ''}`
+    const call = rescan
+      ? apiCall<Usage>('POST', `/system/disk-usage/refresh${query}`)
+      : apiCall<Usage>('GET', `/system/disk-usage${query}`)
+    call
+      .then(r => { if (id === request.current) setData(r) })
+      .catch(e => { if (id === request.current) setError(errMsg(e)) })
+      .finally(() => { if (id === request.current) setBusy(false) })
   }, [scope, activeProject, limit])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(false) }, [load])
+
+  const rows = data?.top_files ?? []
+  const byProject = data?.by_project ?? []
+  const total = data?.total_bytes ?? 0
+  const fileCount = data?.file_count ?? 0
+  const notIndexed = data?.not_indexed ?? []
 
   const copyRel = async (row: Row) => {
     try {
@@ -92,9 +106,9 @@ export function DiskUsage() {
           <option value="500">Top 500</option>
           <option value="1000">Top 1000</option>
         </select>
-        <Btn onClick={load} disabled={busy}>
+        <Btn onClick={() => load(true)} disabled={busy}>
           <RotateCcw size={12} strokeWidth={2} />
-          {busy ? 'Analyse…' : 'Rafraîchir'}
+          {busy ? 'Chargement…' : 'Recharger'}
         </Btn>
       </div>
 
@@ -106,10 +120,24 @@ export function DiskUsage() {
         </div>
       )}
 
+      {data && data.errors.length > 0 && (
+        <div style={{ marginBottom: 12, color: 'var(--err)', fontSize: 11 }}>
+          {data.errors.map(e => <div key={e}>{e}</div>)}
+        </div>
+      )}
+
+      {notIndexed.length > 0 && (
+        <div style={{ marginBottom: 12, color: 'var(--ink-2)', fontSize: 11 }}>
+          Pas encore scanné : {notIndexed.join(', ')}. Cliquer sur Recharger.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Stat label="Racine" value={root || '—'} mono />
+        <Stat label="Racine" value={data?.root || '-'} mono />
         <Stat label="Fichiers scannés" value={fileCount.toLocaleString('fr')} />
         <Stat label="Total" value={humanSize(total)} />
+        <Stat label={byProject.length > 1 ? 'Scan le plus ancien' : 'Dernier scan'}
+          value={data?.scanned_at ? `${scanDate(data.scanned_at)} par ${data.scanned_by}` : 'jamais'} />
       </div>
 
       {byProject.length > 0 && (
@@ -159,7 +187,7 @@ export function DiskUsage() {
         </div>
         {rows.length === 0
           ? <div style={{ padding: 14, fontSize: 11, color: 'var(--ink-4)' }}>
-              {busy ? 'Analyse en cours…' : 'Aucun fichier trouvé.'}
+              {busy ? 'Chargement…' : 'Aucun fichier trouvé.'}
             </div>
           : rows.map((row, i) => (
               <div key={`${row.rel}-${i}`}
