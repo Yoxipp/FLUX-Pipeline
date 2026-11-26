@@ -2,6 +2,7 @@
 #
 # A DM about ONE task / retake or ONE calendar proposal carries Discord message components:
 #   task, retake      Valider (task status APPROVED), Refuser (RTK), menu "Donner a" (assignee)
+#                     Valider / Refuser: project lead or supervisor only
 #   calendar proposal Valider (accept), Refuser (decline), menu "Decaler" (+1, +2, +7, +14 days)
 # No new state: the existing Production statuses (tracking STATUS_TOKENS) and calendar answers.
 # A digest of several events, a mention and a publish get no buttons.
@@ -176,8 +177,11 @@ def _task(project: str, user: str, op: str, ent_id: str, key: str, value: str) -
     from features.production import production_store
     from features.roles import project_roles
     from utils.user_utils import list_users
-    if project_roles.role_of(project, user) is None:
+    role = project_roles.role_of(project, user)
+    if role is None:
         raise PermissionError("compte sans role dans ce projet")
+    if op in TASK_STATUS and role not in (project_roles.LEAD, project_roles.SUPERVISOR):
+        raise PermissionError("reserve au lead ou au superviseur du projet")
     production = production_store.load_production(project)
     previous = copy.deepcopy(production)
     entity, label = _entity(production, ent_id)
