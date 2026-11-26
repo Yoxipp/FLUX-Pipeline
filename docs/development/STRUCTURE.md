@@ -11,7 +11,7 @@ Flux_Pipeline_dev/
 ├── README.md                 point d'entree humain (quoi, lancer, carte du depot, ou lire quoi)
 ├── NOTES.md                 point d'entree des sessions de dev (quoi lire, regles)
 ├── CONTRIBUTING.md           regles de contribution
-├── LICENSE, NOTICE           Apache-2.0
+├── LICENSE, NOTICE           MPL-2.0
 ├── package.py                package Rez de FLUX
 ├── FLUX_DEV.bat              lancement dev (double-clic)
 ├── INSTALL_DEV.bat           installation des dependances de dev

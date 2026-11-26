@@ -153,7 +153,7 @@ th { background:var(--soft); color:#fff; }
   <div class="sub">Manuel de FLUX</div>
   <p>Le pipeline 3D / VFX des équipes de studio ou d'école : projets, nommage, publish, import dans les logiciels, USD, production, rendu. Partie A : utilisation. Partie B : fonctionnement interne.</p>
   <div class="go"><a class="pill-link" href="#sommaire">Sommaire</a><a class="pill-link" href="#partie-a">A. Utilisation</a><a class="pill-link" href="#partie-b">B. Technique</a><a class="pill-link" href="#a21">Index des fonctions</a></div>
-  <div class="meta">Version du document : 1er octobre 2026 · livré avec FLUX, copié dans <code>FLUX_UPDATE</code> à chaque lancement · Licence Apache-2.0</div>
+  <div class="meta">Version du document : 1er octobre 2026 · livré avec FLUX, copié dans <code>FLUX_UPDATE</code> à chaque lancement · Licence MPL-2.0</div>
 </section>
 
 <!-- ============ SOMMAIRE ============ -->
@@ -689,7 +689,7 @@ th { background:var(--soft); color:#fff; }
 <tr><td>Artiste d'abord</td><td>App desktop + shelves / menus dans chaque DCC, jamais de ligne de commande.</td></tr>
 <tr><td>Local-first</td><td>Fonctionne sur un poste seul, dossier projet local, OneDrive ou serveur du studio.</td></tr>
 <tr><td>Zéro token de licence (ADR 0007)</td><td>Aucune étape ne consomme une licence DCC : pas d'<code>imaketx</code>, pas de Houdini pour le proxy. OpenImageIO, pxr pip, fast-simplification.</td></tr>
-<tr><td>Open source permissif</td><td>Apache-2.0, dépendances MIT / BSD / Apache, pas de GPL liée (pas de pymeshlab).</td></tr>
+<tr><td>Open source, copyleft faible</td><td>MPL-2.0 (ADR 0095), dépendances MIT / BSD / Apache, pas de GPL liée (pas de pymeshlab).</td></tr>
 <tr><td>Octets hors API (ADR 0005)</td><td>Les fichiers lourds passent par le filesystem, jamais par HTTP.</td></tr>
 <tr><td>YAML = vérité (ADR 0008)</td><td>Les actions sont décrites en YAML, le graphe n'en est qu'une vue / un éditeur.</td></tr>
 <tr><td>Versions immuables (ADR 0009 / 0017)</td><td><code>vNNN</code> jamais écrasé, <code>LAST</code> dérivé.</td></tr>
@@ -1029,7 +1029,8 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <tr><td>0004 / 0016</td><td>Clés logiques de documents</td></tr>
 <tr><td>0005</td><td>Octets jamais par l'API</td></tr>
 <tr><td>0006</td><td>Fichier <code>project.json</code></td></tr>
-<tr><td>0007</td><td>Open source Apache, zéro token</td></tr>
+<tr><td>0007</td><td>Dépendances permissives, zéro token</td></tr>
+<tr><td>0095</td><td>Licence MPL-2.0</td></tr>
 <tr><td>0008</td><td>Actions YAML source de vérité</td></tr>
 <tr><td>0009 / 0017</td><td>Versions immuables, LAST (copie ou link)</td></tr>
 <tr><td>0010 → 0025</td><td>Chemins USD portables, résolution en paliers</td></tr>
