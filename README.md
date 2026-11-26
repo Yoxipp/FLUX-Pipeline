@@ -20,7 +20,34 @@ FLUX is built by students. One of its goals is to run in production at ESMA. It 
 plain folder (local disk, OneDrive or a file server), FLUX keeps it organised, and no step of the pipeline consumes a
 DCC license.
 
-<!-- Screenshots: docs/images/*.png -->
+<p align="center">
+  <img src="docs/images/production_tracking.png" alt="Production tracking: shots by department with statuses" width="900">
+</p>
+
+<table>
+  <tr>
+    <td><img src="docs/images/publisher.png" alt="Publisher: versioned publish from Maya"></td>
+    <td><img src="docs/images/file_browser.png" alt="Project browser"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Publish from your DCC: <code>vNNN</code> + <code>LAST</code>, named for you</sub></td>
+    <td align="center"><sub>Project browser with token search</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/home.png" alt="Home: your tasks and retakes"></td>
+    <td><img src="docs/images/team_board.png" alt="Team board: notes, cards, storyboard and planning"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Home: your tasks and retakes</sub></td>
+    <td align="center"><sub>Shared team board per project</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/flows_editor.png" alt="Flows: node editor for pipeline automation"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><sub>Flows: automate pipeline tasks with nodes</sub></td>
+  </tr>
+</table>
 
 ## What FLUX does
 
