@@ -15,6 +15,7 @@ import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
 import { useI18n } from '../../i18n'
 import { trackingLocked, type TrackingEntity } from './tracking'
 import { viewportRect } from '../../components/shared/tooltipPosition'
+import { openProductionJson } from './openProductionJson'
 import { shotFollowKey, useFavorites } from '../../hooks/useFavorites'
 
 export function EntityContextMenu({ project, state, entity, setState, setSelection, onEdit, publishesByTask, onOpenVersion }: {
@@ -83,7 +84,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
     return versions.length ? [{ task, versions: [...new Set(versions)] }] : []
   })
   return <>
-    <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title={isShot ? `Clic droit : Edit, ${followed ? 'Ne plus suivre' : 'Suivre'}, Calendar, Lock, Nouveau dossier, Delete` : 'Clic droit : Edit, Nouveau dossier, Delete'}
+    <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title={isShot ? `Clic droit : Edit, ${followed ? 'Ne plus suivre' : 'Suivre'}, Calendar, Lock, Nouveau dossier, Ouvrir le JSON, Delete` : 'Clic droit : Edit, Nouveau dossier, Ouvrir le JSON, Delete'}
       onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = viewportRect(e.currentTarget); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>
       <strong>{entity.name}{locked && <LockKeyhole size={11} />}{followed && <Eye size={11} aria-label="Shot suivi" />}</strong>
@@ -111,6 +112,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
         {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => navigate(`/calendar?${new URLSearchParams({ seq: seq?.name ?? '', shot: entity.name, project })}`)}>Calendar</Dropdown.Item>}
         {isShot && <Dropdown.Item disabled={busy || inherited} className="production-menu-item" onSelect={() => { if (locked) setUnlock(true); else void lock(true) }}>{locked ? 'Unlock' : 'Lock'}{inherited ? ` · ${seq?.name}` : ''}</Dropdown.Item>}
         <Dropdown.Item disabled={locked} className="production-menu-item" onSelect={() => setNewDir('')}>Nouveau dossier</Dropdown.Item>
+        <Dropdown.Item className="production-menu-item" onSelect={() => void openProductionJson(project)}>Ouvrir le JSON</Dropdown.Item>
         <Dropdown.Item disabled={locked} className="production-menu-item production-menu-delete" onSelect={() => void remove()}>Delete</Dropdown.Item>
       </Dropdown.Content></Dropdown.Portal>
     </Dropdown.Root>
