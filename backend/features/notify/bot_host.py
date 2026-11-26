@@ -26,6 +26,7 @@ log = get_logger(__name__)
 FLAG = "--discord-bot"
 SHORTCUT_NAME = "FLUX bot Discord.lnk"
 REFRESH_S = 60.0
+PID_SLACK_S = 5.0                          # small clock steps between process start and lock write
 NO_WINDOW = 0x08000000                     # CREATE_NO_WINDOW
 STARTUP_OVERRIDE: Path | None = None       # tests
 
@@ -62,6 +63,26 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def pid_started(pid: int) -> float | None:
+    """Creation time (epoch) of process *pid*, None when unknown (non Windows, no access)."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)       # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        times = [wintypes.FILETIME() for _ in range(4)]     # creation, exit, kernel, user
+        if not kernel32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        ticks = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        return ticks / 1e7 - 11644473600                    # 100 ns since 1601 -> Unix
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def holder() -> dict | None:
     """{pid, mode, at} of the live process holding the lock, None when free."""
     try:
@@ -74,7 +95,18 @@ def holder() -> dict | None:
         pid = int(data.get("pid") or 0)
     except (TypeError, ValueError):
         return None
-    return data if pid_alive(pid) else None
+    if not pid_alive(pid):
+        return None
+    # Windows reuses PIDs: a process born after the lock was written is not its owner. Without
+    # this, stop_headless could terminate a stranger (a local render) after a crash or reboot.
+    started = pid_started(pid)
+    try:
+        written = float(data.get("at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if started is not None and started > written + PID_SLACK_S:
+        return None
+    return data
 
 
 def claim() -> bool:
