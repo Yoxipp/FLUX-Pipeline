@@ -1,4 +1,4 @@
-# docs/flows/03_INDEX_NODES.md is the doc shown by the (i) button of a node in the
+# docs/user/flows/03_INDEX_NODES.md is the doc shown by the (i) button of a node in the
 # Flows editor (app/src/pages/flow_editor/nodeDoc.tsx). Each FLUX node type must have
 # exactly one section "### <type> : <Label>" with a description and an example, and
 # no section may name a type the registry does not know (renamed or removed node).
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from flux_flows.nodes import registry
 
-DOC = Path(__file__).resolve().parents[3] / "docs" / "flows" / "03_INDEX_NODES.md"
+DOC = Path(__file__).resolve().parents[3] / "docs" / "user" / "flows" / "03_INDEX_NODES.md"
 # Same heading as NODE_HEADING in nodeDoc.tsx.
 HEADING = re.compile(r"^###\s+([a-z][a-z0-9_]*\.[a-z0-9_]+)\s*:\s*(\S+)")
 
@@ -40,7 +40,7 @@ class NodesDoc(unittest.TestCase):
 
     def test_every_flux_node_has_a_section(self) -> None:
         missing = sorted(set(self.specs) - set(self.sections))
-        self.assertEqual(missing, [], "add a section to docs/flows/03_INDEX_NODES.md")
+        self.assertEqual(missing, [], "add a section to docs/user/flows/03_INDEX_NODES.md")
 
     def test_no_section_for_an_unknown_type(self) -> None:
         unknown = sorted(set(self.sections) - set(self.specs))

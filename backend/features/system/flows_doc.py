@@ -1,14 +1,14 @@
-"""Build the Flows manual (resources/manual/FLUX_Flows.html) from docs/flows/*.md.
+"""Build the Flows manual (resources/manual/FLUX_Flows.html) from docs/user/flows/*.md.
 
 The Markdown files are the single source: the editor's (i) button reads
 03_INDEX_NODES.md, Settings > Doc > Flows shows this HTML. The page reuses the
 <style> of FLUX_Manuel.html so both manuals look the same.
 
-Dev command (from backend/), after any change in docs/flows/:
+Dev command (from backend/), after any change in docs/user/flows/:
     python -m features.system.flows_doc
 tests/system/test_flows_doc.py fails while the HTML is out of date.
 
-The converter only knows what docs/flows uses: #, ##, ### headings, paragraphs,
+The converter only knows what docs/user/flows uses: #, ##, ### headings, paragraphs,
 "* " and "1. " lists (one nested level), pipe tables, `code`, **bold**, [links];
 a line starting with "<!--" is a note for the doc writers and is skipped.
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 BACKEND = Path(__file__).resolve().parents[2]
-DOCS_DIR = BACKEND.parent / "docs" / "flows"
+DOCS_DIR = BACKEND.parent / "docs" / "user" / "flows"
 MANUAL_DIR = BACKEND / "resources" / "manual"
 OUT = MANUAL_DIR / "FLUX_Flows.html"
 TITLE = "FLUX Flows"
@@ -275,7 +275,7 @@ def build_html(docs_dir: Path = DOCS_DIR, manual_dir: Path = MANUAL_DIR) -> str:
         '<div class="box"><b>Notify</b>previent l\'equipe</div></div>\n'
         '  <div class="go"><a class="pill-link" href="#global">1. Global</a><a class="pill-link" href="#dispo">2. Dispo et a venir</a>'
         '<a class="pill-link" href="#nodes">3. Index des nodes</a></div>\n'
-        '  <div class="meta">Genere depuis <code>docs/flows/</code> · le bouton (i) d\'un node dans l\'editeur affiche la meme '
+        '  <div class="meta">Genere depuis <code>docs/user/flows/</code> · le bouton (i) d\'un node dans l\'editeur affiche la meme '
         "description · Licence Apache-2.0</div>\n</section>")
     return (
         '<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n'

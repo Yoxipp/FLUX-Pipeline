@@ -9,7 +9,7 @@
 // (i) opens the info card (the maintainer R1 2026-10-24): it stays open until a click outside or Escape;
 // values first (inputs, outputs: value of the last run or dry run, else the set value, else
 // "no value yet"), coloured by port type, family and run state; then the node's section of
-// docs/flows/03_INDEX_NODES.md (nodeDoc.tsx, else the registry doc) folded in "Hints".
+// docs/user/flows/03_INDEX_NODES.md (nodeDoc.tsx, else the registry doc) folded in "Hints".
 // P6a: a DCC node shipped as a locked subflow shows a lock (shipped) or a team tag (its team
 // copy); double click enters it (NetworkPane), like a Houdini HDA (03_EDITEUR §8).
 

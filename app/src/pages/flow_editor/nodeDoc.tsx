@@ -1,11 +1,11 @@
-// nodeDoc.tsx — the (i) doc of a node, read from docs/flows/03_INDEX_NODES.md (bundled by
+// nodeDoc.tsx — the (i) doc of a node, read from docs/user/flows/03_INDEX_NODES.md (bundled by
 // Vite `?raw`, so the installed app needs no file). One section per node: a heading
-// "### <type> : <Label>" up to the next ## / ### heading (rules in docs/flows/README.md,
+// "### <type> : <Label>" up to the next ## / ### heading (rules in docs/user/flows/README.md,
 // checked by backend/tests/test_flux_flows/test_nodes_doc.py). Plain text only: paragraphs,
 // "* " bullets, `code` and **bold**.
 
 import { Fragment, type ReactNode } from 'react'
-import indexMd from '../../../../docs/flows/03_INDEX_NODES.md?raw'
+import indexMd from '../../../../docs/user/flows/03_INDEX_NODES.md?raw'
 
 const NODE_HEADING = /^###\s+([a-z][a-z0-9_]*\.[a-z0-9_]+)\s*:/
 

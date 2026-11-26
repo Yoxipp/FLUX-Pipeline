@@ -1,7 +1,7 @@
 """Ship the FLUX manual (HTML) into <FLUX_ROOT>/FLUX_DOC so every artist finds it there.
 
 Two documents: the FLUX manual (FLUX_Manuel.html, hand written) and the Flows manual
-(FLUX_Flows.html, built from docs/flows/ by features/system/flows_doc.py). Settings > Doc
+(FLUX_Flows.html, built from docs/user/flows/ by features/system/flows_doc.py). Settings > Doc
 shows one tab per document.
 
 ADR 0049: the manual used to land in FLUX_UPDATE (next to the installers). It now lives

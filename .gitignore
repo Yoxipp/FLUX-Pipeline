@@ -31,6 +31,8 @@ node_modules/
 # Flux runtime — never commit these (generated at launch)
 config.json
 USER/
+# Windows git is case-insensitive: USER/ would also hide docs/user/
+!docs/user/
 CONFIG/
 DOSSIER_PROJETS/
 FLUX_UPDATE/*.exe
