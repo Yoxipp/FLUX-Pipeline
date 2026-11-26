@@ -14,6 +14,10 @@ Rule: a file older than N days (advanced setting ``houdini_backup_keep_days``, d
 Deletion is final (no undo, these are copies): ``scan`` lists, the user (or a supervisor
 from the 13h / 18h panel) validates, ``apply`` deletes the validated ids that a fresh
 scan still lists and writes a journal in ``<project>/.flux_cleanup/houdini_backups/``.
+
+``scan`` finds the task folders in the pipeline index when there is one (ADR 0093),
+else by walking the project; the files themselves are always listed live. ``apply``
+deletes, so it never reads the index: it walks.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from pathlib import Path
 
 from core.logger import get_logger
 from features.houdini_work import autosave, work_store
+from features.system import pipeline_index
 
 log = get_logger(__name__)
 
@@ -72,8 +77,30 @@ def backup_scene(path: Path, in_backup_dir: bool) -> str | None:
     return stem if in_backup_dir else None
 
 
-def _task_dirs(project: Path):
+def _indexed_task_dirs(project: Path, dirs: list[str]):
+    """Task folders among the index *dirs* that still exist, same rules as the walk."""
+    marker = [part.lower() for part in work_store.WORK_SUBDIR[:2]]
+    for rel in dirs:
+        parts = rel.split("/")
+        if len(parts) < 3 or any(p in ("", ".", "..") or "\\" in p or ":" in p for p in parts):
+            continue                                     # never leave the project
+        lower = [p.lower() for p in parts]
+        first = next((i for i in range(len(parts) - 1) if lower[i:i + 2] == marker), None)
+        if first != len(parts) - 3:
+            continue
+        if any(p in _SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
+            continue
+        task = project.joinpath(*parts)
+        if task.is_dir():
+            yield task
+
+
+def _task_dirs(project: Path, use_index: bool):
     """FLUX Work task folders of the project (``.../work/houdini/<TASK>``)."""
+    index = pipeline_index.load(project) if use_index else None
+    if index is not None:
+        yield from _indexed_task_dirs(project, index["dirs"])
+        return
     for dirpath, dirnames, _files in os.walk(project):
         here = Path(dirpath)
         if here.name.lower() == work_store.WORK_SUBDIR[1] and here.parent.name.lower() == work_store.WORK_SUBDIR[0]:
@@ -92,10 +119,10 @@ def _stat(path: Path) -> tuple[float, int] | None:
     return st.st_mtime, st.st_size
 
 
-def _project_candidates(project: Path) -> dict[tuple[str, str], list[tuple[str, Path]]]:
+def _project_candidates(project: Path, use_index: bool) -> dict[tuple[str, str], list[tuple[str, Path]]]:
     """(group, scene) -> [(id, path)] of the Houdini backups in the work folders."""
     groups: dict[tuple[str, str], list[tuple[str, Path]]] = {}
-    for task in _task_dirs(project):
+    for task in _task_dirs(project, use_index):
         places = [(task, False), (task / BACKUP_SUBDIR, True)]
         for folder, in_backup in places:
             if not folder.is_dir():
@@ -130,12 +157,13 @@ def _autosave_candidates(project_name: str, root: Path) -> dict[tuple[str, str],
     return groups
 
 
-def _plan(project: Path, project_name: str, days: int, now: float, root: Path) -> tuple[list[dict], int]:
+def _plan(project: Path, project_name: str, days: int, now: float, root: Path,
+          use_index: bool) -> tuple[list[dict], int]:
     """Files to delete (oldest first) and the number of backups kept."""
     items: list[dict] = []
     kept = 0
     limit = now - days * _DAY_S
-    sources = [("projet", _project_candidates(project)), ("autosave", _autosave_candidates(project_name, root))]
+    sources = [("projet", _project_candidates(project, use_index)), ("autosave", _autosave_candidates(project_name, root))]
     for where, groups in sources:
         for (_group, scene), files in groups.items():
             stats = [(fid, path, _stat(path)) for fid, path in files]
@@ -161,14 +189,14 @@ def _resolve(project: Path, root: Path, fid: str) -> Path:
 
 
 def scan(project_path: str | Path, project_name: str, *, days: int | None = None,
-         now: float | None = None, root: str | Path | None = None) -> dict:
+         now: float | None = None, root: str | Path | None = None, use_index: bool = True) -> dict:
     """What the cleaner would delete in the project and this machine's autosaves."""
     days = keep_days() if days is None else days
     if days <= 0:
         return {"enabled": False, "days": 0, "items": [], "kept": 0, "total_size": 0}
     project = Path(project_path)
     root_p = Path(root) if root is not None else autosave.autosave_root()
-    items, kept = _plan(project, project_name, days, time.time() if now is None else now, root_p)
+    items, kept = _plan(project, project_name, days, time.time() if now is None else now, root_p, use_index)
     return {"enabled": True, "days": days, "items": items, "kept": kept,
             "total_size": sum(i["size"] for i in items)}
 
@@ -178,7 +206,7 @@ def apply(project_path: str | Path, project_name: str, ids: list[str], *, days: 
     """Delete the picked ids that a fresh scan still lists (final); write the journal."""
     project = Path(project_path)
     root_p = Path(root) if root is not None else autosave.autosave_root()
-    fresh = scan(project, project_name, days=days, now=now, root=root_p)
+    fresh = scan(project, project_name, days=days, now=now, root=root_p, use_index=False)
     allowed = {i["id"]: i for i in fresh["items"]}
     deleted: list[dict] = []
     errors: list[str] = []

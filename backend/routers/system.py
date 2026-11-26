@@ -8,6 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
+from core import config
 from core.logger import get_logger
 from core.paths import get_flux_root, get_projects_dir
 
@@ -17,12 +18,27 @@ router = APIRouter()
 
 @router.get("/disk-usage")
 async def disk_usage(project: str = "", limit: int = 200) -> dict:
-    """Heaviest files under DOSSIER_PROJETS (or one project). Simple, on-demand."""
-    if limit <= 0 or limit > 2000:
-        raise HTTPException(status_code=400, detail="limit must be in [1, 2000]")
+    """Heaviest files under DOSSIER_PROJETS (or one project), from the pipeline
+    index: no tree walk (ADR 0093)."""
+    _check_limit(limit)
     from features.system.disk_usage import scan
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: scan(project or None, limit))
+
+
+@router.post("/disk-usage/refresh")
+async def refresh_disk_usage(project: str = "", limit: int = 200) -> dict:
+    """"Recharger": walk the projects in scope and rewrite their pipeline index."""
+    _check_limit(limit)
+    from features.system.disk_usage import refresh
+    author = config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: refresh(project or None, limit, author=author))
+
+
+def _check_limit(limit: int) -> None:
+    if limit <= 0 or limit > 2000:
+        raise HTTPException(status_code=400, detail="limit must be in [1, 2000]")
 
 
 @router.get("/flux-root")

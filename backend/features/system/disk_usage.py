@@ -1,88 +1,75 @@
-# disk_usage.py — walk DOSSIER_PROJETS and list the heaviest files.
+# disk_usage.py - heaviest files under DOSSIER_PROJETS, read from the pipeline index.
 #
-# A simple disk manager: scan the workspace, size every file, return the
-# heaviest N and the total per project. No caching, no daemon — a plain
-# rglob over the tree; on OneDrive / network shares the walk is slower
-# but still bounded (the projects dir is capped by convention).
+# scan() only reads the per-project index (features/system/pipeline_index.py,
+# ADR 0093): it never walks the tree. refresh() walks and rewrites the indexes.
+# Display only: nothing here may decide a write.
 
 from __future__ import annotations
 
-import os
+import heapq
 from pathlib import Path
 
 from core.logger import get_logger
 from core.paths import get_projects_dir
+from features.system import pipeline_index
 
 log = get_logger(__name__)
 
 
-def _iter_files(root: Path):
-    """Yield every regular file under *root*, best-effort (skips unreadable dirs)."""
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
-        for name in filenames:
-            full = Path(dirpath) / name
-            try:
-                st = full.stat()
-            except OSError:
-                continue
-            yield full, st
+def _project_dirs(project: str | None) -> list[Path]:
+    """Project folders in scope. A name with a path in it is refused (we write there)."""
+    root = get_projects_dir()
+    if project:
+        if project in (".", "..") or Path(project).name != project:
+            return []
+        folder = root / project
+        return [folder] if folder.is_dir() else []
+    if not root.is_dir():
+        return []
+    return sorted(p for p in root.iterdir() if p.is_dir())
+
+
+def _view(project: str | None, limit: int, indexes: dict[str, dict | None]) -> dict:
+    """Disk page payload from {project name: index or None}."""
+    root = get_projects_dir()
+    present = {name: idx for name, idx in indexes.items() if idx is not None}
+    files = ((size, f"{name}/{rel}", name, mtime)
+             for name, idx in present.items() for rel, size, mtime in idx["files"])
+    top = heapq.nlargest(limit, files, key=lambda f: f[0])
+    by_project = [{"project": name, "size": sum(f[1] for f in idx["files"]), "file_count": len(idx["files"])}
+                  for name, idx in present.items()]
+    by_project.sort(key=lambda p: p["size"], reverse=True)
+    # Several projects: show the oldest scan, the one that limits how fresh the page is.
+    oldest = min(present.values(), key=lambda i: i["scanned_at"], default=None)
+    return {
+        "root":        str(root / project if project else root),
+        "total_bytes": sum(p["size"] for p in by_project),
+        "file_count":  sum(p["file_count"] for p in by_project),
+        "top_files":   [{"rel": r, "project": pr, "size": s, "mtime": m} for (s, r, pr, m) in top],
+        "by_project":  [] if project else by_project,
+        "scanned_at":  oldest["scanned_at"] if oldest else None,
+        "scanned_by":  oldest["scanned_by"] if oldest else "",
+        "not_indexed": [name for name, idx in indexes.items() if idx is None],
+        "errors":      [],
+    }
 
 
 def scan(project: str | None = None, limit: int = 200) -> dict:
-    """Return heaviest files under DOSSIER_PROJETS (or one project).
+    """Heaviest files of DOSSIER_PROJETS (or one project) as of the last refresh."""
+    indexes = {p.name: pipeline_index.load(p) for p in _project_dirs(project)}
+    return _view(project, limit, indexes)
 
-    {
-      "root":       str,            # scanned root
-      "total_bytes":int,            # sum of all files scanned
-      "file_count": int,
-      "top_files":  [{"rel", "project", "size", "mtime"}...],  # sorted desc, up to *limit*
-      "by_project": [{"project", "size", "file_count"}...],    # only when scanning all
-    }
-    """
-    projects_dir = get_projects_dir()
-    if project:
-        root = projects_dir / project
-    else:
-        root = projects_dir
-    if not root.exists():
-        return {"root": str(root), "total_bytes": 0, "file_count": 0, "top_files": [], "by_project": []}
 
-    top: list[tuple[int, str, str, float]] = []  # (size, rel, project, mtime)
-    total = 0
-    count = 0
-    by_project: dict[str, list[int]] = {}
-    projects_dir_resolved = projects_dir.resolve()
-    for full, st in _iter_files(root):
-        size = int(st.st_size)
-        total += size
-        count += 1
+def refresh(project: str | None = None, limit: int = 200, *, author: str) -> dict:
+    """Walk the projects in scope, rewrite their index, return the fresh view."""
+    indexes: dict[str, dict | None] = {}
+    errors: list[str] = []
+    for folder in _project_dirs(project):
+        index = pipeline_index.build(folder, author)
+        indexes[folder.name] = index
         try:
-            rel = full.resolve().relative_to(projects_dir_resolved)
-        except (ValueError, OSError):
-            rel = Path(full.name)
-        rel_posix = rel.as_posix()
-        proj = rel.parts[0] if rel.parts else ""
-        if proj:
-            agg = by_project.setdefault(proj, [0, 0])
-            agg[0] += size
-            agg[1] += 1
-        top.append((size, rel_posix, proj, float(st.st_mtime)))
-        # Cap the heap-ish list at 4x limit so a huge workspace does not accumulate
-        # every file in memory; trim by size and keep going.
-        if len(top) > limit * 4:
-            top.sort(key=lambda x: x[0], reverse=True)
-            top = top[:limit]
-
-    top.sort(key=lambda x: x[0], reverse=True)
-    top = top[:limit]
-    by_project_list = [
-        {"project": p, "size": v[0], "file_count": v[1]}
-        for p, v in sorted(by_project.items(), key=lambda kv: kv[1][0], reverse=True)
-    ]
-    return {
-        "root":        str(root),
-        "total_bytes": total,
-        "file_count":  count,
-        "top_files":   [{"rel": r, "project": pr, "size": s, "mtime": m} for (s, r, pr, m) in top],
-        "by_project":  [] if project else by_project_list,
-    }
+            pipeline_index.write(folder, index)
+        except OSError as exc:
+            log.warning("pipeline index of %s not written: %s", folder.name, exc)
+            errors.append(f"{folder.name} : index non enregistré ({exc})")
+    return {**_view(project, limit, indexes), "errors": errors}
