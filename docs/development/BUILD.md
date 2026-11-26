@@ -1,6 +1,6 @@
 # Build et dev - FLUX
 
-> Deplace depuis `docs/archive/legacy/docs/Build_Pipeline.md` et corrige le 2026-09-16 (cible NSIS, sortie `INSTALLEURS/`,
+> Deplace depuis `docs/archive/legacy/docs/Build_Pipeline.md` (retire, tag `archive/pre-cleanup`) et corrige le 2026-09-16 (cible NSIS, sortie `INSTALLEURS/`,
 > jeton API S1, installeur Python supprime). Les chemins sensibles au build sont listes dans `STRUCTURE.md`.
 
 ## Installer un poste de dev

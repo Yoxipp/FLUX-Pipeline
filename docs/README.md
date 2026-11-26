@@ -14,4 +14,4 @@
 | `CROSS_PLATFORM/` | Dual-boot design notes, unrelated to the FLUX code (Windows only, ADR 0013). |
 
 Root files: `README.md` (overview, quick start), `CONTRIBUTING.md` (rules), `STRUCTURE.md` (tree and build-sensitive
-paths), `NOTES.md` / `AGENTS.md` (instructions for AI coding assistants).
+paths), `NOTES.md` (local tool instructions).
