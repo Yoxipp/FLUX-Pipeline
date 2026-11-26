@@ -15,7 +15,7 @@ In short:
 
 If you see or experience unacceptable behaviour, report it privately to the maintainers through
 **Security > Report a vulnerability** on the repository page (the only private channel GitHub offers), with
-"Code of Conduct" in the title. Every report is reviewed and kept confidential.
+"Code of Conduct" in the title.
 
 Maintainers may remove comments, commits or other contributions that break this code, and may temporarily or
 permanently ban a contributor, following the enforcement guidelines of the Contributor Covenant.
