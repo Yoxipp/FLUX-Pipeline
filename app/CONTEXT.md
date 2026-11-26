@@ -5,4 +5,4 @@
 
 Application desktop : `electron/` (process main) et `src/` (renderer React). Le front ne parle au backend qu'en HTTP.
 
-Commandes dev/build : `docs/development/BUILD.md`. Chemins sensibles au build : `STRUCTURE.md`.
+Commandes dev/build : `docs/development/BUILD.md`. Chemins sensibles au build : `docs/development/STRUCTURE.md`.

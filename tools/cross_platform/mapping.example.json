@@ -1,0 +1,18 @@
+{
+  "_comment": "HYPOTHETICAL mapping for cross_platform_path_audit.py --simulate. P:/ and /mnt/data are placeholders until the disk architecture (A/B/C) is decided. Never loaded by any DCC.",
+  "roots": [
+    {
+      "name": "UTHA_RENAMED",
+      "legacy": "C:/Users/<user>/Projects/UthaRaptor",
+      "current": "C:/Users/<user>/Projects/UthaRaptor_Env",
+      "windows": "P:/Bureau/UthaRaptor_Env",
+      "linux": "/mnt/data/Bureau/UthaRaptor_Env"
+    },
+    {
+      "name": "BUREAU",
+      "legacy": "C:/Users/<user>/Projects",
+      "windows": "P:/Bureau",
+      "linux": "/mnt/data/Bureau"
+    }
+  ]
+}

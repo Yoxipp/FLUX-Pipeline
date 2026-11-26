@@ -5,7 +5,7 @@
 
 Build et outils : `build.cjs` (entree de `npm run build` : bump de version x.x.xxx + enchainement du build), `flux_version.nsh` (genere), `backend.spec` (PyInstaller), `electron-builder.yml` (NSIS, sortie `INSTALLEURS/`), `installer.nsh`, `icon.ico` / `icon.png` (build + icone runtime), `build_hdas.py` et `rebuild_importer_hda.py` (HDA, doublon connu).
 
-Test de charge serveur : `loadtest/` (`flux_loadtest.py` seed / run / cleanup, `flux_instance.py` = un backend isole). Hors build, voir `loadtest/README.md`.
+Test de charge serveur : `tools/loadtest/` (hors build, voir son `README.md`).
 
 Details : `docs/development/BUILD.md`.
 
