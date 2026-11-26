@@ -44,6 +44,8 @@ router = APIRouter()
 
 class ProductionPayload(BaseModel):
     production: dict
+    # "production_version" of the GET (or previous PUT) this document comes from.
+    base_version: str | None = None
 
 
 class CommentNotify(BaseModel):
@@ -185,8 +187,6 @@ async def _compute_production(project: str) -> dict:
 
     def _do() -> dict:
         production = store.load_production(project)
-        # Snapshot the state we would persist, to skip a disk write when nothing changed.
-        before = _fingerprint(production)
         try:
             events = get_all_events(limit=10_000, action="publish", project=project)
         except RuntimeError:
@@ -217,29 +217,42 @@ async def _compute_production(project: str) -> dict:
             log.warning("disk_scan (shots) failed: %s", e)
             disk_shots = []
 
-        production, publishes_by_task, unmatched = reconcile(
-            production, events, known_type_tokens, disk_assets, disk_shots,
-        )
-        # Disk → logical: drop AUTO entities whose folder was deleted on disk.
-        # User-planned entities are never auto-pruned (guards against OneDrive/AV
-        # hiccups); they are removed explicitly from the Publisher instead.
-        try:
-            prod_archive.prune_absent_auto(get_project_path(project), production)
-        except Exception as e:
-            log.warning("prune_absent_auto failed: %s", e)
+        # The scans above take seconds: a status set meanwhile (Discord button) must
+        # not be overwritten, so a conflicting write restarts from the stored doc.
+        for attempt in range(3):
+            version = store.version_of(production)
+            # Snapshot the state we would persist, to skip a disk write when nothing changed.
+            before = _fingerprint(production)
+            production, publishes_by_task, unmatched = reconcile(
+                production, events, known_type_tokens, disk_assets, disk_shots,
+            )
+            # Disk → logical: drop AUTO entities whose folder was deleted on disk.
+            # User-planned entities are never auto-pruned (guards against OneDrive/AV
+            # hiccups); they are removed explicitly from the Publisher instead.
+            try:
+                prod_archive.prune_absent_auto(get_project_path(project), production)
+            except Exception as e:
+                log.warning("prune_absent_auto failed: %s", e)
+            if _fingerprint(production) == before:
+                break
+            try:
+                version = store.save_production_if(project, production, version) or version
+                break
+            except store.StaleProductionError:
+                # Last attempt: *version* stays old, so a save of this copy gets a 409.
+                if attempt < 2:
+                    production = store.load_production(project)
         try:
             _attach_publish_comments(get_project_path(project), publishes_by_task)
         except Exception as e:
             log.warning("attach_publish_comments failed: %s", e)
-        after = _fingerprint(production)
-        if after != before:
-            store.save_production(project, production)
         seqs_on_disk = sorted({(d.get("seq") or "").upper() for d in disk_shots if d.get("seq")})
         shots_on_disk = sorted({((d.get("seq") or "").upper(), (d.get("shot") or "").upper())
                                 for d in disk_shots
                                 if d.get("seq") and d.get("shot")})
         return {
             "production": production,
+            "production_version": version,
             "publishes_by_task": publishes_by_task,
             "publishes_unmatched": unmatched,
             "sequences_on_disk": seqs_on_disk,
@@ -297,6 +310,9 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     to exist on disk. It is strictly CREATE-ONLY (see features/production/sync.py):
     a save can add missing folders but can never delete, move or overwrite existing
     files. A sync failure never fails the save — the planning is persisted first.
+
+    409 when *base_version* is given and the store moved since (status set from
+    Discord, other window): nothing is written, the detail carries the stored doc.
     """
     _ensure_project(project)
     loop = asyncio.get_running_loop()
@@ -309,8 +325,17 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     from features.roles import project_roles
     if not project_roles.can(project, "edit_entity"):
         locked_kept += prod_lock.keep_all_records(payload.production, previous)
-    ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
-    if not ok:
+    try:
+        version = await loop.run_in_executor(
+            None, lambda: store.save_production_if(project, payload.production, payload.base_version))
+    except store.StaleProductionError as exc:
+        scan_cache.invalidate_all()   # the bot writes without a request: do not serve the old read
+        raise HTTPException(status_code=409, detail={
+            "message": "Production modifiée ailleurs : enregistrement refusé.",
+            "production_version": exc.version,
+            "production": resolve_production_doc(exc.current),
+        })
+    if version is None:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
     # Phone notify (ADR 0062): a new assignee or retake, seen as a diff of the saved doc.
     try:
@@ -343,7 +368,7 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     except Exception as e:  # noqa: BLE001 — sync is best-effort, save already succeeded
         log.warning("Production→disk sync failed for %r: %s", project, e)
 
-    return {"success": True, "synced": synced, "shot_stages": stages, "locked_kept": locked_kept}
+    return {"success": True, "production_version": version, "synced": synced, "shot_stages": stages, "locked_kept": locked_kept}
 
 
 @router.post("/{project}/comment")
