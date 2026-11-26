@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from features.houdini_work import backup_cleaner as bc
+from features.system import pipeline_index
 
 DAY = 86400.0
 NOW = 2_000_000_000.0
@@ -114,6 +115,49 @@ class BackupCleanerTest(unittest.TestCase):
         self.assertEqual(res["deleted"], 0)
         self.assertTrue(keep.exists())
         self.assertEqual(res["journal"], "")
+
+    def _index(self) -> None:
+        pipeline_index.write(self.project, pipeline_index.build(self.project, "adam"))
+
+    def _old_pair(self, task: Path) -> None:
+        _touch(task / "backup" / "w003_bak1.hip", 40)
+        _touch(task / "backup" / "w003_bak2.hip", 30)
+
+    def _rel_old(self, task: Path) -> str:
+        return (task / "backup" / "w003_bak1.hip").relative_to(self.project).as_posix()
+
+    def test_index_finds_task_dirs_without_walking(self) -> None:
+        self._old_pair(self.task)
+        self._old_pair(self.project / ".flux_cleanup" / "work" / "houdini" / "OLD")   # skipped
+        self._index()
+        with mock.patch("os.walk", side_effect=AssertionError("walked")):
+            self.assertEqual([i["path"] for i in self._scan()["items"]], [self._rel_old(self.task)])
+
+    def test_missing_or_corrupt_index_walks(self) -> None:
+        self._old_pair(self.task)
+        self.assertEqual(self._names(self._scan()), {"w003_bak1.hip"})
+        pipeline_index.index_path(self.project).parent.mkdir(parents=True, exist_ok=True)
+        pipeline_index.index_path(self.project).write_text("{broken", encoding="utf-8")
+        self.assertEqual(self._names(self._scan()), {"w003_bak1.hip"})
+
+    def test_stale_index_never_decides_a_deletion(self) -> None:
+        self._old_pair(self.task)
+        self._index()
+        later = self.task.parent / "LATER"                    # created after the scan
+        self._old_pair(later)
+        self.assertEqual(len(self._scan()["items"]), 1)       # listing: index only
+        res = bc.apply(self.project, "PROJ", ["p|" + self._rel_old(later)],
+                       days=14, now=NOW, root=self.root)
+        self.assertEqual(res["deleted"], 1)                   # apply reads the live disk
+        self.assertTrue((later / "backup" / "w003_bak2.hip").exists())
+
+    def test_index_cannot_point_outside_the_project(self) -> None:
+        self._old_pair(self.project.parent / "OTHER" / "work" / "houdini" / "FX")
+        self.project.mkdir()
+        index = pipeline_index.build(self.project, "adam")
+        index["dirs"] = ["../OTHER/work/houdini/FX"]
+        pipeline_index.write(self.project, index)
+        self.assertEqual(self._scan()["items"], [])
 
     def test_keep_days_setting(self) -> None:
         with mock.patch.dict(os.environ, {bc.ENV_DAYS: "7"}):
