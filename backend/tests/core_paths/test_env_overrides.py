@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -78,10 +79,18 @@ class ExeEnvTests(unittest.TestCase):
             self.assertEqual(constants._apply_exe_env(self.GROUPS), self.GROUPS)
 
     def test_set_replaces_one_dcc_and_escapes_brackets(self):
-        with _clean_env(FLUX_MAYA_EXE='"D:/apps [x]/maya.exe"'):
-            out = constants._apply_exe_env(self.GROUPS)
-        self.assertEqual(out["Maya"], [["D:/apps [[]x]/maya.exe"]])
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "apps [x]" / "maya.exe"
+            exe.parent.mkdir()
+            exe.write_bytes(b"x")
+            with _clean_env(FLUX_MAYA_EXE=f'"{exe.as_posix()}"'):
+                out = constants._apply_exe_env(self.GROUPS)
+        self.assertEqual(out["Maya"], [[exe.as_posix().replace("[", "[[]")]])
         self.assertEqual(out["Nuke"], self.GROUPS["Nuke"])
+
+    def test_missing_file_keeps_the_default_patterns(self):
+        with _clean_env(FLUX_MAYA_EXE="D:/nowhere/maya.exe"):
+            self.assertEqual(constants._apply_exe_env(self.GROUPS), self.GROUPS)
 
 
 if __name__ == "__main__":

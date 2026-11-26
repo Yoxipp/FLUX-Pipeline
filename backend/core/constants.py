@@ -157,7 +157,7 @@ def _patterns_for_root(pf: str, pf86: str, lad: str) -> dict[str, list[list[str]
     }
 
 # Env override of a DCC executable: FLUX_<NAME>_EXE replaces the default search
-# patterns of that DCC.
+# patterns of that DCC when it names an existing file (else the defaults stay).
 DCC_EXE_ENV: dict[str, str] = {
     "Maya":       "FLUX_MAYA_EXE",
     "Houdini":    "FLUX_HOUDINI_EXE",
@@ -176,7 +176,7 @@ def _apply_exe_env(groups: dict[str, list[list[str]]]) -> dict[str, list[list[st
     out = dict(groups)
     for name, var in DCC_EXE_ENV.items():
         value = (_os.environ.get(var) or "").strip().strip('"')
-        if value:
+        if value and _os.path.isfile(value):
             # Callers glob these: "[" is the only wildcard a Windows path can hold.
             out[name] = [[value.replace("[", "[[]")]]
     return out
