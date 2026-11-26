@@ -11,12 +11,16 @@
 # pluginSettings.json lives in the PUBLIC Documents folder on Windows
 # (C:/Users/Public/Documents/MarvelousDesigner/Plugins), ~/Documents elsewhere.
 # Marvelous may rewrite it on exit: register while Marvelous is closed.
+# Only Marvelous 2025+ has that Plug-in Manager: 2024.x (2024.2.177 checked: no
+# "Plug-in Manager" nor pluginSettings key in its binaries, its Plug-in menu only lists
+# compiled .dll plug-ins) never reads the file, so there the bridge is started from
+# its Python editor (python_editor_line), once per session.
 #
 # Marvelous 2024 embeds the official python.org Python 3.7 build WITHOUT _ctypes, so
 # the bridge cannot pump Marvelous' window messages (one-shot mode: Marvelous busy
 # until the first export). install() also fetches the matching official embeddable
-# Python 3.7.9 (python.org, PSF license) and keeps only _ctypes.pyd + libffi-7.dll in
-# %LOCALAPPDATA%/FLUX/marvelous_pylib, where the bridge looks for them. No network:
+# Python 3.7.9 (python.org, PSF license) and keeps only _ctypes.pyd (libffi is linked
+# into it in 3.7) + the ctypes package in %LOCALAPPDATA%/FLUX/marvelous_pylib, where the bridge looks for them. No network:
 # the bridge still works, one-shot.
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import tempfile
 import urllib.request
@@ -43,7 +48,11 @@ _SETTINGS_NAME = "pluginSettings.json"
 _BRIDGE_LOG = Path(tempfile.gettempdir()) / "flux_marvelous_bridge.log"
 # Same CPython 3.7 ABI as Marvelous 2024 (its log says "python 3.7.9").
 _PYLIB_URL = "https://www.python.org/ftp/python/3.7.9/python-3.7.9-embed-amd64.zip"
-_PYLIB_FILES = ("_ctypes.pyd", "libffi-7.dll")
+_PYLIB_FILES = ("_ctypes.pyd",)
+# Shipped beside _ctypes by Python 3.8+ only (3.7.9 links libffi statically).
+_PYLIB_OPTIONAL = ("libffi-7.dll", "libffi-8.dll")
+# First release with the Plug-in Manager (pluginSettings.json).
+_PLUGIN_MENU_SINCE = (2025, 0)
 
 
 def pylib_dir() -> Path:
@@ -71,8 +80,9 @@ def ensure_pylib(url: str | None = None, timeout: float = 60.0) -> str:
                 return f"ctypes non installe ({', '.join(missing)} absent de {url})"
             dest = pylib_dir()
             dest.mkdir(parents=True, exist_ok=True)
-            for f in _PYLIB_FILES:
-                (dest / f).write_bytes(zf.read(names[f]))
+            for f in _PYLIB_FILES + _PYLIB_OPTIONAL:
+                if f in names:
+                    (dest / f).write_bytes(zf.read(names[f]))
             # The ctypes package (compiled for this exact Python) from the zip's
             # stdlib, in case Marvelous dropped it along with _ctypes.
             stdlib = next((n for n in zf.namelist() if Path(n).name.startswith("python3")
@@ -169,6 +179,43 @@ def is_registered() -> bool:
     return any(isinstance(p, dict) and p.get("m_PlugInTitle") == _PLUGIN_TITLE for p in data["plugins"])
 
 
+def _find_exe() -> str | None:
+    """Installed Marvelous exe (scan only, nothing saved to config)."""
+    try:
+        from features.launcher.launcher_core import list_dcc_candidates
+        found = list_dcc_candidates("marvelous")
+    except Exception as exc:   # launcher scan is best effort here
+        log.debug("Marvelous exe scan failed: %s", exc)
+        return None
+    return found[0] if found else None
+
+
+def marvelous_version(exe_path: str | None = None) -> tuple[int, int] | None:
+    """(year, minor) of the Marvelous next to *exe_path*, read from the first line of
+    its ChangeLog ("[v2024.2.177]") or the install folder name; None when unknown."""
+    exe = exe_path or _find_exe()
+    if not exe:
+        return None
+    folder = Path(exe).parent
+    texts = [folder.name]
+    try:
+        with open(folder / "ChangeLog_MarvelousDesigner.txt", encoding="utf-8", errors="replace") as fh:
+            texts.insert(0, fh.readline())
+    except OSError:
+        pass
+    for text in texts:
+        m = re.search(r"(20\d\d)(?:\.(\d+))?", text)
+        if m:
+            return int(m.group(1)), int(m.group(2) or 0)
+    return None
+
+
+def has_plugin_menu(exe_path: str | None = None) -> bool:
+    """True when this Marvelous reads pluginSettings.json (2025+, or version unknown)."""
+    version = marvelous_version(exe_path)
+    return version is None or version >= _PLUGIN_MENU_SINCE
+
+
 def get_startup_file(exe_path: str | None = None) -> Path | None:
     return _scripts_dir() / _PLUGIN_NAME
 
@@ -191,6 +238,12 @@ def install(exe_path: str | None = None) -> dict:
         return {"success": False, "message": str(exc), "path": None}
     log.info("Marvelous bridge script installed -> %s", dest)
     pylib = ensure_pylib() if os.name == "nt" or os.environ.get("FLUX_MD_PYLIB_URL") else "ctypes: Windows seulement"
+    version = marvelous_version(exe_path)
+    if not has_plugin_menu(exe_path):
+        # 2024.x has no Plug-in Manager: an entry there would never show up.
+        msg = (f"installed -> {dest}. Marvelous {version[0]}.{version[1]} n'a pas de menu Plug-in pour les "
+               f"scripts : a chaque session, Script > Python, colle {python_editor_line()} puis Run")
+        return {"success": True, "message": f"{msg}. {pylib}", "path": str(dest)}
     try:
         settings = register_plugin(dest)
         log.info("Marvelous bridge registered in %s", settings)
@@ -231,10 +284,10 @@ def diagnose(max_lines: int = 4) -> str:
     if not f.exists():
         parts = ["Bridge absent (bouton Plug de Marvelous dans la barre de gauche)"]
     else:
-        # Marvelous 2024 has no Plug-in menu (2024.1+): both ways, the 2024 one first.
-        parts = [f"Dans Marvelous 2024 : Script > Python, colle {python_editor_line()} puis Run"
-                 + (f" ; 2024.1+ : Plugins > Plug-in > {_PLUGIN_TITLE}" if is_registered() else "")
-                 + " (une fois par session)"]
+        # Marvelous 2024 has no Plug-in menu for scripts (2025+ only).
+        parts = [f"Dans Marvelous : Script > Python, colle {python_editor_line()} puis Run"
+                 + (f" (2025+ : Plugins > Plug-in > {_PLUGIN_TITLE})" if has_plugin_menu() and is_registered() else "")
+                 + ", une fois par session"]
         if os.name == "nt" and not has_pylib():
             parts.append("ctypes absent : Marvelous occupe jusqu'au premier export (rebranche le Plug avec internet)")
     try:

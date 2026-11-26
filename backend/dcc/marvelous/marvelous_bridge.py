@@ -60,10 +60,10 @@ def _temp_dir():
 
 
 MAILBOX = os.path.join(_temp_dir(), 'flux_marvelous_bridge')
-# _ctypes (+ libffi) of the official Python 3.7 Windows build, put there by FLUX's
+# _ctypes (libffi linked in) of the official Python 3.7 Windows build, put there by FLUX's
 # Plug button: Marvelous 2024 ships without it, and without ctypes no message pump.
 PYLIB = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'FLUX', 'marvelous_pylib')
-_LOG_PATH = os.path.join(_temp_dir(), 'flux_marvelous_bridge.log')
+_LOG_NAME = 'flux_marvelous_bridge.log'
 
 
 def _state():
@@ -76,7 +76,9 @@ def _state():
 
 def _diag(msg):
     try:
-        with open(_LOG_PATH, 'a') as fh:
+        # Resolved per call: tests redirect FLUX_MD_MAILBOX_ROOT after import and
+        # must not write into the artist's real log (FLUX shows its last lines).
+        with open(os.path.join(_temp_dir(), _LOG_NAME), 'a') as fh:
             fh.write(_time.strftime('%Y-%m-%d %H:%M:%S ') + msg + _NL)
     except OSError:
         pass

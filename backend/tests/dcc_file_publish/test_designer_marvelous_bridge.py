@@ -161,7 +161,8 @@ class Autostart(unittest.TestCase):
 
     def test_marvelous_script_goes_into_the_plugin_menu(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as plug, \
-                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}):
+                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}), \
+                mock.patch.object(md_autostart, "marvelous_version", return_value=(2025, 1)):
             settings = Path(plug) / "pluginSettings.json"
             # a plug-in the artist added by hand stays
             settings.write_text(json.dumps({"plugins": [{"m_PlugInTitle": "Other", "m_SourcePath": "C:/x.py"}],
@@ -181,9 +182,31 @@ class Autostart(unittest.TestCase):
             plugins = json.loads(settings.read_text(encoding="utf-8"))["plugins"]
             self.assertEqual([p["m_PlugInTitle"] for p in plugins], ["Other"])
 
+    def test_marvelous_2024_is_started_from_its_python_editor(self):
+        # 2024.x has no Plug-in Manager for scripts: no menu entry, the editor line instead.
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as plug, \
+                tempfile.TemporaryDirectory() as app, \
+                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}):
+            exe = Path(app) / "Marvelous Designer Enterprise OnlineAuth" / "MarvelousDesigner_Enterprise_Online.exe"
+            exe.parent.mkdir()
+            (exe.parent / "ChangeLog_MarvelousDesigner.txt").write_text("[v2024.2.177]\n\nImprovement\n")
+            self.assertEqual(md_autostart.marvelous_version(str(exe)), (2024, 2))
+            self.assertFalse(md_autostart.has_plugin_menu(str(exe)))
+            res = md_autostart.install(str(exe))
+            self.assertTrue(res["success"])
+            self.assertIn(md_autostart.python_editor_line(), res["message"])
+            self.assertFalse((Path(plug) / "pluginSettings.json").exists())
+            # no ChangeLog: the folder name, then unknown (= try the menu)
+            other = Path(app) / "Marvelous Designer 2025" / "MarvelousDesigner.exe"
+            self.assertEqual(md_autostart.marvelous_version(str(other)), (2025, 0))
+            unknown = str(Path(app) / "MD" / "md.exe")
+            self.assertIsNone(md_autostart.marvelous_version(unknown))
+            self.assertTrue(md_autostart.has_plugin_menu(unknown))
+
     def test_marvelous_unreadable_settings_are_left_alone(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as plug, \
-                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}):
+                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}), \
+                mock.patch.object(md_autostart, "marvelous_version", return_value=None):
             settings = Path(plug) / "pluginSettings.json"
             settings.write_text("{not json", encoding="utf-8")
             res = md_autostart.install()
@@ -220,6 +243,14 @@ class Autostart(unittest.TestCase):
                 got = sorted(str(p.relative_to(lib)).replace(os.sep, "/") for p in lib.rglob("*") if p.is_file())
                 self.assertEqual(got, ["_ctypes.pyd", "ctypes/__init__.pyc", "ctypes/wintypes.pyc", "libffi-7.dll"])
                 self.assertEqual(md_autostart.ensure_pylib("file:///nowhere.zip"), "ctypes deja present")
+        # The real 3.7.9 zip has no libffi DLL (linked into _ctypes): still installed.
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "python-3.7.9-embed-amd64.zip"
+            with zipfile.ZipFile(src, "w") as zf:
+                zf.writestr("_ctypes.pyd", b"pyd")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": d}):
+                self.assertEqual(md_autostart.ensure_pylib(src.as_uri()), "ctypes installe")
+                self.assertTrue(md_autostart.has_pylib())
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"LOCALAPPDATA": d}):
             msg = md_autostart.ensure_pylib((Path(d) / "missing.zip").as_uri())
             self.assertIn("non telecharge", msg)                  # no network: never fatal
@@ -299,6 +330,10 @@ class MarvelousBridgeScript(unittest.TestCase):
         md_types.ImportExportOption = ImportExportOption
         md_types.ExportUSDOption = ExportUSDOption
         self.calls = calls
+        # Mailbox and log in a temp folder, never the artist's real ones.
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = mock.patch.dict(os.environ, {"FLUX_MD_MAILBOX_ROOT": self._tmp.name})
+        self._env.start()
         self._mods = mock.patch.dict(sys.modules, {"export_api": api, "MarvelousTypes": md_types})
         self._mods.start()
         # The script serves on import when the API is there: a state that says
@@ -317,6 +352,8 @@ class MarvelousBridgeScript(unittest.TestCase):
         self._api.stop()
         self._state.stop()
         self._mods.stop()
+        self._env.stop()
+        self._tmp.cleanup()
 
     def _export(self, fmt, **extra):
         with mock.patch.object(self.br, "_MD_AVAILABLE", True), tempfile.TemporaryDirectory() as d:
