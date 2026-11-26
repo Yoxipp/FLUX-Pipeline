@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -30,8 +31,9 @@ class _Local(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def _write_lock(self, pid: int, mode: str = "app"):
-        bot_host.lock_path().write_text(json.dumps({"pid": pid, "mode": mode, "at": 0}), encoding="utf-8")
+    def _write_lock(self, pid: int, mode: str = "app", at: float | None = None):
+        data = {"pid": pid, "mode": mode, "at": time.time() if at is None else at}
+        bot_host.lock_path().write_text(json.dumps(data), encoding="utf-8")
 
 
 class LockTests(_Local):
@@ -77,6 +79,16 @@ class LockTests(_Local):
             self.assertTrue(bot_host.stop_headless())
         kill.assert_called_once_with(os.getppid(), 15)
         self.assertFalse(bot_host.lock_path().exists())
+
+
+    @unittest.skipUnless(os.name == "nt", "Windows only")
+    def test_reused_pid_is_never_terminated(self):
+        # A stale headless lock whose PID now belongs to a younger process (e.g. a local render).
+        self._write_lock(os.getppid(), "headless", at=bot_host.pid_started(os.getppid()) - 60)
+        self.assertIsNone(bot_host.holder())
+        with mock.patch.object(bot_host.os, "kill") as kill:
+            self.assertFalse(bot_host.stop_headless())
+        kill.assert_not_called()
 
 
 class StartupTests(_Local):

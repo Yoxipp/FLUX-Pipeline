@@ -45,6 +45,20 @@ test ; > Projet : bot, webhook de repli, regroupement), `DiscordLink.tsx` (etat 
 * Logs : type + canal + statut. Jamais l'URL du webhook.
 * Secrets dans le partage (2026-10-30) : lisibles par l'equipe, regenerables.
 
+## Bot et rendus (retake Dave, verifie 2026-11-26)
+
+Aucune action du bot (boutons Valider / Refuser, menus « Donner a » / « Decaler », `/link` `/mentions` `/calendar`, DM,
+reprise d'hebergement entre PC) n'annule, ne tue ni ne relance un job Tractor ou un rendu local.
+
+* `dm_actions._task` n'ecrit que `status` / `assignee` dans `production.json` ; `_calendar` n'ecrit que le calendrier et
+  une mention. Aucun module render / dispatcher / flows importe (`tests/notify/test_no_render_path.py`).
+* Reprise d'hebergement : `gateway.cancel()` annule une tache asyncio locale, rien d'autre.
+* Seul processus termine : le bot headless de ce PC (`bot_host.stop_headless`, reglage « arriere-plan » coupe).
+  `bot_host.holder` ignore un verrou dont le PID appartient a un processus ne apres lui (PID reutilise par Windows :
+  sans ce controle, un rendu local pouvait etre termine).
+* Indirect, hors bot : un flow ecrit par un utilisateur peut observer des donnees (`event.when`...) et appeler
+  `dispatcher.cancel`. Il reagirait pareil au meme changement fait dans l'app. Aucun flow livre ne le fait.
+
 ## Tests
 
 `backend/tests/notify/` : relais = serveur HTTP local (`_relay.py`), aucun appel reseau reel. `run_tests.py` met `FLUX_NOTIFY=0`
