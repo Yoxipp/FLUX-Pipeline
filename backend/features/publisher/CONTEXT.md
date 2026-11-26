@@ -21,7 +21,7 @@ Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de 
 * Ecrivains directs (ROP Houdini + scene `.hip`, Nuke Write/script, Photoshop), U3b : `reserve_version` (archive un LAST legacy, premier NNN libre fichier + dossier sequence) -> le DCC ecrit `<base>_vNNN.ext` ou `<base>_vNNN/` -> `finalize_rendered_version` derive LAST (sequence = `.link` avec `pattern`). Echec : `discard_rendered_version`. `archive_flat_last` reste pour compat (plus d'appelant).
 * Lecteurs : `read_last`, `find_last_file` (suit `.link`), `published_files` (cache `.flux.json` et temporaires), `next_publish_version` (preflight), `last_version_label`.
 
-## Charge reseau (2026-10-22, `docs/school_opti_prompt/PROMPT.md`)
+## Charge reseau (2026-10-22, `docs/notes/prompts/school_opti/PROMPT.md`)
 
 * `copy_limits.py` : la copie source -> `vNNN` (`write_version`) passe par un plafond de copies simultanees par backend (`FLUX_PUBLISH_MAX_PARALLEL`, defaut 10, les suivantes attendent) et un debit max optionnel par copie (`FLUX_PUBLISH_MAX_MBPS`, 0 = off = `shutil.copy2`). Reglables dans Parametres avances. `GET /publish/queue` = actives / en attente (affiche dans le Publisher).
 * `vNNN -> LAST` reste `shutil.copy2` : mesure sur `\\server` (Python 3.14), 200 Mo en 0,2 s, la copie est faite cote serveur (pas d'aller-retour par le PC). Hardlink teste OK mais non retenu (the maintainer : garder la copie).

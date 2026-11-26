@@ -1,5 +1,5 @@
 // DocTab.tsx - Settings > Doc (retake F3, ADR 0049): one sub-tab per manual, embedded in
-// the page (GET /system/manual, ?doc=flows for the Flows manual built from docs/flows/),
+// the page (GET /system/manual, ?doc=flows for the Flows manual built from docs/user/flows/),
 // plus buttons to open the shown manual in the system browser or reveal the FLUX_DOC folder.
 // The sub-tab is in the URL (?tab=doc&doc=flows) so a page can link straight to it.
 

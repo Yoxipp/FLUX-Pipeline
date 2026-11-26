@@ -1,17 +1,17 @@
 """The Flows manual (resources/manual/FLUX_Flows.html, Settings > Doc > Flows) is built
-from docs/flows/*.md by features/system/flows_doc.py: the committed HTML must match."""
+from docs/user/flows/*.md by features/system/flows_doc.py: the committed HTML must match."""
 
 import unittest
 
 from features.system import flows_doc
 
 
-@unittest.skipUnless(flows_doc.DOCS_DIR.is_dir(), "docs/flows/ not shipped (frozen build)")
+@unittest.skipUnless(flows_doc.DOCS_DIR.is_dir(), "docs/user/flows/ not shipped (frozen build)")
 class FlowsDoc(unittest.TestCase):
     def test_html_is_up_to_date(self):
         self.assertTrue(
             flows_doc.OUT.read_text(encoding="utf-8") == flows_doc.build_html(),
-            "docs/flows changed: run `python -m features.system.flows_doc` from backend/ and commit the HTML")
+            "docs/user/flows changed: run `python -m features.system.flows_doc` from backend/ and commit the HTML")
 
     def test_every_node_section_has_a_card(self):
         page = flows_doc.build_html()

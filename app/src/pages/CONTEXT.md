@@ -158,7 +158,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 
 ## Editeur de Flows (`flow_editor/`, chantier Flows P0 2026-10-22)
 
-Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, fichiers), ADR 0057. P0 = lecture seule.
+Specs : `docs/notes/prompts/flows_refonte/03_EDITEUR.md` (disposition, familles, ports, fichiers), ADR 0057. P0 = lecture seule.
 * `FlowEditor.tsx` : coque (route `/action-graph`, lien profond `?flow=<nom>`) : `TopBar` (choix du flow, badges, recherche,
   Cadrer, "Ancien editeur"), `ShelfBar` (onglet par famille), `NetworkPane` (@xyflow/react, Tab, F, Echap, MiniMap par famille),
   `ParamsPane` (node selectionne ou flow).

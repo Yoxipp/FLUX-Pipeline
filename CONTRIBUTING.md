@@ -35,7 +35,7 @@
 | `backend/core/paths.py`, `backend/core/config.py` | FLUX_ROOT and frozen mode: an installed app that no longer starts. |
 | Metadata document keys, stores, `migrate_json_to_sqlite.py` | Data of existing projects (ADR 0004). |
 | `backend/dcc/*/autostart.py`, `dcc/houdini/flux_houdini_server.py`, HDA sources | Code copied into the DCC preferences. |
-| `scripts/backend.spec`, `scripts/electron-builder.yml`, `app/electron/python_bridge.ts` | Installer build (paths listed in `STRUCTURE.md`). |
+| `scripts/backend.spec`, `scripts/electron-builder.yml`, `app/electron/python_bridge.ts` | Installer build (paths listed in `docs/development/STRUCTURE.md`). |
 
 ## Never
 
@@ -49,5 +49,5 @@ Full list of things not to redo: `docs/history/HISTORY_ANALYSIS.md` section 4.
 
 ## After coding
 
-Update the folder `CONTEXT.md`, `STRUCTURE.md` if the tree or a build path changed, `docs/notes/CURRENT_STATE.md`,
+Update the folder `CONTEXT.md`, `docs/development/STRUCTURE.md` if the tree or a build path changed, `docs/notes/CURRENT_STATE.md`,
 `docs/notes/NEXT_STEPS.md` if the roadmap moved, and write an ADR for any architecture choice.

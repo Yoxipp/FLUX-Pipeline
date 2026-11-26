@@ -764,7 +764,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <section class="chap" id="b4">
 <h1>B4. Organisation du code</h1>
 <pre>Flux_Pipeline_dev/
-  NOTES.md, STRUCTURE.md, LICENSE, NOTICE
+  NOTES.md, CONTRIBUTING.md, LICENSE, NOTICE
   FLUX_DEV.bat                    lancement dev
   BUILD_INSTALLER.bat             installeur NSIS -> INSTALLEURS/
   app/electron/                   process main
@@ -776,8 +776,9 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
     resources/                    shelves, scènes, rigs, presets Painter, startup
     tests/                        run_tests.py + une suite par dossier
   scripts/                        build.cjs, backend.spec, electron-builder.yml, installer.nsh, build_hdas.py
-  docs/                           notes/ decisions/ architecture/ development/ audit/ history/ archive/ manual/
-  old/                            historique brut, lecture seule</pre>
+  docs/                           architecture/ decisions/ development/ user/ history/ notes/ archive/ (index : docs/README.md)
+  tools/                          scripts hors application
+</pre>
 <h3>Pages front</h3>
 <table>
 <tr><th>Fichier</th><th>Page</th></tr>
@@ -1003,7 +1004,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <li>PyInstaller (<code>python -m PyInstaller scripts/backend.spec</code>) build le sidecar <code>backend/dist/flux_backend</code> avec <code>resources/</code>, YAML d'actions et <code>pxr</code>.</li>
 <li>electron-builder (<code>scripts/electron-builder.yml</code>) assemble l'installeur NSIS ; <code>set_exe_icon.cjs</code> pose l'icône.</li>
 </ol>
-<div class="warn">Chemins sensibles au build (liste complète dans <code>STRUCTURE.md</code>) : <code>backend.spec</code>, <code>electron-builder.yml</code>, <code>python_bridge.ts</code>, <code>main.ts</code>, <code>tsconfig.electron.json</code>, <code>vite.config.ts</code>, <code>package.json</code>, <code>index.html</code>, <code>backend/resources/</code>. Toujours builder avec le même Python que celui qui a les dépendances (<code>python -m PyInstaller</code>).</div>
+<div class="warn">Chemins sensibles au build (liste complète dans <code>docs/development/STRUCTURE.md</code>) : <code>backend.spec</code>, <code>electron-builder.yml</code>, <code>python_bridge.ts</code>, <code>main.ts</code>, <code>tsconfig.electron.json</code>, <code>vite.config.ts</code>, <code>package.json</code>, <code>index.html</code>, <code>backend/resources/</code>. Toujours builder avec le même Python que celui qui a les dépendances (<code>python -m PyInstaller</code>).</div>
 </section>
 
 <section class="chap" id="b15">
