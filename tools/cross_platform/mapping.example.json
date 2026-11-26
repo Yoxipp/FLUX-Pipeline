@@ -3,8 +3,8 @@
   "roots": [
     {
       "name": "UTHA_RENAMED",
-      "legacy": "C:/Users/<user>/Projects/UthaRaptor",
-      "current": "C:/Users/<user>/Projects/UthaRaptor_Env",
+      "legacy": "C:/Users/<user>/Projects/MyFilm",
+      "current": "C:/Users/<user>/Projects/MyFilm_Env",
       "windows": "P:/Bureau/UthaRaptor_Env",
       "linux": "/mnt/data/Bureau/UthaRaptor_Env"
     },

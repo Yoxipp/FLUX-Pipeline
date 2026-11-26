@@ -59,9 +59,9 @@ class IdentifierTests(unittest.TestCase):
     def test_shortest_free_prefix_then_suffix(self):
         self.assertEqual(identity.make_user_id("Adam", "Colin", set()), "ADAM_C")
         taken = {"ADAM_C"}
-        self.assertEqual(identity.make_user_id("Adam", "Carlier", taken), "ADAM_CA")
+        self.assertEqual(identity.make_user_id("Adam", "Camus", taken), "ADAM_CA")
         taken |= {"ADAM_CA", "ADAM_CE"}
-        self.assertEqual(identity.make_user_id("Adam", "Cellier", taken), "ADAM_CEL")
+        self.assertEqual(identity.make_user_id("Adam", "Celan", taken), "ADAM_CEL")
         full = {"BO_L", "BO_LI", "BO_LIN"}
         self.assertEqual(identity.make_user_id("Bo", "Lin", full), "BO_LIN_1")
         self.assertEqual(identity.make_user_id("Bo", "Lin", full | {"BO_LIN_1"}), "BO_LIN_2")
@@ -230,7 +230,7 @@ class AccountRouteTests(_TempWorkspace):
         self.assertEqual((profile["first_name"], profile["last_name"]), ("Adam", "Colin"))
         self.assertTrue(profile["has_password"])
         preview = self.client.post("/settings/users/id-preview",
-                                   json={"first_name": "Adam", "last_name": "Carlier"})
+                                   json={"first_name": "Adam", "last_name": "Camus"})
         self.assertEqual(preview.json()["id"], "ADAM_CA")
 
     def test_switch_needs_password(self):
