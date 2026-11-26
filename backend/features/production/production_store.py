@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import threading
 import uuid
 
 from core.logger import get_logger
@@ -19,6 +22,26 @@ log = get_logger(__name__)
 _COLLECTION = "production"
 
 SCHEMA_VERSION = 1
+
+# Serialises writers of this process (HTTP routes, bot thread) so that the
+# version check and the write of save_production_if are one step.
+_WRITE_LOCK = threading.RLock()
+
+
+class StaleProductionError(Exception):
+    """The store moved since the caller loaded it. *current* is the stored doc."""
+
+    def __init__(self, current: dict, version: str) -> None:
+        super().__init__("production.json changed since it was loaded")
+        self.current = current
+        self.version = version
+
+
+def version_of(data: dict) -> str:
+    """Content hash of a production document, not stored in it. Same value on every
+    backend, and an identical rewrite does not move it (a file stat would)."""
+    raw = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def default_schema() -> dict:
@@ -45,10 +68,25 @@ def load_production(project_name: str) -> dict:
 
 def save_production(project_name: str, data: dict) -> bool:
     """Write production.json atomically. Returns True on success."""
-    ok = get_repository().set(_COLLECTION, project_name, _heal(data))
+    with _WRITE_LOCK:
+        ok = get_repository().set(_COLLECTION, project_name, _heal(data))
     if not ok:
         log.error("Failed to write production.json for project %r", project_name)
     return ok
+
+
+def save_production_if(project_name: str, data: dict, base_version: str | None) -> str | None:
+    """save_production only when the store still is at *base_version* (None: no check).
+    Returns the new version, None when the write failed. Raises StaleProductionError."""
+    with _WRITE_LOCK:
+        if base_version:
+            current = load_production(project_name)
+            version = version_of(current)
+            if version != base_version:
+                raise StaleProductionError(current, version)
+        if not save_production(project_name, data):
+            return None
+        return version_of(load_production(project_name))
 
 
 def _heal(data: dict) -> dict:
