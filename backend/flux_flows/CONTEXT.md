@@ -1,6 +1,6 @@
 # backend/flux_flows - Flows v2 (format, stockage, droits, migration)
 
-Chantier Flows (ADR 0057, 0058 ; specs `docs/notes/prompts/flows_refonte/`). Package neuf : `flux_core` et `flux_actions`
+Chantier Flows (ADR 0057, 0058). Package neuf : `flux_core` et `flux_actions`
 ne sont pas modifies ; depuis P8 le publish passe par les flows quand le projet est en v2 (`switch.py`), sinon v1. Etat au 2026-10-22 : P1 fait
 (prompt P1, retire au menage 2026-11 : tag `archive/pre-cleanup`). P2 fait (prompt `P2_moteur_runs.md`) :
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).

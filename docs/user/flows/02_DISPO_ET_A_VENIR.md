@@ -1,6 +1,6 @@
 # Flows : ce qui est dispo, ce qui arrive
 
-Etat au 2026-10-24. Le chantier suit les phases P0 a P8 (`docs/notes/prompts/flows_refonte/prompts/README.md`, ADR 0057 et 0058).
+Etat au 2026-10-24. Le chantier suit les phases P0 a P8 (ADR 0057 et 0058).
 P0 a P7 sont codees ; leur verification live par le mainteneur reste a faire. Catalogue prevu au total : 185 types de node,
 dont **178 disponibles** aujourd'hui (liste dans [03_INDEX_NODES.md](03_INDEX_NODES.md)).
 

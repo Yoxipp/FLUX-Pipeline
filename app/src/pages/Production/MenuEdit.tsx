@@ -40,7 +40,7 @@ const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2,
 // ── delete = archive flow (asset / seq / shot) ───────────────────────────────
 // Deleting a disk-backed entity never hard-deletes: it moves the folder into
 // <project>/ARCHIVE/<timestamp>/ then removes the logical entity. A confirmation
-// is ALWAYS shown (Milo's spec); when the folder is non-empty it states how
+// is ALWAYS shown (team spec); when the folder is non-empty it states how
 // many files will be moved. Cancel does nothing. If the folder is a ghost
 // (nothing on disk) we skip the move and just drop the logical entity.
 type ArchiveDescriptor =

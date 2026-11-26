@@ -9,7 +9,7 @@ times the same channel exported several ways and writes everything to
     flux_bench()                      # current channel
     flux_bench(["BCOL", "ROUG"])      # named channels (as in the Channels palette)
 
-Hypotheses measured (docs/notes/prompts/PROMPT_mari_export_perf.md):
+Hypotheses measured:
   1. Mari's flatten itself       -> direct exportImagesFlattened, time to 1st tile / per tile
   2. called from a QTimer slot   -> same call via QTimer.singleShot, FLUX bridge timer paused / running
   3. GIL contention              -> % of the time a Python thread gets the GIL during the export,

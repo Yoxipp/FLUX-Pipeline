@@ -61,13 +61,14 @@ backend/resources/shelves/houdini/backup/
 # AI agent tooling: local settings and vendored third-party skills are not FLUX
 # source (skills are reinstalled from skills-lock.json / `npx gitnexus analyze`).
 .local/settings.local.json
-.local/skills/*
-# FLUX-owned skills (USD knowledge, VFX USD Survival Guide adapted, Apache-2.0) are versioned.
-!.local/skills/flux-usd-pipeline/
-!.local/skills/usd-*/
-!.local/skills/flux-doc-cleanup/
-!.local/skills/flux-integrate-branch/
+# Skills and session notes live in the private companion repo (PRIVATE/skills, PRIVATE/session-work);
+# .local/skills is a local junction to it.
+.local/skills
+.local/session-work/
 .local/worktrees/
+
+# Private companion repo (maintainer notes, school environment, maintainer state). Never public.
+PRIVATE/
 state/
 
 # Session scratch files

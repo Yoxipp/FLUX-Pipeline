@@ -54,10 +54,10 @@ Flux_Pipeline_dev/
 ├── scripts/                  build.cjs (npm run build + version), backend.spec, electron-builder.yml, installer.nsh, flux_version.nsh, set_exe_icon.cjs (afterPack: logo dans FLUX.exe), icon.ico/png,
 │                             build_hdas.py, rebuild_importer_hda.py
 │
-├── tools/                    scripts hors application (loadtest/ : test de charge serveur, cross_platform/ : audit des chemins Windows/Linux)
+├── tools/                    scripts hors application (cross_platform/ : audit des chemins Windows/Linux)
 │
 ├── docs/                     index : docs/README.md
-│   ├── architecture/         systemes vivants : PIPE_LOGIC, USD_*, HOUDINI_WORK, ESMA_ENV
+│   ├── architecture/         systemes vivants : OVERVIEW, PIPE_LOGIC, USD_*, HOUDINI_WORK
 │   ├── decisions/            ADR 0001..NNNN
 │   ├── development/          BUILD, STRUCTURE (ce fichier), REZ, PUBLISH_ROLLBACK, FLOWS_BRIDGE_3DSMAX
 │   ├── user/flows/           doc utilisateur des Flows (03_INDEX_NODES.md embarque dans l'app : bouton (i) des nodes)
@@ -69,10 +69,10 @@ Flux_Pipeline_dev/
 │
 ├── index.html, vite.config.ts, postcss.config.js, tailwind.config.js,
 ├── tsconfig.json, tsconfig.electron.json, package.json, package-lock.json
-└── .local/                  launch.json, settings.json, skills/ FLUX (settings.local.json, worktrees/ ignores)
+└── .local/                  launch.json, settings.json (skills/, settings.local.json, worktrees/ ignores)
 ```
 
-Chaque dossier important a un `CONTEXT.md` court (role + pieges) qui renvoie vers `docs/notes/`.
+Chaque dossier important a un `CONTEXT.md` court (role + pieges) qui renvoie vers `docs/architecture/OVERVIEW.md`.
 
 ## Chemins a ne pas changer sans propagation
 
@@ -103,4 +103,4 @@ Doivent rester a la racine : `index.html`, `vite.config.ts`, `postcss.config.js`
 | `node_modules/`, `__pycache__/`, `.venv/` | dependances |
 | `config.json` | config machine (dev : racine du repo) |
 | `USER/`, `CONFIG/`, `DOSSIER_PROJETS/`, `test/` | donnees locales FLUX_ROOT de dev |
-| `.local/settings.local.json`, `.local/skills/` (hors skills FLUX), `.local/worktrees/`, `state/`, `scratchpad/` | outils IA locaux |
+| `.local/settings.local.json`, `.local/skills` (jonction vers `PRIVATE/skills`), `.local/session-work/`, `PRIVATE/`, `.local/worktrees/`, `state/`, `scratchpad/` | outils IA locaux |

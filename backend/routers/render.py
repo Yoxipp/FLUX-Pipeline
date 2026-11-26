@@ -311,7 +311,7 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
     if (body.hosts or body.groups) and not include:
         raise HTTPException(status_code=400, detail="Aucune machine dans la selection")
     if include and not farm_targets.FLUX_HOST_TARGETING_VERIFIED:
-        notes.append("Ciblage par nom de machine pas encore valide sur la farm (job test a faire)")
+        notes.append("Ciblage par nom de machine pas encore valide sur une vraie farm (job test a faire)")
     own = _min_cap(settings["maxactive"], own)
     return service, own, own, notes
 

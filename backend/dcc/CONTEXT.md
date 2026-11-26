@@ -1,7 +1,7 @@
 # CONTEXT - `backend/dcc/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 `bridge_secret.py` (2026-10-24) : secret par poste (`%APPDATA%/FluxPipeline/bridge_secret.txt`) qui protege l'action `run` des bridges TCP ; l'installation du bridge le copie dans `<script>.json` a cote du script, la desinstallation le retire.
 

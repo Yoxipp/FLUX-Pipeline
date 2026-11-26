@@ -7,7 +7,7 @@ stdout:  {"ok": true, "result": {...}}  or  {"ok": false, "error": "..."}.
 
 Must stay valid Python 2.7 AND 3 (no f-strings, no annotations).
 
-TO VERIFY AT SCHOOL (phase 0, docs/architecture/ESMA_ENV.md): every Tractor call
+TO VERIFY ON THE REAL FARM (phase 0, ADR 0015): every Tractor call
 is in the TRACTOR section below (query API names, job columns, tractor-spool
 output). Nothing here was run against a real engine yet.
 """
@@ -81,7 +81,7 @@ def _spool(req):
 
 def _spool_api(req):
     # Same path as the school's Nuke submitter (EngineClient.spool). tractor-spool cannot be used:
-    # it writes the owner unquoted in its JSON and the school login "3d1" starts with a digit
+    # it writes the owner unquoted in its JSON and a login that starts with a digit (e.g. "3d1") breaks it
     # ("Invalid JSON generated from job script parse", 2026-10-23). Owner = the Windows login,
     # like every other job; the FLUX user is in the job metadata.
     import getpass
