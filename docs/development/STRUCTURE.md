@@ -15,6 +15,7 @@ Flux_Pipeline_dev/
 ├── FLUX_DEV.bat              lancement dev (double-clic)
 ├── INSTALL_DEV.bat           installation des dependances de dev
 ├── BUILD_INSTALLER.bat       build installeur NSIS -> INSTALLEURS/
+├── PUBLISH_GITHUB_PUBLIC.bat publication du repo public (controles puis push, tools/publish/)
 ├── .gitattributes            binaires (.hda, .hipnc, images)
 │
 ├── app/
@@ -53,7 +54,8 @@ Flux_Pipeline_dev/
 ├── scripts/                  build.cjs (npm run build + version), backend.spec, electron-builder.yml, installer.nsh, flux_version.nsh, set_exe_icon.cjs (afterPack: logo dans FLUX.exe), icon.ico/png,
 │                             build_hdas.py, rebuild_importer_hda.py
 │
-├── tools/                    scripts hors application (cross_platform/ : audit des chemins Windows/Linux)
+├── tools/                    scripts hors application (cross_platform/ : audit des chemins Windows/Linux,
+│                             publish/ : publication + hook pre-push, voir publish/CONTEXT.md)
 │
 ├── docs/                     index : docs/README.md
 │   ├── development/          BUILD, STRUCTURE (ce fichier)
