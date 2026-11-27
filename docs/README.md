@@ -2,6 +2,11 @@
 
 New here? Start with the [README](../README.md) at the root of the repository.
 
+> **Work in progress, not a finished product.** FLUX is a student project under active development and testing.
+> Features change often, some are experimental or only partly tested, and file and data formats can change between
+> versions. Do not rely on it for a production you cannot afford to lose: keep backups of your projects.
+> Bug reports and feedback are welcome.
+
 | Folder | Read it for |
 |---|---|
 | [user/](user/README.md) | Using FLUX: the in-app manual, the Flows editor guide (French), `REZ.md` (Rez package), `PUBLISH_ROLLBACK.md` (back to publish v1), `FLOWS_BRIDGE_3DSMAX.md` (adding a software bridge). |

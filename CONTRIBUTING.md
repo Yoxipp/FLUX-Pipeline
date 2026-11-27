@@ -3,6 +3,9 @@
 Thanks for taking the time to help. Bug reports, ideas, docs fixes and code are all welcome, whatever your level.
 Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every exchange.
 
+FLUX is a work in progress, not a finished product: expect rough edges, missing tests and parts that change.
+Reporting what breaks is already a useful contribution.
+
 ## Ways to help
 
 * **Report a bug**: open an issue with what you did, what you expected, what happened, your FLUX version

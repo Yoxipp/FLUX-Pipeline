@@ -11,10 +11,15 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/license-MPL--2.0-blue"></a>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-lightgrey">
-  <img alt="Status: in development" src="https://img.shields.io/badge/status-in%20development-orange">
+  <img alt="Status: work in progress" src="https://img.shields.io/badge/status-work%20in%20progress-orange">
 </p>
 
 ---
+
+> **Work in progress, not a finished product.** FLUX is a student project under active development and testing.
+> Features change often, some are experimental or only partly tested, and file and data formats can change between
+> versions. Do not rely on it for a production you cannot afford to lose: keep backups of your projects.
+> Bug reports and feedback are welcome.
 
 FLUX is built by students. One of its goals is to run in production at ESMA. It is local-first: a project lives in a
 plain folder (local disk, OneDrive or a file server), FLUX keeps it organised, and no step of the pipeline consumes a

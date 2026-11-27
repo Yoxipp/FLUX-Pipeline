@@ -1,5 +1,9 @@
 # Flows : documentation du graph
 
+> **En cours de developpement, pas un produit fini.** FLUX est un projet etudiant en test : les fonctions changent,
+> certaines sont experimentales ou peu testees, et les formats peuvent changer d'une version a l'autre.
+> Garde des sauvegardes de tes projets.
+
 Documentation utilisateur de l'editeur de flows de FLUX (Parametres avances > Actions (YAML) > Ouvrir le graph).
 Elle decrit ce qui existe, pour celui qui s'en sert.
 
