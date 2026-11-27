@@ -7,7 +7,7 @@
 ## Arborescence trackee
 
 ```
-Flux_Pipeline_dev/
+FLUX_Pipeline/
 ├── README.md                 point d'entree humain (quoi, lancer, carte du depot, ou lire quoi)
 ├── CONTRIBUTING.md           regles de contribution
 ├── LICENSE, NOTICE           MPL-2.0
