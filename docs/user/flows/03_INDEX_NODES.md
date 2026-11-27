@@ -2210,7 +2210,7 @@ Exemple : `ZBrushInstance` > `zbImport` > `zbSaveScene`.
 
 ## Logiciels en extension (bridge maison, P6c)
 
-Un logiciel que FLUX ne livre pas s'ajoute par un `bridge.yml` dans `CONFIG/extensions/bridges/<soft>/` (voir `docs/development/FLOWS_BRIDGE_3DSMAX.md`). Flows > Bridges > "Creer les nodes" ecrit deux nodes d'equipe : `<Logiciel>Instance` (`session.<prefixe>_instance`) et `<prefixe>Publish` (`dcc.<prefixe>_publish`).
+Un logiciel que FLUX ne livre pas s'ajoute par un `bridge.yml` dans `CONFIG/extensions/bridges/<soft>/` (voir `docs/user/FLOWS_BRIDGE_3DSMAX.md`). Flows > Bridges > "Creer les nodes" ecrit deux nodes d'equipe : `<Logiciel>Instance` (`session.<prefixe>_instance`) et `<prefixe>Publish` (`dcc.<prefixe>_publish`).
 
 ### session.ext_instance_core : ExtensionInstanceCore
 

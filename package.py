@@ -1,4 +1,4 @@
-# Rez package of FLUX (the built Windows app). Guide: docs/development/REZ.md
+# Rez package of FLUX (the built Windows app). Guide: docs/user/REZ.md
 # No version locking on requirements.
 
 name = "flux"
@@ -33,7 +33,7 @@ def commands():
     alias("flux", "{root}/app/FLUX.exe")
 
     # Site settings, all optional (unset = FLUX defaults). Uncomment to force one for
-    # every user of this package; table of variables in docs/development/REZ.md.
+    # every user of this package; table of variables in docs/user/REZ.md.
     # env.FLUX_USER_DIR = "D:/flux_user"
     # env.FLUX_MAYA_EXE = "C:/Program Files/Autodesk/Maya2025/bin/maya.exe"
     # env.FLUX_HOUDINI_EXE = "C:/Program Files/Side Effects Software/<version>/bin/houdini.exe"

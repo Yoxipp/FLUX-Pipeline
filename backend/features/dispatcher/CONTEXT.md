@@ -1,6 +1,6 @@
 # CONTEXT - `backend/features/dispatcher/`
 
-> Decision : ADR 0067 (complete 0015 et 0057). Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
+> Decision : ADR 0067 (complete 0015 et 0057).
 
 Le dispatcher du pipe : envoyer un job (des taches) sans nommer le gestionnaire de farm. Les nodes de la famille
 `dispatcher` des Flows (`flux_flows/nodes/dispatcher.py`) et le mode `dispatch` de ForEach passent par `api.py`.

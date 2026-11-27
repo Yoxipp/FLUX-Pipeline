@@ -244,7 +244,7 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   page). Les routes `/dcc/<soft>/publish` l'appellent (Maya, Houdini, Nuke, Painter, Designer, Mari, Marvelous, ZBrush ;
   `routers/CONTEXT.md`). Sorties ajoutees : `rop_node` (houPublish), `tx` (sp / sd / mariPublish) ; entree `node` de
   `publish_nuke`. Parite v1 / v2 : `tests/test_flux_flows/test_publish_flows.py`. Retour arriere :
-  `docs/development/PUBLISH_ROLLBACK.md`.
+  `docs/user/PUBLISH_ROLLBACK.md`.
 * **Nodes livres verrouilles** (`dcc_nodes.py`, decisions 18 / 19) : `HoudiniInstance`, `MayaInstance`, `houPublish`,
   `mayPublish` = flows `shipped/dcc/<soft>/*.flow.yml` avec `node_type` ; spec du catalogue tiree de l'interface (entrees
   `select` = reglages a choix, constantes), drapeaux du coeur Python `<type>_core` (`internal`, hors Tab / Shelf). Le moteur
@@ -278,7 +278,7 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
 ## Bridges d'extension (P6c, 01 §12, 00_LOGIQUE n°18)
 
 Un logiciel que FLUX ne livre pas : `CONFIG/extensions/bridges/<soft>/` = `bridge.yml` + `dcc_side/` (+ `flows/` optionnel).
-Exemple documente, NON TESTE : `docs/development/FLOWS_BRIDGE_3DSMAX.md`.
+Exemple documente, NON TESTE : `docs/user/FLOWS_BRIDGE_3DSMAX.md`.
 
 * `bridges/extension.py` : manifeste strict (pydantic `extra=forbid` : soft, label, icon, prefix `^[a-z]{2,4}$`, exe_hints,
   port_range [base, nombre <= 16], transport `tcp_json` | `file_mailbox` | `http`, mailbox, install {target, files relatifs}),

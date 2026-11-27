@@ -104,7 +104,7 @@ The full user manual (in French) is built into the app: **Settings > Doc**.
 |---|---|
 | Use FLUX as an artist | The manual in the app (Settings > Doc), source `backend/resources/manual/FLUX_Manuel.html` |
 | Automate with Flows | [docs/user/flows/](docs/user/flows/) (French) |
-| Understand the architecture | [docs/architecture/](docs/architecture/) and the decision records in [docs/decisions/](docs/decisions/) |
+| Understand a folder of the code | The `CONTEXT.md` next to the code |
 | Build or package FLUX | [docs/development/BUILD.md](docs/development/BUILD.md), [docs/development/STRUCTURE.md](docs/development/STRUCTURE.md) |
 | Find anything else | [docs/README.md](docs/README.md) |
 

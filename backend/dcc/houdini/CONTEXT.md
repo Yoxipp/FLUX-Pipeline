@@ -1,7 +1,6 @@
 # CONTEXT - `backend/dcc/houdini/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 `flux_houdini_server.py` (HTTP in-app 48884..48891, refuse les navigateurs S2), `client.py`, `shot_sync.py` (stages de shot regeneres par Production pousses aux Houdini ouverts : `refresh_from_flux` des FLUX Shot), `houdini_export.py` / `houdini_import.py` / `houdini_usd_light_export.py`, `autostart.py` (package `packages/flux.json` + favoris `jump.pref` `$FLUX/` et `$FLUX/DOSSIER_PROJETS/` ajoutes a l'installation, retires a la desinstallation), `hda/` (HDA importer/exporter/lighting ; `hda/flux_work_hda.py` = HDA FLUX Work SOP / LOP, une scene `.hip` par travail, ADR 0090 ; `work_open.py` = ouverture d'un travail depuis Production via `/run` ou lancement ; `work_template_build.py` = templates `.hip` (hython)), `startup/`.
 

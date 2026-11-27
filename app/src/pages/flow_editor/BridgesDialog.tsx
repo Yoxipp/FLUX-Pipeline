@@ -91,7 +91,7 @@ export function BridgesDialog({ open, canCreate, onClose, onNodes }: {
           <div style={small}>
             {tr('Un logiciel ajoute sans recompiler FLUX : bridge.yml + script cote logiciel dans ', 'A software added without rebuilding FLUX: bridge.yml + software-side script in ')}
             <span className="tag">{data?.dir ?? 'CONFIG/extensions/bridges'}</span>
-            {tr(' (exemple : docs/development/FLOWS_BRIDGE_3DSMAX.md).', ' (example: docs/development/FLOWS_BRIDGE_3DSMAX.md).')}
+            {tr(' (exemple : docs/user/FLOWS_BRIDGE_3DSMAX.md).', ' (example: docs/user/FLOWS_BRIDGE_3DSMAX.md).')}
           </div>
           {error && <div style={{ fontSize: 12, color: 'var(--err)', marginTop: 6 }}>{error}</div>}
           {data && data.bridges.length === 0 && (

@@ -1,7 +1,6 @@
 # CONTEXT - `backend/features/houdini_work/`
 
-> Architecture : `docs/architecture/HOUDINI_WORK.md`, ADR 0051 puis ADR 0090 (un travail = une scene `.hip`).
-> Decision : ADR 0051. Doc : `docs/architecture/HOUDINI_WORK.md`.
+> Decision : ADR 0051 puis ADR 0090 (un travail = une scene `.hip`).
 
 FLUX Work (travail Houdini versionne par tache). `work_store.py` (fonctions pures sur disque) :
 * `work_dir(project, seq, shot, task)` : dossier departement du token `TYPE_SHOT` + `work/houdini/<TASK>/`. Template sans

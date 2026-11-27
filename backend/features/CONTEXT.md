@@ -1,7 +1,6 @@
 # CONTEXT - `backend/features/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Metier par domaine : `folder_manager`, `production`, `publisher`, `importer`, `activity`, `launcher`, `shelf_manager`, `usd_assembler`, `usd_export`.
 
@@ -10,7 +9,7 @@ Version epinglee (ADR 0048) : champ optionnel `version` ("vNNN") sur un lien de 
 shot gagne sur celui de la sequence, un lien sans pin garde celui de la sequence ; `_asset_target` vise
 `<NAME>_vNNN/<NAME>.usda` (introuvable = warning + `LAST`) ; toutes les instances `_NN` partagent la version ; le chemin
 entre dans la signature (pin change = nouvelle version du stage) ; `shot_summary` rend `version` / `latest_version`.
-`usd_assembler/extents.py` (R2, `docs/architecture/USD_STRATEGY.md`) : `extentsHint` ecrit sur l'entree du component et de l'assembly (bound visible payload decharge ; un decor utilise les hints de ses components, sans lire leur geometrie). `usd_assembler/validate/publish_check.py` (R3) : controle USD de chaque publish, appele en premier par `publisher/usd_publish_hooks.after_usd_publish` (cle `issues`), warn seulement, ligne "controle USD" dans `modif_logs.json`. `usd_assembler/inspect.py` (R4) : ouvert en `LoadNone`, seul le payload de la racine est charge.
+`usd_assembler/extents.py` (R2) : `extentsHint` ecrit sur l'entree du component et de l'assembly (bound visible payload decharge ; un decor utilise les hints de ses components, sans lire leur geometrie). `usd_assembler/validate/publish_check.py` (R3) : controle USD de chaque publish, appele en premier par `publisher/usd_publish_hooks.after_usd_publish` (cle `issues`), warn seulement, ligne "controle USD" dans `modif_logs.json`. `usd_assembler/inspect.py` (R4) : ouvert en `LoadNone`, seul le payload de la racine est charge.
 `usd_assembler/component_recipe.py` + `component_auto.py` (ADR 0023) : component cree a la main (`create_component`), recette = departements (tokens TYPE d'asset, une fois chacun) + fichiers (publish ou chemin manuel, format par extension, nature, cibles, proxy de, dependances). Un variantSet `on`/`off` par fichier dans la couche du departement. Un publish ne cree jamais de component : `refresh_from_publish` re-compose seulement un component existant qui utilise ce departement. Les nouveaux publishs sont proposes (`proposed_files`), jamais ajoutes seuls. Anciens components (slots, ADR 0019) lus comme recette (`_legacy_recipe`), reecrits au format 0023 a la mise a jour suivante. ADR 0024 : les fichiers ("links") sont groupes en blocks a nom libre (`model` / `look` / `rig` a la creation) ; chaque link porte sa task (`department`), son arc (`reference` / `payload` / `sublayer` : ce dernier entre dans les sublayers du payload, toujours actif), une variante optionnelle (variantSet du block, un seul choix actif) et une case proxy (proxy des autres links du block). `departments` = tasks des links. Recette 0023 sans `blocks` : un block par task.
 
 Metadonnees via `core.repository_factory.get_repository()`, octets via filesystem / `get_storage()`.
