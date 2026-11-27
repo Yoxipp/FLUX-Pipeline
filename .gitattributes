@@ -12,7 +12,3 @@
 *.spexp  binary
 *.cfg    binary
 
-# ADR index: every branch appends its own line at the end of the table, so a merge
-# keeps the lines of both sides without a conflict (built-in git driver, nothing to
-# install). A number used twice is caught by backend/tests/system/test_adr_numbers.py.
-docs/decisions/README.md merge=union

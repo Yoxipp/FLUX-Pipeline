@@ -1,7 +1,6 @@
 # CONTEXT - `backend/features/folder_manager/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Creation projet / assets / seq / shots : `project_init.py`, `asset_creator.py`, `seq_shot_creator.py`, `tokens.py` + `naming_validator.py` (nommage par tokens), `preset_manager.py`, `locks.py`, `sequence_template.py` (USD seq/shot), `houdini_render_scene.py` (ADR 0036 / 0037 : scene de rendu de sequence `<SEQ>_render.hip` = template du mainteneur `resources/scenes/houdini/flux_template_sequence_render.hip` + FLUX Sequence + une chaine CRYPTO / RENDER_SETTINGS / FLUX Render / ROP par bloc, au moins 3 blocs, hython isole, jamais ecrasee ; preset livre "Rendu <SEQ>" via `builtin_presets` / `open_builtin_preset`, `GET presets?builtin=1`), `houdini_scene_template.py` (scene lighting).
 

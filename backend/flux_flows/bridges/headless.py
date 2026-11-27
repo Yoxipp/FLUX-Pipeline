@@ -6,7 +6,7 @@
 #   * WORKER_SOURCE (below, stdlib only, Python 3.10 = Maya 2024) is written to a temp
 #     file and started with hython / mayapy, environment cleaned like a launched soft
 #     (launcher_core._child_env: no PYTHONPATH, so FLUX's usd-core never reaches
-#     Houdini's Python; NOTES.md §6). No file is added to the FLUX bundle.
+#     Houdini's Python). No file is added to the FLUX bundle.
 #   * protocol: one JSON line per request on stdin {"id", "code"} -> one JSON line on
 #     the worker's real stdout {"id", "ok", "result" | "error"}; the code's prints go
 #     to stderr (kept in a log). First line = {"ready": true, "version", "scene"}.

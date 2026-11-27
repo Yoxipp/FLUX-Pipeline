@@ -4,7 +4,7 @@
 # the publish already landed, a finding goes to the log and modif_logs.json, it never
 # blocks or fails anything. Reads the version's own layer stack (no payload loaded).
 #
-# Checks (docs/architecture/USD_STRATEGY.md section 3):
+# Checks:
 #   * a defaultPrim, and for an asset department layer it is the asset NAME (ADR 0019);
 #   * portable asset paths: no drive letter, no backslash, no "$VAR" (USD never expands
 #     it) in sublayers, references, payloads AND asset attributes (textures);

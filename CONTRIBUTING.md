@@ -26,9 +26,8 @@ Build and packaging details: [docs/development/BUILD.md](docs/development/BUILD.
 
 ## Before you code
 
-1. Read the overview in [README.md](README.md), then the system docs in [docs/architecture/](docs/architecture/).
-2. Look for the decision record of your topic in [docs/decisions/](docs/decisions/README.md). An accepted decision is
-   changed by a new record, never by editing the old one. If your change needs a new decision, propose it in the issue.
+1. Read the overview in [README.md](README.md).
+2. If your change needs a design decision, propose it in the issue first.
 3. Read the `CONTEXT.md` of the folder you touch: it gives the role of the folder and its pitfalls.
 
 ## Branches and pull requests

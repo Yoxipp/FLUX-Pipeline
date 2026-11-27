@@ -1,7 +1,6 @@
 # CONTEXT - `app/src/components/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Contient `shared/` : composants communs (Sidebar, TitleBar, StatusBar, Console, BackendBanner, ExportOptions, SoftwareSelector, ActionForm, ui).
 

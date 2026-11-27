@@ -1,7 +1,6 @@
 # CONTEXT - `backend/features/activity/`
 
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee de mai 2026 retiree (lisible au tag `archive/pre-cleanup`).
-> Vue d'ensemble : `docs/architecture/OVERVIEW.md`.
 
 Fil d'activite, chat, @mentions : `activity_writer.py`, `activity_reader.py`, `chat_manager.py`, `history.py` (JSONL append-only sous lock inter-process, rotation vers `CONFIG/archive/`), `read_state.py`. Routes : `routers/activity.py` (ETag via `repository.version_token`).
 

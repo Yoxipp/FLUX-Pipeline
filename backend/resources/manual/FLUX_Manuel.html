@@ -641,7 +641,7 @@ th { background:var(--soft); color:#fff; }
 <tr><td>Chemins accentués dans Maya</td><td>Limite de l'import USD Maya</td><td>Garder l'import aplati (défaut).</td></tr>
 <tr><td>Export Mari très long</td><td>Channel lourd</td><td>Le statut affiche la progression ; arrêt après 20 min sans progrès avec l'endroit du blocage.</td></tr>
 <tr><td>Un shot archivé réapparaît</td><td>Ancien comportement</td><td>Corrigé : l'archive retire aussi les tokens.</td></tr>
-<tr><td>Publish en échec depuis le passage du projet en v2 (publish par les flows)</td><td>Flow <code>publish_&lt;logiciel&gt;</code> ou bridge</td><td>Production → Settings → Paramètres avancés du projet → Publish en <b>v1</b>, republier (sans redémarrer). Si ça ne remarche pas : relancer le logiciel, puis Paramètres → User → Logiciels → Installer tous les bridges. Procédure complète : <code>docs/development/PUBLISH_ROLLBACK.md</code>.</td></tr>
+<tr><td>Publish en échec depuis le passage du projet en v2 (publish par les flows)</td><td>Flow <code>publish_&lt;logiciel&gt;</code> ou bridge</td><td>Production → Settings → Paramètres avancés du projet → Publish en <b>v1</b>, republier (sans redémarrer). Si ça ne remarche pas : relancer le logiciel, puis Paramètres → User → Logiciels → Installer tous les bridges. Procédure complète : <code>docs/user/PUBLISH_ROLLBACK.md</code>.</td></tr>
 <tr><td>« publie par l'ancien chemin : ... »</td><td>Le flow n'a pas pu démarrer (aucune instance, copie d'équipe invalide)</td><td>Le publish est fait (v1). Corriger le flow ou ouvrir le logiciel ; ne pas republier pour voir.</td></tr>
 </table>
 </section>
@@ -764,7 +764,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <section class="chap" id="b4">
 <h1>B4. Organisation du code</h1>
 <pre>Flux_Pipeline_dev/
-  NOTES.md, CONTRIBUTING.md, LICENSE, NOTICE
+  README.md, CONTRIBUTING.md, LICENSE, NOTICE
   FLUX_DEV.bat                    lancement dev
   BUILD_INSTALLER.bat             installeur NSIS -> INSTALLEURS/
   app/electron/                   process main
@@ -776,7 +776,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
     resources/                    shelves, scènes, rigs, presets Painter, startup
     tests/                        run_tests.py + une suite par dossier
   scripts/                        build.cjs, backend.spec, electron-builder.yml, installer.nsh, build_hdas.py
-  docs/                           architecture/ decisions/ development/ user/ history/ notes/ archive/ (index : docs/README.md)
+  docs/                           development/ (BUILD, STRUCTURE) user/ images/ (index : docs/README.md)
   tools/                          scripts hors application
 </pre>
 <h3>Pages front</h3>
@@ -1020,7 +1020,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 
 <section class="chap" id="b16">
 <h1>B16. Registre des décisions (ADR)</h1>
-<p>Dossier <code>docs/decisions/</code>. Une décision acceptée ne se rouvre que par une nouvelle ADR.</p>
+<p>Les ADR complètes sont tenues par le mainteneur, hors du dépôt public. Une décision acceptée ne se rouvre que par une nouvelle ADR.</p>
 <table>
 <tr><th>#</th><th>Sujet</th></tr>
 <tr><td>0001</td><td>Stack Python + Electron</td></tr>

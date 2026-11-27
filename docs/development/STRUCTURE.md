@@ -1,7 +1,7 @@
 # FLUX Pipeline - Structure du depot
 
 > Reecrit le 2026-09-16 (V7-05). Arborescence + chemins dont depend le build.
-> Role des systemes : `docs/architecture/OVERVIEW.md`. Commandes build : `docs/development/BUILD.md`.
+> Commandes build : `docs/development/BUILD.md`.
 > A mettre a jour quand un dossier de premier niveau ou un chemin de build change.
 
 ## Arborescence trackee
@@ -9,7 +9,6 @@
 ```
 Flux_Pipeline_dev/
 ├── README.md                 point d'entree humain (quoi, lancer, carte du depot, ou lire quoi)
-├── NOTES.md                 point d'entree des sessions de dev (quoi lire, regles)
 ├── CONTRIBUTING.md           regles de contribution
 ├── LICENSE, NOTICE           MPL-2.0
 ├── package.py                package Rez de FLUX
@@ -57,22 +56,16 @@ Flux_Pipeline_dev/
 ├── tools/                    scripts hors application (cross_platform/ : audit des chemins Windows/Linux)
 │
 ├── docs/                     index : docs/README.md
-│   ├── architecture/         systemes vivants : OVERVIEW, PIPE_LOGIC, USD_*, HOUDINI_WORK
-│   ├── decisions/            ADR 0001..NNNN
-│   ├── development/          BUILD, STRUCTURE (ce fichier), REZ, PUBLISH_ROLLBACK, FLOWS_BRIDGE_3DSMAX
-│   ├── user/flows/           doc utilisateur des Flows (03_INDEX_NODES.md embarque dans l'app : bouton (i) des nodes)
-│   ├── history/              HISTORY_ANALYSIS (ne pas refaire), audits dates
-│   ├── notes/               PROJECT_CONTEXT, CURRENT_STATE, NEXT_STEPS, ISSUES_BACKLOG, GITNEXUS, PLAN_* (memoire vivante)
-│   │   └── prompts/          prompts de travail encore ouverts
-│   └── archive/              lecture seule : studies/ (etudes et analyses), prompts/ (prompts finis)
-│                             (avant le menage 2026-11 : tag `archive/pre-cleanup`)
+│   ├── development/          BUILD, STRUCTURE (ce fichier)
+│   ├── user/                 doc utilisateur : README, REZ, PUBLISH_ROLLBACK, FLOWS_BRIDGE_3DSMAX
+│   │   └── flows/            doc des Flows (03_INDEX_NODES.md embarque dans l'app : bouton (i) des nodes)
+│   └── images/               captures du README
 │
 ├── index.html, vite.config.ts, postcss.config.js, tailwind.config.js,
 ├── tsconfig.json, tsconfig.electron.json, package.json, package-lock.json
-└── .local/                  launch.json, settings.json (skills/, settings.local.json, worktrees/ ignores)
 ```
 
-Chaque dossier important a un `CONTEXT.md` court (role + pieges) qui renvoie vers `docs/architecture/OVERVIEW.md`.
+Chaque dossier important a un `CONTEXT.md` court (role + pieges).
 
 ## Chemins a ne pas changer sans propagation
 
@@ -103,4 +96,4 @@ Doivent rester a la racine : `index.html`, `vite.config.ts`, `postcss.config.js`
 | `node_modules/`, `__pycache__/`, `.venv/` | dependances |
 | `config.json` | config machine (dev : racine du repo) |
 | `USER/`, `CONFIG/`, `DOSSIER_PROJETS/`, `test/` | donnees locales FLUX_ROOT de dev |
-| `.local/settings.local.json`, `.local/skills` (jonction vers `PRIVATE/skills`), `.local/session-work/`, `PRIVATE/`, `.local/worktrees/`, `state/`, `scratchpad/` | outils IA locaux |
+| `PRIVATE/`, `state/`, `scratchpad/` | fichiers locaux du mainteneur |
