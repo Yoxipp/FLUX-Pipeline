@@ -46,7 +46,7 @@ class PublishChecksTest(unittest.TestCase):
         (private / "publish" / "allowed_authors.txt").write_text(f"{GOOD[0]} <{GOOD[1]}>\n", encoding="utf-8")
         (private / "publish" / "strings_source.txt").write_text("kit/replace.txt\n", encoding="utf-8")
         (private / "kit" / "replace.txt").write_bytes(
-            "\\\\server42==>\\\\server\nregex:(?i)codename_[a-z]+==>x\nglob:room*b==>room\nMoreau\n".encode())
+            "\\\\server42==>\\\\server\nregex:(?i)codename_[a-z]+==>x\nglob:room*b==>room\nBrévallec\n".encode())
         (self.repo / ".gitignore").write_text("PRIVATE/\n", encoding="utf-8")
         (self.repo / "app.py").write_text("print('ok')\n", encoding="utf-8")
         _git(self.repo, "add", ".gitignore", "app.py")
@@ -86,7 +86,7 @@ class PublishChecksTest(unittest.TestCase):
 
     def test_literal_regex_glob_and_unicode_strings_refused(self):
         for text in ("root = r'\\\\server42\\share'\n", "name = 'CODENAME_blue'\n",
-                     "where = 'room12b'\n", "who = 'Moreau'\n"):
+                     "where = 'room12b'\n", "who = 'Brévallec'\n"):
             with self.subTest(text=text):
                 _git(self.repo, "reset", "--quiet", "--hard", "origin/main")  # temp test repo only
                 tip = self._commit("lib/conf.py", text)
