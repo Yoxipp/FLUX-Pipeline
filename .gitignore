@@ -58,9 +58,7 @@ flux_dev.log
 # Houdini HDA auto-backups (createDigitalAsset)
 backend/resources/shelves/houdini/backup/
 
-# Maintainer-local files (private companion repo and local tool settings). Never public.
-/NOTES.md
-.local/
+# Maintainer-local files (private companion repo). Never public.
 PRIVATE/
 state/
 

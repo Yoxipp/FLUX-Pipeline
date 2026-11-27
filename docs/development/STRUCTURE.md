@@ -96,4 +96,4 @@ Doivent rester a la racine : `index.html`, `vite.config.ts`, `postcss.config.js`
 | `node_modules/`, `__pycache__/`, `.venv/` | dependances |
 | `config.json` | config machine (dev : racine du repo) |
 | `USER/`, `CONFIG/`, `DOSSIER_PROJETS/`, `test/` | donnees locales FLUX_ROOT de dev |
-| `NOTES.md`, `.local/`, `PRIVATE/`, `state/`, `scratchpad/` | outils locaux du mainteneur |
+| `PRIVATE/`, `state/`, `scratchpad/` | fichiers locaux du mainteneur |
