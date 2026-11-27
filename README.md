@@ -67,8 +67,8 @@ DCC license.
 
 | Status | Software |
 |---|---|
-| Validated in production use | Maya, Houdini, ZBrush |
-| Bridges (working, less tested) | Nuke, Substance 3D Painter / Designer, Mari, Marvelous Designer, Photoshop |
+| Validated in production use | Maya, Houdini |
+| Bridges (working, less tested) | Nuke, Substance 3D Painter, Zbrush / Designer, Mari, Marvelous Designer, Photoshop |
 
 ## Install
 
