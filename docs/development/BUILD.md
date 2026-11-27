@@ -7,8 +7,11 @@
 
 * Double-clic `INSTALL_DEV.bat` : `pip install -r backend/requirements-dev.txt` (backend + `httpx2` des tests +
   PyInstaller) puis `npm ci`, puis verifie les imports et `tsc`. Il installe dans le `python` du PATH (celui que lance
-  `FLUX_DEV.bat`) mais **ignore le Python d'un logiciel** (Nuke, Houdini, Maya...) et les raccourcis du Store : il
-  prend alors le Python suivant (`py -3.13`, `py -3`) et previent qu'il faut le mettre en premier dans le PATH.
+  `FLUX_DEV.bat`) mais **ignore le Python d'un logiciel** (Nuke, Houdini, Maya...), les raccourcis du Store et tout
+  Python sans pip (le venv d'un autre outil) : il prend alors le Python suivant (`py -3.13`, `py -3`) et previent
+  qu'il faut le mettre en premier dans le PATH.
+  Les parties Python et Node sont independantes : si pip echoue, `npm ci` tourne quand meme, et le resume final dit
+  quelle partie a echoue (code de sortie 1).
   Il n'installe ni Python ni Node : il donne la commande `winget` s'ils manquent.
 
 ## Lancer en dev
